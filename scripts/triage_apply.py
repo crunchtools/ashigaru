@@ -43,11 +43,12 @@ def starts_now(state: str, queue: str) -> bool:
 
 
 def comment(result: dict, state: str, next_step: str) -> str:
-    category = result.get("category", "unknown")
+    """The triage comment: the verdict, the agent's summary, and what happens next."""
     confidence = result.get("confidence")
     shown = f"{confidence:.0%}" if isinstance(confidence, (int, float)) else "n/a"
     summary = str(result.get("summary", "")).strip() or "No summary returned."
-    return f"{MARKER}\n**Ashigaru triage:** {category} ({shown})\n\n{summary}\n\n{next_step}"
+    verdict = f"{result.get('category', 'unknown')} ({shown})"
+    return f"{MARKER}\n**Ashigaru triage:** {verdict}\n\n{summary}\n\n{next_step}"
 
 
 def main() -> int:

@@ -1,5 +1,6 @@
 """The sweep's limits are the budget: triage per run, fixes per hour (profile IV)."""
 
+import sweep
 from sweep import MAX_LIMIT, candidates, conflicted, remaining, select, waiting
 
 
@@ -115,3 +116,26 @@ def test_the_hourly_budget_is_what_the_past_hour_left():
     assert remaining(per_hour, 2) == per_hour - 2
     assert remaining(per_hour, 9) == 0
     assert remaining(MAX_LIMIT + 50, 0) == MAX_LIMIT
+
+
+def test_a_ready_pull_request_is_not_an_issue_to_start():
+    labeled_pull = {**ready(9), "pull_request": {}}
+    assert waiting("o/r", [labeled_pull], set(), HOUR_AGO) == []
+
+
+def test_a_negative_budget_starts_nothing():
+    assert remaining(-3, 0) == 0
+
+
+def test_the_past_hour_is_counted_from_the_apps_pull_requests(monkeypatch):
+    calls = []
+    opened_this_hour = 3
+
+    def fake_gh(*args):
+        calls.append(args)
+        return f"{opened_this_hour}\n"
+
+    monkeypatch.setattr(sweep, "gh", fake_gh)
+    assert sweep.opened_since("o", "app/bot", HOUR_AGO) == opened_this_hour
+    assert f"q=org:o is:pr author:app/bot created:>={HOUR_AGO}" in calls[0]
+    assert "search/issues" in calls[0]

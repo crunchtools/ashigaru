@@ -101,11 +101,15 @@ def remaining(per_hour: int, used: int) -> int:
 
 
 def stamp(moment: datetime) -> str:
+    """A UTC moment in the form GitHub writes them, so the two compare as text."""
     return moment.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def opened_since(org: str, bot: str, since: str) -> int:
-    """Pull requests Ashigaru opened across the organization since `since`."""
+    """Pull requests Ashigaru opened across the organization since `since`.
+
+    GitHub search takes a full timestamp in `created:`, not only a date.
+    """
     query = f"org:{org} is:pr author:{bot} created:>={since}"
     return int(gh("api", "-X", "GET", "search/issues", "-f", f"q={query}", "--jq", ".total_count"))
 
@@ -135,6 +139,7 @@ def enrolled(repo: str) -> bool:
 
 
 def start_fixes(items: list[dict], budget: int, dry_run: bool) -> None:
+    """Send the first `budget` items to the code agent; a dry run only lists them."""
     for item in items[:budget]:
         print(f"  start {item['repo']}#{item['number']}")
         if not dry_run:
