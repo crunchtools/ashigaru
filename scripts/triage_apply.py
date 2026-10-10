@@ -16,6 +16,7 @@ NEXT_STEP = {
     TRIAGED: "Left for a maintainer. Add `ready-to-code` to have Ashigaru take it.",
     NEEDS_INFO: "Answer the question above, then add `ready-for-triage`.",
 }
+QUEUED = "Queued. Ashigaru starts a limited number of fixes each hour, oldest first."
 MARKER = "<!-- ashigaru:triage -->"
 
 
@@ -32,12 +33,21 @@ def decide(result: dict, auto_categories: set[str], min_confidence: float) -> st
     return TRIAGED
 
 
-def comment(result: dict, state: str) -> str:
+def starts_now(state: str, queue: str) -> bool:
+    """Whether this run goes straight on to the code agent.
+
+    A newly opened issue does. Anything triaged from the backlog waits for the
+    sweep, which is what holds coding to its hourly budget.
+    """
+    return state == READY_TO_CODE and queue != "backlog"
+
+
+def comment(result: dict, state: str, next_step: str) -> str:
     category = result.get("category", "unknown")
     confidence = result.get("confidence")
     shown = f"{confidence:.0%}" if isinstance(confidence, (int, float)) else "n/a"
     summary = str(result.get("summary", "")).strip() or "No summary returned."
-    return f"{MARKER}\n**Ashigaru triage:** {category} ({shown})\n\n{summary}\n\n{NEXT_STEP[state]}"
+    return f"{MARKER}\n**Ashigaru triage:** {category} ({shown})\n\n{summary}\n\n{next_step}"
 
 
 def main() -> int:
@@ -47,6 +57,7 @@ def main() -> int:
     parser.add_argument("--result", required=True, help="structured output JSON from the agent")
     parser.add_argument("--auto-categories", default="bug,documentation,performance")
     parser.add_argument("--min-confidence", default=0.7, type=float)
+    parser.add_argument("--queue", default="fresh", choices=("fresh", "backlog"))
     args = parser.parse_args()
 
     try:
@@ -60,9 +71,11 @@ def main() -> int:
 
     type_label = TYPE_LABELS.get(result.get("category", ""))
     set_state(args.repo, args.issue, state, extra=(type_label,) if type_label else ())
-    gh("issue", "comment", str(args.issue), "--repo", args.repo, "--body", comment(result, state))
+    now = starts_now(state, args.queue)
+    next_step = QUEUED if state == READY_TO_CODE and not now else NEXT_STEP[state]
+    gh("issue", "comment", str(args.issue), "--repo", args.repo, "--body", comment(result, state, next_step))
     set_output("state", state)
-    set_output("auto_code", "true" if state == READY_TO_CODE else "false")
+    set_output("auto_code", "true" if now else "false")
     return 0
 
 

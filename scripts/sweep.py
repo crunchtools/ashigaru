@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
-"""Nightly backlog drain: queue the oldest untriaged issues in enrolled repos.
+"""Hourly dispatcher: triage the backlog quickly, start fixes on a budget.
 
-The per-run limit is the budget: it bounds how much agent work a night can
-start, which is what keeps the factory out of the maintainer's rate limit.
+Triage is cheap, so many issues are queued for it per run. Coding is not, so
+the sweep starts only as many fixes as the hourly budget has left after
+counting the pull requests Ashigaru already opened in the past hour. That
+budget is what keeps the factory out of the maintainer's rate limit.
 """
 
 from __future__ import annotations
@@ -12,6 +14,7 @@ import json
 import subprocess
 import sys
 from collections.abc import Callable
+from datetime import UTC, datetime, timedelta
 
 from common import (
     BRANCH_PREFIX,
@@ -29,6 +32,10 @@ from common import (
 CALLER = ".github/workflows/ashigaru.yml"
 MAX_LIMIT = 20
 """No run queues more than this, whatever limit it is asked for."""
+WINDOW = timedelta(hours=1)
+"""The span the coding budget is counted over."""
+SETTLE = timedelta(minutes=20)
+"""An issue touched more recently than this may have a fix in flight; leave it for the next run."""
 OLDEST_OPEN = "issues?state=open&sort=created&direction=asc&per_page=100"
 """One page per repo: the globally oldest MAX_LIMIT are always within each repo's oldest 100."""
 
@@ -76,6 +83,33 @@ def conflicted(repo: str, pulls: list[dict], bot: str) -> list[dict]:
     ]
 
 
+def waiting(repo: str, issues: list[dict], branches: set[str], before: str) -> list[dict]:
+    """Open issues labeled ready-to-code that no pull request has picked up yet."""
+    return [
+        {"repo": repo, "number": issue["number"], "created_at": issue["created_at"]}
+        for issue in issues
+        if "pull_request" not in issue
+        and READY_TO_CODE in {label["name"] for label in issue.get("labels", [])}
+        and f"{BRANCH_PREFIX}issue-{issue['number']}" not in branches
+        and issue["updated_at"] < before
+    ]
+
+
+def remaining(per_hour: int, used: int) -> int:
+    """Fixes this run may still start: the hourly budget less what the past hour already used."""
+    return max(min(max(per_hour, 0), MAX_LIMIT) - used, 0)
+
+
+def stamp(moment: datetime) -> str:
+    return moment.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def opened_since(org: str, bot: str, since: str) -> int:
+    """Pull requests Ashigaru opened across the organization since `since`."""
+    query = f"org:{org} is:pr author:{bot} created:>={since}"
+    return int(gh("api", "-X", "GET", "search/issues", "-f", f"q={query}", "--jq", ".total_count"))
+
+
 def requeue(item: dict) -> None:
     """Send the issue back to the code agent. The label must go away first to fire again."""
     issue, repo = str(item["number"]), item["repo"]
@@ -100,44 +134,61 @@ def enrolled(repo: str) -> bool:
     return True
 
 
+def start_fixes(items: list[dict], budget: int, dry_run: bool) -> None:
+    for item in items[:budget]:
+        print(f"  start {item['repo']}#{item['number']}")
+        if not dry_run:
+            requeue(item)
+
+
+def queue_triage(items: list[dict], dry_run: bool) -> None:
+    for item in items:
+        print(f"  triage {item['repo']}#{item['number']} ({item['created_at'][:10]})")
+        if dry_run:
+            continue
+        ensure_labels(item["repo"], [READY_FOR_TRIAGE])
+        gh("issue", "edit", str(item["number"]), "--repo", item["repo"],
+           "--add-label", READY_FOR_TRIAGE)  # fmt: skip
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--org", required=True)
-    parser.add_argument("--limit", default=5, type=int)
+    parser.add_argument("--limit", default=MAX_LIMIT, type=int, help="issues to queue for triage")
+    parser.add_argument("--code-per-hour", default=5, type=int, help="fixes started per hour, fleet-wide")
     parser.add_argument("--bot", default="app/ashigaru-crunchtools")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
 
+    now = datetime.now(UTC)
     repos = [
         repo["full_name"]
         for repo in api_pages(f"orgs/{args.org}/repos?type=public&per_page=100")
         if not repo["archived"] and repo["has_issues"]
     ]
-    found: list[dict] = []
+    untriaged: list[dict] = []
     stuck: list[dict] = []
+    ready: list[dict] = []
     for repo in repos:
-        if enrolled(repo):
-            found += candidates(repo, api(f"repos/{repo}/{OLDEST_OPEN}"))
-            stuck += conflicted(repo, open_pulls(repo), args.bot)
-
-    # Rebuilds come out of the same budget, first: finishing work beats starting it.
-    budget = min(max(args.limit, 0), MAX_LIMIT)
-    rebuilds = stuck[:budget]
-    print(f"sweep: {len(stuck)} conflicted pull request(s), rebuilding {len(rebuilds)}")
-    for item in rebuilds:
-        print(f"  {item['repo']}#{item['pull']} from issue #{item['number']}")
-        if not args.dry_run:
-            requeue(item)
-
-    chosen = select(found, budget - len(rebuilds))
-    print(f"sweep: {len(found)} untriaged issue(s) in enrolled repos, queueing {len(chosen)}")
-    for item in chosen:
-        print(f"  {item['repo']}#{item['number']} ({item['created_at'][:10]})")
-        if args.dry_run:
+        if not enrolled(repo):
             continue
-        ensure_labels(item["repo"], [READY_FOR_TRIAGE])
-        gh("issue", "edit", str(item["number"]), "--repo", item["repo"],
-           "--add-label", READY_FOR_TRIAGE)  # fmt: skip
+        issues = api(f"repos/{repo}/{OLDEST_OPEN}")
+        pulls = open_pulls(repo)
+        untriaged += candidates(repo, issues)
+        stuck += conflicted(repo, pulls, args.bot)
+        ready += waiting(repo, issues, {pull["headRefName"] for pull in pulls}, stamp(now - SETTLE))
+
+    used = opened_since(args.org, args.bot, stamp(now - WINDOW))
+    budget = remaining(args.code_per_hour, used)
+    # Rebuilds first: finishing work beats starting it. Then the oldest waiting issues.
+    fixes = [*stuck, *sorted(ready, key=lambda item: (item["created_at"], item["repo"], item["number"]))]
+    print(f"sweep: {len(stuck)} conflicted, {len(ready)} waiting, {used} opened in the past hour, "
+          f"starting {min(len(fixes), budget)}")  # fmt: skip
+    start_fixes(fixes, budget, args.dry_run)
+
+    chosen = select(untriaged, args.limit)
+    print(f"sweep: {len(untriaged)} untriaged issue(s) in enrolled repos, queueing {len(chosen)}")
+    queue_triage(chosen, args.dry_run)
     return 0
 
 

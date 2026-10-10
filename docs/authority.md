@@ -32,7 +32,8 @@ Agent jobs check out with `persist-credentials: false`. What leaves an agent job
 | Job timeout | 20, 60 and 75 minutes | workflow files |
 | Hook passes fed back to the code agent | 2 | `code.yml` |
 | Fix rounds per pull request | 5 | input `max_rounds` |
-| Issues queued or rebuilt per sweep | 5, never more than 20 | `sweep.yml` input `limit`, `MAX_LIMIT` in `scripts/sweep.py` |
+| Issues queued for triage per sweep | 20, never more | `sweep.yml` input `limit`, `MAX_LIMIT` in `scripts/sweep.py` |
+| Fixes started by the sweep per hour, fleet-wide | 5, less the pull requests Ashigaru opened in the past hour | `sweep.yml` input `code_per_hour`, `remaining` in `scripts/sweep.py` |
 | Runs at a time per issue or pull request branch | 1 | caller `concurrency` |
 
 Each is covered in `tests/test_workflows.py`, `tests/test_findings.py` or `tests/test_sweep.py`.
@@ -42,7 +43,8 @@ Each is covered in `tests/test_workflows.py`, `tests/test_findings.py` or `tests
 - The agent job's runner is the agent's: it can write any file there, and writing files is enough to run code (a git hook, a repository script a pre-commit hook calls). Two secrets are present on that runner. The Claude token is in the agent's process environment and cannot be elsewhere. The reviewer key is on disk only while the Gatehouse hook runs, after the other hooks, and is never in the environment of a hook that runs repository code; that narrows the exposure and does not remove it. Both are bounded by who can reach the agent: only issues from accounts with write access.
 - A pull request from `ashigaru/issue-N` is a same-repository pull request, so the repository's own CI runs the changed code with whatever secrets that CI has. That is true of any contributor with write access; here the contributor is a model.
 - With file tools only the agent has no direct network access. A repository that adds `Bash` to `allowed_tools` gives it one.
-- Concurrency groups are per repository. Nothing limits how many repositories run an agent at once except the sweep limit and how often people file issues.
+- Concurrency groups are per repository. Nothing limits how many repositories run an agent at once except the sweep's hourly budget and how often people file issues. Newly opened issues and hand-added `ready-to-code` labels start at once, so a burst of them can exceed the budget for that hour; the sweep then starts nothing until the hour clears.
+- A waiting issue whose code run dies without handing off keeps its `ready-to-code` label and is started again by a later sweep. Nothing counts those attempts yet.
 
 ## Related
 
