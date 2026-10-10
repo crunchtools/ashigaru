@@ -15,7 +15,7 @@ A model that reads issue text can be talked into things. The design assumes that
 | Classify, Code agent, Fix agent | yes | job token, read-only | the Claude token; in Code agent, the reviewer key in the hook step only |
 | Apply verdict | no | job token, `issues: write` | none |
 | Open pull request, Push and answer findings | no | Ashigaru app token | none |
-| Sweep | no | Ashigaru app token, `issues: write` and `contents: read` | none |
+| Sweep | no | Ashigaru app token, `issues: write`, `pull-requests: read` and `contents: read` | none |
 
 Agent jobs check out with `persist-credentials: false`. What leaves an agent job is structured output validated against a schema and a patch file; the writing job applies the patch on a fresh runner. The app has no Workflows permission, and the publish scripts refuse a patch that touches `.github/`.
 
@@ -32,7 +32,7 @@ Agent jobs check out with `persist-credentials: false`. What leaves an agent job
 | Job timeout | 20, 60 and 75 minutes | workflow files |
 | Hook passes fed back to the code agent | 2 | `code.yml` |
 | Fix rounds per pull request | 5 | input `max_rounds` |
-| Issues queued per sweep | 5, never more than 20 | `sweep.yml` input `limit`, `MAX_LIMIT` in `scripts/sweep.py` |
+| Issues queued or rebuilt per sweep | 5, never more than 20 | `sweep.yml` input `limit`, `MAX_LIMIT` in `scripts/sweep.py` |
 | Runs at a time per issue or pull request branch | 1 | caller `concurrency` |
 
 Each is covered in `tests/test_workflows.py`, `tests/test_findings.py` or `tests/test_sweep.py`.

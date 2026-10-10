@@ -2,7 +2,7 @@
 
 from common import touches_protected
 from fix_publish import replies
-from publish import commit_message, refusal
+from publish import commit_message, refusal, stale
 
 PATCH = "diff --git a/src/app.py b/src/app.py\n--- a/src/app.py\n+++ b/src/app.py\n@@ -1 +1 @@\n-a\n+b\n"
 WORKFLOW_PATCH = PATCH.replace("src/app.py", ".github/workflows/ci.yml")
@@ -62,3 +62,16 @@ def test_not_a_bug_without_a_reason_is_not_answered():
 
 def test_dispositions_for_unknown_findings_are_ignored():
     assert replies(FINDINGS, [{"id": 99, "disposition": "not_a_bug", "reason": "r"}], "abc") == {}
+
+
+def test_a_branch_with_no_open_pull_request_may_be_built():
+    assert stale([])
+
+
+def test_an_open_pull_request_that_still_merges_is_never_overwritten():
+    assert not stale([{"number": 5, "mergeable": "MERGEABLE"}])
+    assert not stale([{"number": 5, "mergeable": "UNKNOWN"}])
+
+
+def test_a_conflicting_pull_request_is_rebuilt():
+    assert stale([{"number": 5, "mergeable": "CONFLICTING"}])

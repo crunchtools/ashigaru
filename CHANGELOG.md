@@ -6,6 +6,16 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [2.1.0] - 2026-10-10
+
+### Added
+
+- Conflict recovery. When two Ashigaru pull requests in one repository touch the same file, the second can no longer merge once the first lands, and nothing used to bring it back. The nightly sweep now finds Ashigaru's open pull requests that conflict with the default branch and sends their issues back to the code agent; the publish job rebuilds a conflicting pull request's branch in place instead of doing nothing. Rebuilds count against the sweep limit and skip pull requests labeled `needs-human`.
+
+### Changed
+
+- The sweep's app token now also asks for `pull-requests: read`.
+
 ## [2.0.1] - 2026-10-10
 
 ### Security

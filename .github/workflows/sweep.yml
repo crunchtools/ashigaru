@@ -50,6 +50,7 @@ jobs:
           owner: ${{ github.repository_owner }}
           permission-contents: read
           permission-issues: write
+          permission-pull-requests: read
 
       - name: Label the oldest untriaged issues
         env:

@@ -58,7 +58,7 @@ jobs:
         uses: actions/checkout@v7
         with:
           repository: crunchtools/ashigaru
-          ref: v2.0.1
+          ref: v2.1.0
           path: .ashigaru-src
           persist-credentials: false
 
@@ -117,7 +117,7 @@ jobs:
         uses: actions/checkout@v7
         with:
           repository: crunchtools/ashigaru
-          ref: v2.0.1
+          ref: v2.1.0
           persist-credentials: false
 
       - name: Label and comment

@@ -19,6 +19,8 @@ BOT_NAME = "ashigaru-crunchtools[bot]"
 BOT_EMAIL = "ashigaru-crunchtools[bot]@users.noreply.github.com"
 TRAILER = "Co-Authored-By: Claude <noreply@anthropic.com>"
 FOOTER = "Opened by Ashigaru. Merges automatically once the required checks pass."
+CONFLICTING = "CONFLICTING"
+REBUILT = "**Ashigaru rebuilt this pull request** on the current default branch after a merge conflict."
 
 
 def refusal(result: dict, patch: str) -> str | None:
@@ -42,6 +44,30 @@ def hand_off(repo: str, issue: int, why: str) -> None:
     gh("issue", "comment", str(issue), "--repo", repo, "--body", f"**Ashigaru stopped.** {why}")
 
 
+def stale(open_prs: list[dict]) -> bool:
+    """True when the branch may be rebuilt: no pull request is open, or the open one conflicts.
+
+    A pull request that still merges is never overwritten; its review threads and
+    fix rounds belong to the commits already there.
+    """
+    return not open_prs or open_prs[0].get("mergeable") == CONFLICTING
+
+
+def announce(repo: str, branch: str, base: str, title: str, body: str) -> str:
+    """Open the pull request and turn on auto-merge. Returns its URL."""
+    url = gh(
+        "pr", "create", "--repo", repo, "--head", branch, "--base", base,
+        "--title", title, "--body", body,
+    ).strip()  # fmt: skip
+    try:
+        gh("pr", "merge", url, "--auto", "--squash")
+    except subprocess.CalledProcessError as error:
+        gh("pr", "comment", url, "--body",
+           f"**Ashigaru could not enable auto-merge**, so this needs a manual merge.\n\n"
+           f"```\n{error.stderr.strip()}\n```")  # fmt: skip
+    return url
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--repo", required=True)
@@ -58,10 +84,10 @@ def main() -> int:
         result = {}
     branch = f"{BRANCH_PREFIX}issue-{args.issue}"
 
-    open_prs = json.loads(
-        gh("pr", "list", "--repo", args.repo, "--head", branch, "--state", "open", "--json", "number")
-    )
-    if open_prs:
+    listing = gh("pr", "list", "--repo", args.repo, "--head", branch, "--state", "open",
+                 "--json", "number,mergeable,url")  # fmt: skip
+    open_prs = json.loads(listing)
+    if not stale(open_prs):
         print(f"publish: PR #{open_prs[0]['number']} is already open for {branch}; nothing to do")
         return 0
 
@@ -85,18 +111,13 @@ def main() -> int:
     git("commit", "-m", commit_message(title, args.issue, summary))
     git("push", "--force", "origin", branch)
 
-    body = f"{summary}\n\nCloses #{args.issue}\n\n{FOOTER}\n"
-    url = gh(
-        "pr", "create", "--repo", args.repo, "--head", branch, "--base", args.base,
-        "--title", f"fix: {title} (#{args.issue})", "--body", body,
-    ).strip()  # fmt: skip
-    try:
-        gh("pr", "merge", url, "--auto", "--squash")
-    except subprocess.CalledProcessError as error:
-        gh("pr", "comment", url, "--body",
-           f"**Ashigaru could not enable auto-merge**, so this needs a manual merge.\n\n"
-           f"```\n{error.stderr.strip()}\n```")  # fmt: skip
-    print(f"publish: opened {url}")
+    if open_prs:
+        url = open_prs[0]["url"]
+        gh("pr", "comment", url, "--body", REBUILT)
+    else:
+        body = f"{summary}\n\nCloses #{args.issue}\n\n{FOOTER}\n"
+        url = announce(args.repo, branch, args.base, f"fix: {title} (#{args.issue})", body)
+    print(f"publish: published {url}")
     set_output("pr", url)
     return 0
 
