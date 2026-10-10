@@ -1,6 +1,6 @@
 # ashigaru Constitution
 
-> **Version:** 2.0.1
+> **Version:** 2.1.0
 > **Ratified:** 2026-10-10
 > **Status:** Active
 > **Inherits:** [crunchtools/constitution](https://github.com/crunchtools/constitution) v1.23.0
@@ -26,8 +26,8 @@ required checks. Feature work is labeled and left for a maintainer.
 - **Writing jobs** (`Apply verdict`, `Open pull request`, `Push and answer
   findings`, `Queue untriaged issues`) run no model. The two publishing jobs
   hold the Ashigaru app token, minted per job with contents, issues and
-  pull-requests write and nothing else; the sweep mints it with issues write
-  and contents read.
+  pull-requests write and nothing else; the sweep mints it with issues write,
+  pull-requests read and contents read.
 - What crosses from an agent job to a writing job is schema-validated
   structured output and a patch file. The writing job applies the patch on a
   fresh runner and refuses one that touches `.github/`.
@@ -42,7 +42,7 @@ required checks. Feature work is labeled and left for a maintainer.
 | Turn limit and tool list on every agent step | 40 or 80 turns | `test_every_agent_step_has_a_turn_limit_and_a_tool_list` |
 | Job timeouts | 5 to 75 minutes | same as the switch |
 | Fix rounds per pull request | 5, then `needs-human` | `test_round_cap_hands_off_instead_of_fixing` |
-| Issues queued per sweep | 5 by default, 20 at most | `test_no_run_queues_more_than_the_hard_maximum` |
+| Issues queued or rebuilt per sweep | 5 by default, 20 at most | `test_no_run_queues_more_than_the_hard_maximum` |
 | Authors without write access | never read unless someone with write access labels the issue | `tests/test_guard.py` |
 
 ## Public Interface

@@ -8,11 +8,23 @@ start, which is what keeps the factory out of the maintainer's rate limit.
 from __future__ import annotations
 
 import argparse
+import json
 import subprocess
 import sys
 from collections.abc import Callable
 
-from common import READY_FOR_TRIAGE, STATE_LABELS, api, api_pages, can_write, ensure_labels, gh
+from common import (
+    BRANCH_PREFIX,
+    NEEDS_HUMAN,
+    READY_FOR_TRIAGE,
+    READY_TO_CODE,
+    STATE_LABELS,
+    api,
+    api_pages,
+    can_write,
+    ensure_labels,
+    gh,
+)
 
 CALLER = ".github/workflows/ashigaru.yml"
 MAX_LIMIT = 20
@@ -47,6 +59,37 @@ def select(found: list[dict], limit: int, writes: Callable[[str, str], bool] = c
     return chosen
 
 
+def conflicted(repo: str, pulls: list[dict], bot: str) -> list[dict]:
+    """Ashigaru's own open pull requests that no longer merge, as the issues to rebuild them from.
+
+    One a human has taken over (`needs-human`) is left alone.
+    """
+    prefix = f"{BRANCH_PREFIX}issue-"
+    return [
+        {"repo": repo, "number": int(pull["headRefName"].removeprefix(prefix)), "pull": pull["number"]}
+        for pull in pulls
+        if pull["mergeable"] == "CONFLICTING"
+        and pull["author"]["login"] == bot
+        and NEEDS_HUMAN not in {label["name"] for label in pull["labels"]}
+        and not pull["isCrossRepository"]
+        and pull["headRefName"].removeprefix(prefix).isdigit()
+    ]
+
+
+def requeue(item: dict) -> None:
+    """Send the issue back to the code agent. The label must go away first to fire again."""
+    issue, repo = str(item["number"]), item["repo"]
+    ensure_labels(repo, [READY_TO_CODE])
+    gh("issue", "edit", issue, "--repo", repo, "--remove-label", READY_TO_CODE)
+    gh("issue", "edit", issue, "--repo", repo, "--add-label", READY_TO_CODE)
+
+
+def open_pulls(repo: str) -> list[dict]:
+    listing = gh("pr", "list", "--repo", repo, "--state", "open", "--limit", "100",
+                 "--json", "number,headRefName,mergeable,author,isCrossRepository,labels")  # fmt: skip
+    return json.loads(listing)
+
+
 def enrolled(repo: str) -> bool:
     try:
         gh("api", f"repos/{repo}/contents/{CALLER}", "--silent")
@@ -61,6 +104,7 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--org", required=True)
     parser.add_argument("--limit", default=5, type=int)
+    parser.add_argument("--bot", default="app/ashigaru-crunchtools")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
 
@@ -70,11 +114,22 @@ def main() -> int:
         if not repo["archived"] and repo["has_issues"]
     ]
     found: list[dict] = []
+    stuck: list[dict] = []
     for repo in repos:
         if enrolled(repo):
             found += candidates(repo, api(f"repos/{repo}/{OLDEST_OPEN}"))
+            stuck += conflicted(repo, open_pulls(repo), args.bot)
 
-    chosen = select(found, args.limit)
+    # Rebuilds come out of the same budget, first: finishing work beats starting it.
+    budget = min(max(args.limit, 0), MAX_LIMIT)
+    rebuilds = stuck[:budget]
+    print(f"sweep: {len(stuck)} conflicted pull request(s), rebuilding {len(rebuilds)}")
+    for item in rebuilds:
+        print(f"  {item['repo']}#{item['pull']} from issue #{item['number']}")
+        if not args.dry_run:
+            requeue(item)
+
+    chosen = select(found, budget - len(rebuilds))
     print(f"sweep: {len(found)} untriaged issue(s) in enrolled repos, queueing {len(chosen)}")
     for item in chosen:
         print(f"  {item['repo']}#{item['number']} ({item['created_at'][:10]})")

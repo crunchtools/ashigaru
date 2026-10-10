@@ -19,7 +19,7 @@ A coding agent that can also push is one prompt injection away from pushing some
 
 **Open pull request** (app token, no model): `scripts/publish.py` applies the patch on a fresh checkout, commits, pushes `ashigaru/issue-N`, opens the pull request with `Closes #N` and runs `gh pr merge --auto --squash`.
 
-The publish job refuses, labels the issue `needs-human` and says why when the agent reported no fix, when the patch is empty, or when it touches `.github/`. If a pull request is already open for the branch it does nothing.
+The publish job refuses, labels the issue `needs-human` and says why when the agent reported no fix, when the patch is empty, or when it touches `.github/`. If a pull request is already open for the branch and still merges, it does nothing. If the open pull request conflicts with the default branch, the job rebuilds the branch from the new patch, force-pushes it and says so on the pull request; the earlier commits and their review threads are replaced.
 
 Hook failures that survive two passes do not block the pull request: the repository's required checks are the arbiter, and [fix](fix.md) handles what they report.
 
@@ -27,7 +27,7 @@ Hook failures that survive two passes do not block the pull request: the reposit
 
 ```yaml
 code:
-  uses: crunchtools/ashigaru/.github/workflows/code.yml@v2.0.1
+  uses: crunchtools/ashigaru/.github/workflows/code.yml@v2.1.0
   with:
     model: "sonnet"
     max_turns: 80

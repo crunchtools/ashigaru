@@ -1,6 +1,6 @@
 """The sweep's per-run limit is the nightly budget (profile IV)."""
 
-from sweep import MAX_LIMIT, candidates, select
+from sweep import MAX_LIMIT, candidates, conflicted, select
 
 
 def issue(number, created, author="maintainer", labels=(), pr=False):
@@ -44,3 +44,40 @@ def test_limit_zero_queues_nothing():
 def test_no_run_queues_more_than_the_hard_maximum():
     found = candidates("o/a", [issue(n, f"2026-01-{n:02d}") for n in range(1, 29)])
     assert len(select(found, 500, writes)) == MAX_LIMIT
+
+
+BOT = "app/ashigaru-crunchtools"
+
+
+def pull(number, branch, **overrides):
+    labels = overrides.pop("labels", ())
+    return {
+        "number": number,
+        "headRefName": branch,
+        "mergeable": "CONFLICTING",
+        "author": {"login": overrides.pop("author", BOT)},
+        "isCrossRepository": False,
+        "labels": [{"name": name} for name in labels],
+        **overrides,
+    }
+
+
+def test_a_conflicted_ashigaru_pull_request_is_rebuilt_from_its_issue():
+    assert conflicted("o/r", [pull(51, "ashigaru/issue-47")], BOT) == [
+        {"repo": "o/r", "number": 47, "pull": 51}
+    ]
+
+
+def test_pull_requests_that_merge_or_belong_to_someone_else_are_left_alone():
+    pulls = [
+        pull(1, "ashigaru/issue-2", mergeable="MERGEABLE"),
+        pull(3, "ashigaru/issue-4", author="mallory"),
+        pull(5, "ashigaru/issue-6", isCrossRepository=True),
+        pull(7, "feature/thing"),
+        pull(9, "ashigaru/issue-x"),
+    ]
+    assert conflicted("o/r", pulls, BOT) == []
+
+
+def test_a_pull_request_a_human_took_over_is_not_rebuilt():
+    assert conflicted("o/r", [pull(51, "ashigaru/issue-47", labels=("needs-human",))], BOT) == []
