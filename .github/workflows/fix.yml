@@ -81,7 +81,7 @@ jobs:
         uses: actions/checkout@v7
         with:
           repository: crunchtools/ashigaru
-          ref: v2.1.0
+          ref: v2.2.0
           path: .ashigaru-src
           persist-credentials: false
 
@@ -166,7 +166,7 @@ jobs:
         uses: actions/checkout@v7
         with:
           repository: crunchtools/ashigaru
-          ref: v2.1.0
+          ref: v2.2.0
           path: .ashigaru-src
           persist-credentials: false
 

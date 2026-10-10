@@ -3,7 +3,7 @@
 import pytest
 
 from common import NEEDS_INFO, READY_TO_CODE, TRIAGED
-from triage_apply import comment, decide
+from triage_apply import NEXT_STEP, QUEUED, comment, decide, starts_now
 
 AUTO = {"bug", "documentation", "performance"}
 
@@ -44,5 +44,19 @@ def test_category_can_be_taken_out_of_the_automatic_set():
 
 
 def test_comment_names_the_next_step():
-    text = comment(verdict("feature"), TRIAGED)
+    text = comment(verdict("feature"), TRIAGED, NEXT_STEP[TRIAGED])
     assert "feature (90%)" in text and "ready-to-code" in text
+
+
+def test_a_newly_opened_bug_goes_straight_to_the_code_agent():
+    assert starts_now(READY_TO_CODE, "fresh")
+
+
+def test_a_bug_triaged_from_the_backlog_waits_for_the_hourly_budget():
+    assert not starts_now(READY_TO_CODE, "backlog")
+    assert "Queued" in comment(verdict("bug"), READY_TO_CODE, QUEUED)
+
+
+def test_nothing_but_ready_to_code_ever_starts_the_code_agent():
+    assert not starts_now(TRIAGED, "fresh")
+    assert not starts_now(NEEDS_INFO, "fresh")

@@ -1,21 +1,28 @@
-# Ashigaru sweep — drain the backlog a few issues a night.
+# Ashigaru sweep — triage the backlog quickly, start fixes on an hourly budget.
 #
 # Runs here only, not in consumer repos. It labels the oldest untriaged issues
 # in enrolled repos `ready-for-triage`, using the Ashigaru app token so the
 # label starts each repo's own Ashigaru workflow. A repo is enrolled when it
 # carries .github/workflows/ashigaru.yml.
 #
-# `limit` is the nightly budget: it bounds how much agent work one night starts.
+# It also starts the fixes that are waiting: issues labeled `ready-to-code` with no
+# pull request yet, and Ashigaru pull requests that conflict. `code_per_hour` is
+# the budget: fixes started per hour across every repo, counting the pull
+# requests Ashigaru already opened in the past hour.
 
 name: Ashigaru sweep
 
 on:
   schedule:
-    - cron: "17 6 * * *"   # 06:17 UTC, the small hours in US Eastern
+    - cron: "17 * * * *"   # hourly
   workflow_dispatch:
     inputs:
       limit:
-        description: "Issues to queue in this run (the script caps it at 20)."
+        description: "Issues to queue for triage in this run (the script caps it at 20)."
+        type: number
+        default: 20
+      code_per_hour:
+        description: "Fixes to start per hour across all repos."
         type: number
         default: 5
       dry_run:
@@ -52,13 +59,14 @@ jobs:
           permission-issues: write
           permission-pull-requests: read
 
-      - name: Label the oldest untriaged issues
+      - name: Queue triage and start waiting fixes
         env:
           GH_TOKEN: ${{ steps.app.outputs.token }}
           # A schedule has no inputs; a manual 0 stays 0.
-          LIMIT: ${{ github.event_name == 'schedule' && 5 || inputs.limit }}
+          LIMIT: ${{ github.event_name == 'schedule' && 20 || inputs.limit }}
+          CODE_PER_HOUR: ${{ github.event_name == 'schedule' && 5 || inputs.code_per_hour }}
           DRY_RUN: ${{ inputs.dry_run }}
         run: |
-          args=(--org "$GITHUB_REPOSITORY_OWNER" --limit "$LIMIT")
+          args=(--org "$GITHUB_REPOSITORY_OWNER" --limit "$LIMIT" --code-per-hour "$CODE_PER_HOUR")
           if [ "$DRY_RUN" = "true" ]; then args+=(--dry-run); fi
           python3 scripts/sweep.py "${args[@]}"

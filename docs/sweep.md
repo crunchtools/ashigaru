@@ -1,10 +1,10 @@
 # Sweep
 
-Sweep queues old issues for triage, a few each night.
+Sweep runs every hour. It queues old issues for triage and starts the fixes that are waiting, on a budget.
 
 ## Why it matters
 
-Triage runs when an issue is opened, so issues that predate enrollment would never be looked at. Queueing all of them at once would start dozens of agent runs and spend a subscription's rate limit in an hour. The sweep's limit is the budget.
+Triage runs when an issue is opened, so issues that predate enrollment would never be looked at. Triage is a short read-only run, so the backlog can be triaged quickly. A fix is a long run with review rounds, and starting dozens at once would spend a subscription's rate limit in an hour. So the sweep has two limits: issues queued for triage per run, and fixes started per hour.
 
 ## How it works
 
@@ -12,9 +12,14 @@ Triage runs when an issue is opened, so issues that predate enrollment would nev
 
 1. lists the organization's public, non-archived repositories and keeps those that carry `.github/workflows/ashigaru.yml`;
 2. reads each one's hundred oldest open issues and keeps those with none of Ashigaru's state labels;
-3. walks them oldest first across all repositories, skips authors without write access, and adds `ready-for-triage` to the first `limit` (default 5, never more than 20).
+3. walks them oldest first across all repositories, skips authors without write access, and adds `ready-for-triage` to the first `limit` (20 on the schedule, never more than 20).
 
-Before queueing anything new it looks for Ashigaru's own open pull requests that conflict with the default branch, and sends each one's issue back through [code](code.md) by removing and re-adding `ready-to-code`. The publish job then rebuilds the branch on the current default branch. Rebuilds come out of the same `limit`, first, and a pull request labeled `needs-human` is never rebuilt.
+**Starting fixes.** A newly opened issue that triage marks `ready-to-code` goes to the code agent in the same run. An issue triaged any other way (queued by the sweep, or re-triaged after a question was answered) is labeled `ready-to-code` and waits. Each hour the sweep counts the pull requests Ashigaru opened across the organization in the past hour, subtracts that from `code_per_hour` (default 5), and starts that many fixes by removing and re-adding `ready-to-code` with the app token. It starts, in order:
+
+1. Ashigaru's own open pull requests that conflict with the default branch (the publish job rebuilds the branch; one labeled `needs-human` is never rebuilt);
+2. waiting issues, oldest first: open, labeled `ready-to-code`, no `ashigaru/issue-N` pull request, and not touched in the last 20 minutes, so a fix already in flight is not started twice.
+
+A maintainer who adds `ready-to-code` by hand starts the fix at once; it counts against the next hour's budget once its pull request opens.
 
 The label is added with the app token, so it starts each repository's own workflow. From there the issue follows the normal path through [triage](triage.md).
 

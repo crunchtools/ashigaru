@@ -1,6 +1,6 @@
 # ashigaru Constitution
 
-> **Version:** 2.1.0
+> **Version:** 2.2.0
 > **Ratified:** 2026-10-10
 > **Status:** Active
 > **Inherits:** [crunchtools/constitution](https://github.com/crunchtools/constitution) v1.23.0
@@ -42,7 +42,8 @@ required checks. Feature work is labeled and left for a maintainer.
 | Turn limit and tool list on every agent step | 40 or 80 turns | `test_every_agent_step_has_a_turn_limit_and_a_tool_list` |
 | Job timeouts | 5 to 75 minutes | same as the switch |
 | Fix rounds per pull request | 5, then `needs-human` | `test_round_cap_hands_off_instead_of_fixing` |
-| Issues queued or rebuilt per sweep | 5 by default, 20 at most | `test_no_run_queues_more_than_the_hard_maximum` |
+| Issues queued for triage per sweep | 20 at most | `test_no_run_queues_more_than_the_hard_maximum` |
+| Fixes started by the sweep per hour | 5 by default, less those opened in the past hour | `test_the_hourly_budget_is_what_the_past_hour_left` |
 | Authors without write access | never read unless someone with write access labels the issue | `tests/test_guard.py` |
 
 ## Public Interface

@@ -6,6 +6,13 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [2.2.0] - 2026-10-10
+
+### Changed
+
+- The sweep runs hourly instead of nightly and has two limits instead of one. It queues up to 20 issues for triage per run, and starts up to five fixes per hour across the organization, less the pull requests Ashigaru opened in the past hour.
+- Only a newly opened issue goes from triage straight to the code agent. An issue triaged from the backlog is labeled `ready-to-code` and waits for the sweep to start it, which is what holds coding to the hourly budget.
+
 ## [2.1.0] - 2026-10-10
 
 ### Added

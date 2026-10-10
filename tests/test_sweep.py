@@ -1,6 +1,6 @@
-"""The sweep's per-run limit is the nightly budget (profile IV)."""
+"""The sweep's limits are the budget: triage per run, fixes per hour (profile IV)."""
 
-from sweep import MAX_LIMIT, candidates, conflicted, select
+from sweep import MAX_LIMIT, candidates, conflicted, remaining, select, waiting
 
 
 def issue(number, created, author="maintainer", labels=(), pr=False):
@@ -81,3 +81,37 @@ def test_pull_requests_that_merge_or_belong_to_someone_else_are_left_alone():
 
 def test_a_pull_request_a_human_took_over_is_not_rebuilt():
     assert conflicted("o/r", [pull(51, "ashigaru/issue-47", labels=("needs-human",))], BOT) == []
+
+
+HOUR_AGO = "2026-10-10T12:00:00Z"
+
+
+def ready(number, updated="2026-10-10T09:00:00Z"):
+    return {**issue(number, "2026-10-01T00:00:00Z", labels=("ready-to-code",)), "updated_at": updated}
+
+
+def test_a_ready_issue_with_no_pull_request_is_waiting():
+    assert waiting("o/r", [ready(7)], set(), HOUR_AGO) == [
+        {"repo": "o/r", "number": 7, "created_at": "2026-10-01T00:00:00Z"}
+    ]
+
+
+def test_an_issue_that_already_has_its_pull_request_is_not_started_again():
+    assert waiting("o/r", [ready(7)], {"ashigaru/issue-7"}, HOUR_AGO) == []
+
+
+def test_an_issue_touched_moments_ago_may_have_a_fix_in_flight():
+    assert waiting("o/r", [ready(7, updated="2026-10-10T12:05:00Z")], set(), HOUR_AGO) == []
+
+
+def test_issues_without_the_label_are_not_waiting():
+    untouched = {**issue(8, "2026-10-01T00:00:00Z"), "updated_at": "2026-10-10T09:00:00Z"}
+    assert waiting("o/r", [untouched], set(), HOUR_AGO) == []
+
+
+def test_the_hourly_budget_is_what_the_past_hour_left():
+    per_hour = 5
+    assert remaining(per_hour, 0) == per_hour
+    assert remaining(per_hour, 2) == per_hour - 2
+    assert remaining(per_hour, 9) == 0
+    assert remaining(MAX_LIMIT + 50, 0) == MAX_LIMIT
