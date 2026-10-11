@@ -43,14 +43,19 @@ SECRET = re.compile(r"sk-ant-[\w-]{16,}|gh[pousr]_\w{20,}|github_pat_\w{20,}")
 is posted: the agent jobs are denied the files that hold their token, and this is the second
 lock, on the door the text leaves by."""
 REMOVED = "[removed]"
+# Applied to agent-written text before it is posted. An agent that read a stranger's words may
+# repeat them, so the text gets no mentions, no HTML, and no Markdown links or images.
 INERT = str.maketrans({"@": "@\u200b", "<": "&lt;", "[": "(", "]": ")"})
-"""Applied to agent-written text before it is posted. An agent that read a stranger's words may
-repeat them, so the text gets no mentions, no HTML, and no Markdown links or images."""
+UNLINKED = ":\u200b//"
 
 
 def publishable(text: str) -> str:
-    """Agent-written text made safe to post: mentions and links made inert, credentials blanked."""
-    return SECRET.sub(REMOVED, text.translate(INERT))
+    """Agent-written text made safe to post.
+
+    Mentions, HTML and Markdown links are made inert, a bare URL is broken so
+    it does not become a link, and anything shaped like a credential is blanked.
+    """
+    return SECRET.sub(REMOVED, text.translate(INERT).replace("://", UNLINKED))
 
 
 DIFF_HEADER = re.compile(r"^diff --git a/(\S+) b/(\S+)$", re.MULTILINE)
