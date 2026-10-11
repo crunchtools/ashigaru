@@ -22,6 +22,7 @@ from common import (
     NEEDS_HUMAN,
     READY_FOR_TRIAGE,
     READY_TO_CODE,
+    RELEASES,
     STATE_LABELS,
     api,
     api_pages,
@@ -40,7 +41,7 @@ SETTLE = timedelta(minutes=20)
 """An issue touched more recently than this may have a fix in flight; leave it for the next run."""
 PULL_FIELDS = (
     "number,headRefName,headRefOid,baseRefName,mergeable,author,"
-    "isCrossRepository,isDraft,labels,title,url,createdAt"
+    "isCrossRepository,isDraft,labels,title,url,createdAt,autoMergeRequest"
 )
 OLDEST_OPEN = "issues?state=open&sort=created&direction=asc&per_page=100"
 """One page per repo: the globally oldest MAX_LIMIT are always within each repo's oldest 100."""
@@ -53,7 +54,7 @@ def candidates(repo: str, issues: list[dict]) -> list[dict]:
         for issue in issues
         if "pull_request" not in issue
         and issue["user"].get("type") == "User"
-        and not {label["name"] for label in issue.get("labels", [])} & {*STATE_LABELS, INBOX}
+        and not {label["name"] for label in issue.get("labels", [])} & {*STATE_LABELS, INBOX, RELEASES}
     ]
 
 
@@ -201,7 +202,7 @@ def main() -> int:
         # can_write is cached per repo and account, so each author costs one lookup per sweep.
         visitors += inbox.outside_pulls(repo, pulls, can_write)
         reports += inbox.outside_issues(repo, issues, can_write)
-        stopped += inbox.handed_over(repo, pulls)
+        stopped += inbox.handed_over(repo, pulls) + inbox.held_releases(repo, pulls)
         questions[repo] = inbox.unanswered(issues)
 
     used = opened_since(args.org, args.bot, stamp(now - WINDOW))

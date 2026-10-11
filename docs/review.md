@@ -24,6 +24,7 @@ Nothing is labeled, approved, merged or closed. The recommendation is an opinion
 - pull requests from outside contributors, each with Ashigaru's recommendation;
 - issues from outside contributors, each with its type and state labels;
 - pull requests labeled `needs-human`, where Ashigaru stopped after five rounds;
+- [release](release.md) pull requests that do not merge on their own;
 - a count of `needs-info` issues per repository.
 
 The body has no timestamps and names people without an `@`, so it is edited only when the list changes and never notifies anyone.

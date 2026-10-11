@@ -33,7 +33,16 @@ TYPE_LABELS = {
 """What an issue is, next to the state label that says where it stands."""
 INBOX = "ashigaru-inbox"
 """Marks the one issue the sweep keeps as the list of what waits on a maintainer."""
-MANAGED_LABELS = STATE_LABELS | TYPE_LABELS | {INBOX: ("ededed", "Ashigaru: what is waiting on a maintainer")}
+RELEASES = "ashigaru-releases"
+"""Marks the one issue the sweep keeps as the record of what was released and what was not."""
+MANAGED_LABELS = (
+    STATE_LABELS
+    | TYPE_LABELS
+    | {
+        INBOX: ("ededed", "Ashigaru: what is waiting on a maintainer"),
+        RELEASES: ("ededed", "Ashigaru: what was released and what is waiting to be"),
+    }
+)
 
 WRITE_PERMISSIONS = {"admin", "write"}  # the API folds maintain into write, triage into read
 BRANCH_PREFIX = "ashigaru/"

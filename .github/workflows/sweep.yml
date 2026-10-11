@@ -14,6 +14,12 @@
 # labeled `ashigaru-inbox`, listing outside contributions and work Ashigaru
 # stopped on, and it sends up to five outside pull requests per run to
 # review.yml for a first-pass review comment.
+#
+# A second job cuts releases where a repository asked for them with a topic:
+# `ashigaru-release-pr` or `ashigaru-release-auto`. It opens the release pull
+# request from the changelog and, once that has merged, publishes the tag and
+# the GitHub Release. It keeps one issue here, labeled `ashigaru-releases`,
+# listing what shipped and what is merged and waiting. See docs/release.md.
 
 name: Ashigaru sweep
 
@@ -79,6 +85,76 @@ jobs:
                 --inbox-repo "$GITHUB_REPOSITORY")
           if [ "$DRY_RUN" = "true" ]; then args+=(--dry-run); fi
           python3 scripts/sweep.py "${args[@]}"
+
+  release:
+    name: Cut releases
+    if: vars.ASHIGARU_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # Two runs at once would open the same release pull request twice.
+    concurrency:
+      group: ashigaru-release
+      cancel-in-progress: false
+    permissions:
+      contents: read
+    steps:
+      # This workflow is not reusable: it runs in the Ashigaru repository only, so
+      # the scripts beside it on the default branch are the release's own.
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+
+      - name: Mint the reading token
+        id: reader
+        uses: actions/create-github-app-token@v3
+        with:
+          app-id: ${{ secrets.ASHIGARU_APP_ID }}
+          private-key: ${{ secrets.ASHIGARU_APP_KEY }}
+          owner: ${{ github.repository_owner }}
+          permission-contents: read
+          permission-issues: write
+          permission-pull-requests: read
+
+      - name: Find the releases that are due
+        id: plan
+        env:
+          GH_TOKEN: ${{ steps.reader.outputs.token }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          args=(--plan "$RUNNER_TEMP/releases.json" --org "$GITHUB_REPOSITORY_OWNER")
+          if [ "$DRY_RUN" = "true" ]; then args+=(--dry-run); fi
+          python3 scripts/release.py plan "${args[@]}"
+
+      # The token that can push and publish exists only in an hour with a release
+      # to cut, and covers only the repositories that have one.
+      - name: Mint the writing token
+        id: writer
+        if: steps.plan.outputs.repos != ''
+        uses: actions/create-github-app-token@v3
+        with:
+          app-id: ${{ secrets.ASHIGARU_APP_ID }}
+          private-key: ${{ secrets.ASHIGARU_APP_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ steps.plan.outputs.repos }}
+          permission-contents: write
+          permission-pull-requests: write
+
+      - name: Open release pull requests and publish merged ones
+        if: steps.plan.outputs.repos != ''
+        env:
+          GH_TOKEN: ${{ steps.writer.outputs.token }}
+        run: python3 scripts/release.py act --plan "$RUNNER_TEMP/releases.json"
+
+      - name: Record what shipped and what waits
+        if: ${{ !cancelled() && steps.plan.outcome == 'success' }}
+        env:
+          GH_TOKEN: ${{ steps.reader.outputs.token }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          args=(--plan "$RUNNER_TEMP/releases.json" --repo "$GITHUB_REPOSITORY")
+          if [ "$DRY_RUN" = "true" ]; then args+=(--dry-run); fi
+          python3 scripts/release.py record "${args[@]}"
 
   review:
     name: Review ${{ matrix.repo }}#${{ matrix.number }}

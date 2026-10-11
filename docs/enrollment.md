@@ -21,6 +21,20 @@ On a GitHub Free organization, organization secrets reach public repositories on
 
 **Repository.** Copy [`examples/ashigaru.yml`](../examples/ashigaru.yml) to `.github/workflows/ashigaru.yml`. The state labels are created the first time they are needed.
 
+**Releases** are off until the repository carries a topic. Topics, not inputs, so the caller file stays identical everywhere and the sweep can read the setting without opening each repository's workflow.
+
+| Topic | Effect |
+|-------|--------|
+| `ashigaru-release-pr` | Ashigaru opens the release pull request; a maintainer merges it; Ashigaru publishes |
+| `ashigaru-release-auto` | as above, and GitHub merges it when the required checks pass |
+| `ashigaru-release-max-patch`, `-minor`, `-major` | the largest bump `auto` may merge without a person; `minor` when absent |
+
+```bash
+gh repo edit crunchtools/mcp-pcloud --add-topic ashigaru-release-auto
+```
+
+See [Release](release.md) for what the repository's `CHANGELOG.md` must look like.
+
 **Inputs**
 
 | Workflow | Input | Default |
@@ -44,4 +58,4 @@ A called workflow cannot name its own ref, so each reusable workflow fetches the
 ## Related
 
 - [Authority and limits](authority.md)
-- [Triage](triage.md), [Code](code.md), [Fix](fix.md), [Sweep](sweep.md)
+- [Triage](triage.md), [Code](code.md), [Fix](fix.md), [Sweep](sweep.md), [Release](release.md)

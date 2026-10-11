@@ -6,6 +6,18 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [2.4.0] - 2026-10-10
+
+### Added
+
+- Releases. A repository asks for them with a topic: `ashigaru-release-pr` or `ashigaru-release-auto`. Each hour the sweep finds enrolled repositories whose `CHANGELOG.md` has entries under `[Unreleased]`, no Ashigaru pull request open, and a default branch that has been quiet for 20 minutes. It reads the bump from the entries (`BREAKING` or `### Removed` is major; `### Added`, `### Changed` or `### Deprecated` is minor; anything else is patch) and opens `ashigaru/release-X.Y.Z`, which moves the entries under the new version and rewrites the old version on every line that states it. Once that pull request has merged, the next sweep tags `vX.Y.Z` and publishes the GitHub Release with the changelog entry as its notes. With `-pr` a maintainer merges the pull request; with `-auto` GitHub merges it when the required checks pass, unless the bump is above the repository's limit (`ashigaru-release-max-patch`, `-minor` or `-major`; minor by default). No model runs and no repository code runs. See [docs/release.md](docs/release.md).
+- A releases record. The sweep keeps one issue in the Ashigaru repository, labeled `ashigaru-releases`: releases published in the last seven days across every enrolled repository, release pull requests that are open, repositories with merged work and no release (whatever their release mode), and repositories it could not release, with the reason.
+- The inbox lists release pull requests that wait on a maintainer.
+
+### Changed
+
+- The fix agent does not run on `ashigaru/release-*` pull requests. A release pull request that fails its checks, or that stops merging, is a person's to look at; one that conflicts is closed and reopened from the current default branch.
+
 ## [2.3.0] - 2026-10-10
 
 ### Added

@@ -20,6 +20,7 @@ def test_candidates_skip_touched_issues_and_pull_requests():
         issue(5, "2026-01-05", labels=("enhancement",)),
         issue(6, "2026-01-06", author="ashigaru-crunchtools[bot]", kind="Bot", labels=("ashigaru-inbox",)),
         issue(7, "2026-01-07", author="spam[bot]", kind="Bot"),
+        issue(8, "2026-01-08", labels=("ashigaru-releases",)),
     ]
     assert [item["number"] for item in candidates("o/r", issues)] == [1, 5]
 

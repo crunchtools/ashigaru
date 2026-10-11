@@ -115,6 +115,33 @@ def test_the_fix_job_ignores_runs_that_a_reply_started():
     assert "head_repository.full_name == github.repository" in condition
 
 
+def test_the_fix_agent_leaves_release_pull_requests_alone():
+    condition = load("fix.yml")["jobs"]["agent"]["if"]
+    assert "!startsWith(github.event.workflow_run.head_branch, 'ashigaru/release-')" in condition
+
+
+def tokens(job):
+    return {step["id"]: step for step in steps_of(job) if "create-github-app-token" in str(step.get("uses"))}
+
+
+def grants(step):
+    return {key: value for key, value in step["with"].items() if key.startswith("permission-")}
+
+
+def test_the_release_job_can_write_only_where_and_when_a_release_is_due():
+    job = load("sweep.yml")["jobs"]["release"]
+    reader, writer = tokens(job)["reader"], tokens(job)["writer"]
+    assert grants(reader) == {"permission-contents": "read", "permission-issues": "write",
+                              "permission-pull-requests": "read"}  # fmt: skip
+    assert grants(writer) == {"permission-contents": "write", "permission-pull-requests": "write"}
+    assert writer["if"] == "steps.plan.outputs.repos != ''"
+    assert writer["with"]["repositories"] == "${{ steps.plan.outputs.repos }}"
+    holders = [step for step in steps_of(job) if "steps.writer.outputs.token" in str(step)]
+    assert len(holders) == 1 and holders[0]["if"] == writer["if"]
+    assert holders[0]["run"].startswith("python3 scripts/release.py act ")
+    assert job["concurrency"] == {"group": "ashigaru-release", "cancel-in-progress": False}
+
+
 def test_changelog_has_this_version():
     assert f"## [{VERSION}]" in (ROOT / "CHANGELOG.md").read_text()
 

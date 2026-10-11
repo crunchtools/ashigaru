@@ -66,6 +66,7 @@ jobs:
       github.event_name == 'workflow_run' &&
       github.event.workflow_run.event == 'pull_request_target' &&
       startsWith(github.event.workflow_run.head_branch, 'ashigaru/') &&
+      !startsWith(github.event.workflow_run.head_branch, 'ashigaru/release-') &&
       github.event.workflow_run.head_repository.full_name == github.repository
     runs-on: ubuntu-latest
     timeout-minutes: 75
@@ -81,7 +82,7 @@ jobs:
         uses: actions/checkout@v7
         with:
           repository: crunchtools/ashigaru
-          ref: v2.3.0
+          ref: v2.4.0
           path: .ashigaru-src
           persist-credentials: false
 
@@ -171,7 +172,7 @@ jobs:
         uses: actions/checkout@v7
         with:
           repository: crunchtools/ashigaru
-          ref: v2.3.0
+          ref: v2.4.0
           path: .ashigaru-src
           persist-credentials: false
 

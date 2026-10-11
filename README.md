@@ -8,10 +8,11 @@ Named for the *ashigaru* (足軽), the foot soldiers a daimyo sent into the fiel
 
 1. **[Triage](docs/triage.md)**: every new issue is read against the code and labeled. Bug, documentation and performance issues go to the code agent; features wait for a person. An issue from someone without write access is labeled too, but is fixed only when a maintainer says so.
 2. **[Code](docs/code.md)**: a `ready-to-code` issue becomes a pull request from `ashigaru/issue-N` with auto-merge on. The repository's own pre-commit hooks run before the pull request opens, and failures go back to the same agent session.
-3. **[Fix](docs/fix.md)**: after each review of an Ashigaru pull request, every finding gets an answer in its thread and failed checks get fixed, for at most five rounds.
+3. **[Fix](docs/fix.md)**: after each review of a pull request the code agent opened, every finding gets an answer in its thread and failed checks get fixed, for at most five rounds.
 4. **[Sweep](docs/sweep.md)**: every hour the oldest untriaged issues across enrolled repositories are queued for triage, and up to five waiting fixes are started, so a backlog drains without spending the model budget.
-5. **[Review](docs/review.md)**: a pull request from an outside contributor gets one first-pass comment for the maintainers, and everything waiting on a person is listed in a single inbox issue.
-6. **[Authority and limits](docs/authority.md)**: the job that runs the model holds no credential that can write; the job that writes runs no model. One organization variable stops everything.
+5. **[Release](docs/release.md)**: a repository that asks for it with a topic gets its merged work released: a release pull request from the changelog, then the tag and the GitHub Release, so a fix does not sit merged and unshipped.
+6. **[Review](docs/review.md)**: a pull request from an outside contributor gets one first-pass comment for the maintainers, and everything waiting on a person is listed in a single inbox issue.
+7. **[Authority and limits](docs/authority.md)**: the job that runs the model holds no credential that can write; the job that writes runs no model. One organization variable stops everything.
 
 ## Quick Start
 
@@ -26,7 +27,7 @@ Each repository:
 
 ```bash
 mkdir -p .github/workflows
-curl -fsSL https://raw.githubusercontent.com/crunchtools/ashigaru/v2.3.0/examples/ashigaru.yml \
+curl -fsSL https://raw.githubusercontent.com/crunchtools/ashigaru/v2.4.0/examples/ashigaru.yml \
   -o .github/workflows/ashigaru.yml
 ```
 
@@ -40,6 +41,7 @@ Details and the full list of inputs are in [docs/enrollment.md](docs/enrollment.
 | [docs/code.md](docs/code.md) | The two-job split, the pre-commit inner loop, what is refused |
 | [docs/fix.md](docs/fix.md) | What triggers a round, how findings are answered, the round limit |
 | [docs/sweep.md](docs/sweep.md) | Backlog selection and the hourly budget |
+| [docs/release.md](docs/release.md) | Turning releases on per repository, how the version is chosen and rewritten, the releases record |
 | [docs/review.md](docs/review.md) | First-pass review of outside pull requests, and the inbox issue |
 | [docs/authority.md](docs/authority.md) | Who holds which credential, untrusted input, the switch and the caps |
 | [docs/enrollment.md](docs/enrollment.md) | Organization setup, enrolling a repository, inputs, releasing |

@@ -25,6 +25,8 @@ The label is added with the app token, so it starts each repository's own workfl
 
 **What waits on a person.** After that the sweep picks up to five outside pull requests for a [first-pass review](review.md) and rewrites the inbox issue when its list changed.
 
+**Releases.** A second job in the same workflow cuts [releases](release.md) in repositories that asked for them, and keeps the releases record.
+
 ## Example
 
 Run by hand to see what would be queued:
@@ -37,4 +39,5 @@ gh workflow run sweep.yml -R crunchtools/ashigaru -f limit=10 -f dry_run=true
 
 - [Triage](triage.md)
 - [Review](review.md)
+- [Release](release.md)
 - [Authority and limits](authority.md)
