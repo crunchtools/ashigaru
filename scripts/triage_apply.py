@@ -34,7 +34,11 @@ def decide(result: dict, auto_categories: set[str], min_confidence: float) -> st
     confidence = result.get("confidence")
     if category not in CATEGORIES or not isinstance(confidence, (int, float)):
         return TRIAGED
-    if result.get("needs_info") or category in ("question", "unclear"):
+    if category in ("question", "unclear"):
+        return NEEDS_INFO
+    # A missing fact blocks only work Ashigaru would otherwise start. A feature waits for a
+    # maintainer either way, and the open question is in the summary they will read.
+    if result.get("needs_info") and category in auto_categories:
         return NEEDS_INFO
     if category in auto_categories and confidence >= min_confidence:
         return READY_TO_CODE

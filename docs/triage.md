@@ -14,7 +14,7 @@ Issues filed in passing pile up unlabeled, and nobody goes back to sort them. So
 |---------|-------|-------------------|
 | `bug`, `documentation` or `performance`, confidence at or above `min_confidence` | `ready-to-code` | The caller chains [code](code.md) in the same run |
 | `feature`, or any category below the threshold, or a malformed verdict | `triaged` | Waits. Add `ready-to-code` to have it fixed |
-| `question`, `unclear`, or `needs_info` | `needs-info` | Waits. Answer, then add `ready-for-triage` |
+| `question` or `unclear`, or a bug-class issue with `needs_info` | `needs-info` | Waits. Answer, then add `ready-for-triage` |
 
 The matching type label (`bug`, `documentation`, `performance`, `enhancement` for a feature, `question`) is added, and created when the repository lacks it.
 
