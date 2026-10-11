@@ -61,3 +61,9 @@ def test_other_label_creation_failures_propagate(monkeypatch):
     monkeypatch.setattr(common, "gh", create)
     with pytest.raises(subprocess.CalledProcessError):
         common.ensure_labels("o/r", [common.TRIAGED])
+
+
+def test_text_shaped_like_a_credential_is_blanked_before_posting():
+    leaked = "token sk-ant-oat01-AbCdEfGhIjKlMnOpQrStUv and ghs_" + "a" * 36
+    assert common.SECRET.sub(common.REMOVED, leaked) == "token [removed] and [removed]"
+    assert not common.SECRET.search("src/ask.py: the task list is skipped at a1b2c3d4e5f6a7b8c9d0.")

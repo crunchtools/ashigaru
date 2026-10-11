@@ -1,6 +1,6 @@
 # ashigaru Constitution
 
-> **Version:** 2.2.0
+> **Version:** 2.3.0
 > **Ratified:** 2026-10-10
 > **Status:** Active
 > **Inherits:** [crunchtools/constitution](https://github.com/crunchtools/constitution) v1.23.0
@@ -18,16 +18,19 @@ required checks. Feature work is labeled and left for a maintainer.
 
 ## Authority Split
 
-- **Agent jobs** (`Classify`, `Code agent`, `Fix agent`) run Claude Code with
-  the job token at read-only permissions and `persist-credentials: false`.
-  Their only other secret is the Claude token, plus the reviewer key inside the
-  pre-commit hook step of `Code agent`. Tools default to file tools; triage
-  cannot edit.
+- **Agent jobs** (`Classify`, `Code agent`, `Fix agent`, `Read the pull
+  request`) run Claude Code with the job token at read-only permissions and
+  `persist-credentials: false`. Their only other secret is the Claude token,
+  plus the reviewer key inside the pre-commit hook step of `Code agent`. Tools
+  default to file tools; the two agents that read text from outside
+  contributors, triage and review, cannot edit. No agent's file tools may read
+  `/proc` or `/sys`, where the process environment would give the token back.
 - **Writing jobs** (`Apply verdict`, `Open pull request`, `Push and answer
-  findings`, `Queue untriaged issues`) run no model. The two publishing jobs
-  hold the Ashigaru app token, minted per job with contents, issues and
-  pull-requests write and nothing else; the sweep mints it with issues write,
-  pull-requests read and contents read.
+  findings`, `Queue untriaged issues`, `Post the review`) run no model. The two
+  publishing jobs hold the Ashigaru app token, minted per job with contents,
+  issues and pull-requests write and nothing else; the sweep mints it with
+  issues write, pull-requests read and contents read; the review publisher
+  mints it with pull-requests write alone, since a comment is all it leaves.
 - What crosses from an agent job to a writing job is schema-validated
   structured output and a patch file. The writing job applies the patch on a
   fresh runner and refuses one that touches `.github/`.
@@ -44,7 +47,9 @@ required checks. Feature work is labeled and left for a maintainer.
 | Fix rounds per pull request | 5, then `needs-human` | `test_round_cap_hands_off_instead_of_fixing` |
 | Issues queued for triage per sweep | 20 at most | `test_no_run_queues_more_than_the_hard_maximum` |
 | Fixes started by the sweep per hour | 5 by default, less those opened in the past hour | `test_the_hourly_budget_is_what_the_past_hour_left` |
-| Authors without write access | never read unless someone with write access labels the issue | `tests/test_guard.py` |
+| Authors without write access | triaged and reviewed by agents that can only read; never reach the code agent unless someone with write access adds `ready-to-code` | `tests/test_guard.py`, `test_an_agent_that_reads_outside_text_cannot_edit` |
+| Outside pull requests reviewed per sweep | 5 | `test_no_sweep_reviews_more_than_its_share_and_the_oldest_go_first` |
+| File tools on `/proc` and `/sys` | denied in every agent step | `test_no_agent_can_read_its_own_environment` |
 
 ## Public Interface
 

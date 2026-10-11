@@ -81,7 +81,7 @@ jobs:
         uses: actions/checkout@v7
         with:
           repository: crunchtools/ashigaru
-          ref: v2.2.0
+          ref: v2.3.0
           path: .ashigaru-src
           persist-credentials: false
 
@@ -129,6 +129,11 @@ jobs:
         with:
           prompt_file: ${{ runner.temp }}/prompt.md
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # The Claude token is in this process's environment. Claude Code applies a
+          # Read deny rule to every file tool: with this rule, Read, Grep and Glob on
+          # /proc/self/environ are all refused (tested against the CLI; without it,
+          # Grep returns the environment).
+          settings: '{"permissions":{"deny":["Read(//proc/**)","Read(//sys/**)"]}}'
           claude_args: |
             --model ${{ steps.collect.outputs.model }}
             --max-turns ${{ inputs.max_turns }}
@@ -166,7 +171,7 @@ jobs:
         uses: actions/checkout@v7
         with:
           repository: crunchtools/ashigaru
-          ref: v2.2.0
+          ref: v2.3.0
           path: .ashigaru-src
           persist-credentials: false
 

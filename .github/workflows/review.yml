@@ -1,0 +1,141 @@
+# Ashigaru review — a first look at one pull request from an outside contributor.
+#
+# Called by the sweep, here only. No event from a fork ever starts it, so no
+# workflow a stranger can trigger holds a secret.
+#
+# Two jobs with different authority:
+#   • read    — runs the LLM. Read-only token, read-only tools. It sees the base
+#               branch and the pull request as text (title, description, diff).
+#               The fork's code is never checked out and never run.
+#   • publish — no LLM. Posts the verdict as one comment, with the facts read
+#               from the API. It labels, merges and closes nothing.
+
+name: Ashigaru review
+
+on:
+  workflow_call:
+    inputs:
+      repo:
+        description: "owner/name of the repository the pull request is in."
+        type: string
+        required: true
+      number:
+        description: "Pull request number."
+        type: number
+        required: true
+      sha:
+        description: "Head commit of the pull request when the sweep chose it."
+        type: string
+        required: true
+      base:
+        description: "Branch the pull request targets. The agent reads the repository at this branch."
+        type: string
+        required: true
+      model:
+        type: string
+        default: "sonnet"
+      max_turns:
+        type: number
+        default: 40
+    secrets:
+      CLAUDE_CODE_OAUTH_TOKEN:
+        required: true
+      ASHIGARU_APP_ID:
+        required: true
+      ASHIGARU_APP_KEY:
+        required: true
+
+permissions: {}
+
+jobs:
+  read:
+    name: Read the pull request
+    if: vars.ASHIGARU_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    outputs:
+      verdict: ${{ steps.agent.outputs.structured_output }}
+    steps:
+      - name: Fetch Ashigaru at this release
+        uses: actions/checkout@v7
+        with:
+          repository: crunchtools/ashigaru
+          ref: v2.3.0
+          path: .ashigaru-src
+          persist-credentials: false
+
+      - name: Move Ashigaru out of the workspace
+        run: mv .ashigaru-src "$RUNNER_TEMP/ashigaru"
+
+      - name: Check out the base branch of the repository
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ inputs.repo }}
+          ref: ${{ inputs.base }}
+          persist-credentials: false
+
+      - name: Build the prompt
+        id: prompt
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ inputs.repo }}
+          NUMBER: ${{ inputs.number }}
+        run: |
+          python3 "$RUNNER_TEMP/ashigaru/scripts/prompt.py" review \
+            --repo "$REPO" --pull "$NUMBER" --out "$RUNNER_TEMP/prompt.md"
+          echo "schema=$(jq -c . "$RUNNER_TEMP/ashigaru/schemas/review.json")" >> "$GITHUB_OUTPUT"
+
+      - name: Review agent
+        id: agent
+        uses: anthropics/claude-code-action/base-action@v1
+        with:
+          prompt_file: ${{ runner.temp }}/prompt.md
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # The Claude token is in this process's environment. Claude Code applies a
+          # Read deny rule to every file tool: with this rule, Read, Grep and Glob on
+          # /proc/self/environ are all refused (tested against the CLI; without it,
+          # Grep returns the environment).
+          settings: '{"permissions":{"deny":["Read(//proc/**)","Read(//sys/**)"]}}'
+          claude_args: |
+            --model ${{ inputs.model }}
+            --max-turns ${{ inputs.max_turns }}
+            --allowedTools "Read,Glob,Grep"
+            --json-schema '${{ steps.prompt.outputs.schema }}'
+
+  publish:
+    name: Post the review
+    needs: read
+    # Also after a failed read: a comment saying so stops the sweep retrying every hour.
+    if: always() && needs.read.result != 'skipped' && needs.read.result != 'cancelled'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Fetch Ashigaru at this release
+        uses: actions/checkout@v7
+        with:
+          repository: crunchtools/ashigaru
+          ref: v2.3.0
+          persist-credentials: false
+
+      - name: Mint the Ashigaru app token
+        id: app
+        uses: actions/create-github-app-token@v3
+        with:
+          app-id: ${{ secrets.ASHIGARU_APP_ID }}
+          private-key: ${{ secrets.ASHIGARU_APP_KEY }}
+          owner: ${{ github.repository_owner }}
+          permission-pull-requests: write
+
+      - name: Comment
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          REPO: ${{ inputs.repo }}
+          NUMBER: ${{ inputs.number }}
+          SHA: ${{ inputs.sha }}
+          VERDICT: ${{ needs.read.outputs.verdict }}
+        run: |
+          python3 scripts/review_publish.py --repo "$REPO" --pull "$NUMBER" --sha "$SHA" --result "$VERDICT"

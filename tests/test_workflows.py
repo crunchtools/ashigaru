@@ -1,5 +1,6 @@
 """The workflow files hold the limits and the authority split the profile requires."""
 
+import json
 from pathlib import Path
 
 import pytest
@@ -8,8 +9,10 @@ import yaml
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOWS = ROOT / ".github" / "workflows"
 VERSION = (ROOT / "VERSION").read_text().strip()
-PRODUCT = ("triage.yml", "code.yml", "fix.yml", "sweep.yml")
+PRODUCT = ("triage.yml", "code.yml", "fix.yml", "sweep.yml", "review.yml")
 REUSABLE = PRODUCT[:3]
+AGENTS = (*REUSABLE, "review.yml")
+"""Workflows that run a model. Each fetches its scripts at the release tag."""
 BASE_ACTION = "anthropics/claude-code-action/base-action@"
 WRITE = {"write"}
 
@@ -39,14 +42,15 @@ def test_workflows_start_from_no_permissions(name):
 def test_the_switch_gates_the_first_job_and_every_job_has_a_timeout(name):
     gated = False
     for _, job in jobs(name):
-        assert isinstance(job.get("timeout-minutes"), int)
+        # A job that calls a workflow cannot set a timeout; the called jobs set their own.
+        assert "uses" in job or isinstance(job.get("timeout-minutes"), int)
         if "needs" not in job:
             assert "vars.ASHIGARU_ENABLED == 'true'" in job["if"]
             gated = True
     assert gated
 
 
-@pytest.mark.parametrize("name", REUSABLE)
+@pytest.mark.parametrize("name", AGENTS)
 def test_a_job_that_runs_an_llm_holds_no_write_credential(name):
     seen = False
     for job_name, job in jobs(name):
@@ -62,7 +66,7 @@ def test_a_job_that_runs_an_llm_holds_no_write_credential(name):
     assert seen
 
 
-@pytest.mark.parametrize("name", REUSABLE)
+@pytest.mark.parametrize("name", AGENTS)
 def test_every_agent_step_has_a_turn_limit_and_a_tool_list(name):
     for _, job in jobs(name):
         for step in steps_of(job):
@@ -71,17 +75,18 @@ def test_every_agent_step_has_a_turn_limit_and_a_tool_list(name):
                 assert "--max-turns" in args and "--allowedTools" in args
 
 
-def test_the_triage_agent_cannot_edit():
+@pytest.mark.parametrize("name", ["triage.yml", "review.yml"])
+def test_an_agent_that_reads_outside_text_cannot_edit(name):
     args = [
         step["with"]["claude_args"]
-        for _, job in jobs("triage.yml")
+        for _, job in jobs(name)
         for step in steps_of(job)
         if str(step.get("uses", "")).startswith(BASE_ACTION)
     ]
     assert args and all('--allowedTools "Read,Glob,Grep"' in value for value in args)
 
 
-@pytest.mark.parametrize("name", REUSABLE)
+@pytest.mark.parametrize("name", AGENTS)
 def test_reusable_workflows_fetch_their_own_release(name):
     """A called workflow cannot name its own ref, so the release is a literal."""
     fetches = [
@@ -117,3 +122,45 @@ def test_changelog_has_this_version():
 def test_the_caller_passes_secrets_to_fix_only_for_this_repository():
     condition = yaml.safe_load((ROOT / "examples" / "ashigaru.yml").read_text())["jobs"]["fix"]["if"]
     assert "head_repository.full_name == github.repository" in condition
+
+
+def test_the_guard_is_told_which_stage_it_guards():
+    for name, stage in (("triage.yml", "triage"), ("code.yml", "code")):
+        runs = [step["run"] for _, job in jobs(name) for step in steps_of(job) if step.get("id") == "guard"]
+        assert runs and all(run.endswith(f'guard.py" --stage {stage}') for run in runs), name
+
+
+def test_no_event_a_fork_can_fire_starts_a_review():
+    assert set(load("review.yml")[True]) == {"workflow_call"}
+    assert set(load("sweep.yml")[True]) == {"schedule", "workflow_dispatch"}
+
+
+def test_the_review_never_checks_out_the_pull_request():
+    for _, job in jobs("review.yml"):
+        for step in steps_of(job):
+            if str(step.get("uses", "")).startswith("actions/checkout@"):
+                # Ashigaru at this release, or the branch the pull request targets.
+                assert step["with"]["ref"] in (f"v{VERSION}", "${{ inputs.base }}")
+    assert "pull_request_target" not in (WORKFLOWS / "review.yml").read_text().split("on:")[1]
+
+
+def test_the_review_publisher_can_comment_and_nothing_more():
+    mint = [
+        step["with"]
+        for step in steps_of(load("review.yml")["jobs"]["publish"])
+        if "create-github-app-token" in str(step.get("uses", ""))
+    ]
+    granted = {key: value for key, value in mint[0].items() if key.startswith("permission-")}
+    assert granted == {"permission-pull-requests": "write"}
+
+
+@pytest.mark.parametrize("name", AGENTS)
+def test_no_agent_can_read_its_own_environment(name):
+    """Grep on /proc/self/environ returns the Claude token unless the settings deny it."""
+    seen = False
+    for _, job in jobs(name):
+        for step in steps_of(job):
+            if str(step.get("uses", "")).startswith(BASE_ACTION):
+                seen = True
+                assert "Read(//proc/**)" in json.loads(step["with"]["settings"])["permissions"]["deny"]
+    assert seen

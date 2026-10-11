@@ -16,15 +16,17 @@ Issues filed in passing pile up unlabeled, and nobody goes back to sort them. So
 | `feature`, or any category below the threshold, or a malformed verdict | `triaged` | Waits. Add `ready-to-code` to have it fixed |
 | `question`, `unclear`, or `needs_info` | `needs-info` | Waits. Answer, then add `ready-for-triage` |
 
-The matching type label (`bug`, `documentation`, `enhancement`) is added when the repository has it.
+The matching type label (`bug`, `documentation`, `performance`, `enhancement` for a feature, `question`) is added, and created when the repository lacks it.
 
-Triage runs when someone with write access opens an issue, and when `ready-for-triage` is added. An issue opened by an account without write access is not read until someone with write access labels it; see [authority](authority.md).
+Triage runs when an issue is opened, and when `ready-for-triage` is added.
+
+**Issues from outside.** An issue from an account without write access is triaged the same way, with one difference: a verdict that would have been `ready-to-code` becomes `triaged`, with a comment saying Ashigaru can fix it once a maintainer adds `ready-to-code`. The triage agent can only read, so classifying a stranger's report is safe; writing code from it is a maintainer's decision. An issue written by a bot without write access is not read. See [authority](authority.md).
 
 ## Example
 
 ```yaml
 triage:
-  uses: crunchtools/ashigaru/.github/workflows/triage.yml@v2.2.0
+  uses: crunchtools/ashigaru/.github/workflows/triage.yml@v2.3.0
   with:
     auto_code_categories: "bug,documentation"   # keep performance work for a person
     min_confidence: "0.8"
