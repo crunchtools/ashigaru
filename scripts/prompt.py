@@ -55,17 +55,18 @@ def trusted(repo: str, comments: list[dict]) -> list[dict]:
     return kept[-COMMENTS_KEPT:]
 
 
-def trusted_comments(repo: str, comments: list[dict]) -> str:
-    kept = [
-        f"[{comment['user']['login']}] {comment['body'][:COMMENT_LIMIT]}"
-        for comment in trusted(repo, comments)
+def comment_text(comments: list[dict]) -> str:
+    """Comments as text for the prompt, each under its author's login."""
+    return "\n\n".join(f"[{c['user']['login']}] {c['body'][:COMMENT_LIMIT]}" for c in comments) or NONE
+
+
+def image_sources(*written: dict) -> list[str]:
+    """The URLs of the images GitHub itself serves, from the rendered HTML of an issue and its comments."""
+    return [
+        html.unescape(source)
+        for entry in written
+        for source in IMAGE_SOURCE.findall(entry.get("body_html") or "")
     ]
-    return "\n\n".join(kept) or NONE
-
-
-def image_sources(rendered: str | None) -> list[str]:
-    """The URLs of the images in rendered issue HTML that GitHub itself serves."""
-    return [html.unescape(source) for source in IMAGE_SOURCE.findall(rendered or "")]
 
 
 def image_kind(image: bytes) -> str | None:
@@ -84,15 +85,16 @@ def fetch(url: str) -> bytes:
 def attachments(number: int, sources: list[str], dest: Path) -> str:
     """Save the first few images to `dest` and return their paths, one per line.
 
-    A download that fails, is too large or is not an image is skipped with a
-    warning: a missing screenshot never stops the agent from running. The URL
-    is kept out of the log because it can carry a signed token.
+    Only the first few URLs are tried at all, so a report full of dead links
+    costs a bounded wait. A download that fails, is too large or is not an
+    image is skipped with a warning: a missing screenshot never stops the agent
+    from running. The URL is kept out of the log because it can carry a signed token.
     """
     saved: list[str] = []
-    for position, url in enumerate(dict.fromkeys(sources), start=1):
-        if len(saved) == IMAGES_KEPT:
-            print(f"::warning::issue {number} has more than {IMAGES_KEPT} images; the rest are not shown")
-            break
+    distinct = list(dict.fromkeys(sources))
+    if len(distinct) > IMAGES_KEPT:
+        print(f"::warning::issue {number} has more than {IMAGES_KEPT} images; the rest are not shown")
+    for position, url in enumerate(distinct[:IMAGES_KEPT], start=1):
         try:
             image = fetch(url)
         except (OSError, ValueError) as error:
@@ -114,19 +116,22 @@ def render(template: str, values: dict[str, str]) -> str:
     return SLOT.sub(lambda match: values.get(match.group(1), match.group(0)), template)
 
 
-def issue_values(repo: str, number: int, images: Path | None = None) -> dict[str, str]:
-    issue = api(f"repos/{repo}/issues/{number}", *RENDERED)
-    comments = api_pages(f"repos/{repo}/issues/{number}/comments?per_page=100", *RENDERED)
-    sources = image_sources(issue.get("body_html"))
-    for comment in trusted(repo, comments):
-        sources += image_sources(comment.get("body_html"))
+def described(repo: str, number: int, item: dict) -> dict[str, str]:
+    """What an issue and a pull request both have: where it is, its title and its body."""
     return {
         "repo": repo,
         "number": str(number),
-        "title": issue["title"],
-        "body": (issue.get("body") or "(empty)")[:BODY_LIMIT],
-        "comments": trusted_comments(repo, comments),
-        "attachments": attachments(number, sources, images) if images else NONE,
+        "title": item["title"],
+        "body": (item.get("body") or "(empty)")[:BODY_LIMIT],
+    }
+
+
+def issue_values(repo: str, number: int, images: Path | None = None) -> dict[str, str]:
+    issue = api(f"repos/{repo}/issues/{number}", *RENDERED)
+    comments = trusted(repo, api_pages(f"repos/{repo}/issues/{number}/comments?per_page=100", *RENDERED))
+    return described(repo, number, issue) | {
+        "comments": comment_text(comments),
+        "attachments": attachments(number, image_sources(issue, *comments), images) if images else NONE,
     }
 
 
@@ -140,13 +145,9 @@ def pull_values(repo: str, number: int) -> dict[str, str]:
     except subprocess.CalledProcessError as error:
         print(f"::warning::no diff for {repo}#{number}: {error.stderr.strip()[:200]}")
         diff = NO_DIFF
-    return {
-        "repo": repo,
-        "number": str(number),
+    return described(repo, number, pull) | {
         "author": pull["user"]["login"],
         "base": pull["base"]["ref"],
-        "title": pull["title"],
-        "body": (pull.get("body") or "(empty)")[:BODY_LIMIT],
         "files": "\n".join(entry["filename"] for entry in files) or "(none)",
         "diff": diff if len(diff) <= DIFF_LIMIT else diff[:DIFF_LIMIT] + CUT,
     }
@@ -160,7 +161,11 @@ def main() -> int:
     parser.add_argument("--pull", type=int)
     parser.add_argument("--findings", type=Path)
     parser.add_argument("--hooks-log", type=Path)
-    parser.add_argument("--attachments", type=Path, help="directory to save the issue's images in")
+    parser.add_argument(
+        "--attachments",
+        type=Path,
+        help="directory to save the issue's images in; without it none are downloaded",
+    )
     parser.add_argument("--out", required=True, type=Path)
     args = parser.parse_args()
 
