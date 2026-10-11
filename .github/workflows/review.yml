@@ -58,11 +58,11 @@ jobs:
     outputs:
       verdict: ${{ steps.agent.outputs.structured_output }}
     steps:
-      - name: Fetch Ashigaru at this release
+      - name: Fetch Ashigaru
         uses: actions/checkout@v7
         with:
           repository: crunchtools/ashigaru
-          ref: v2.5.0
+          ref: v2
           path: .ashigaru-src
           persist-credentials: false
 
@@ -114,11 +114,11 @@ jobs:
     permissions:
       contents: read
     steps:
-      - name: Fetch Ashigaru at this release
+      - name: Fetch Ashigaru
         uses: actions/checkout@v7
         with:
           repository: crunchtools/ashigaru
-          ref: v2.5.0
+          ref: v2
           persist-credentials: false
 
       - name: Mint the Ashigaru app token

@@ -18,5 +18,5 @@ Everything runs from containers; the host needs only git, podman, pre-commit and
 - A job that runs `claude-code-action/base-action` gets a read-only token, `persist-credentials: false`, and never the app token. `tests/test_workflows.py` enforces it.
 - Logic goes in `scripts/`, not in workflow shell.
 - Event values reach scripts through `env:`, never interpolated into `run:`.
-- Releasing: see `docs/enrollment.md`. `VERSION`, the literal `ref:` in each reusable workflow, the caller pins and the CHANGELOG move together.
+- Releasing: see `docs/enrollment.md`. `VERSION` and the CHANGELOG move together; callers and the literal `ref:` in each reusable workflow name the major tag (`v2`), which `major-tag.yml` moves when a release is published.
 - Label names, input names, the `ashigaru/` branch prefix and job names are public interface: a change is a MAJOR release.
