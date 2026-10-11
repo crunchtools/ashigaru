@@ -6,6 +6,10 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- A feature request with an open question was labeled `needs-info`, which took it off the list of work waiting for a maintainer's decision. After the fleet backlog was triaged, 44 of 48 `needs-info` issues were features. `needs_info` now holds back only bug-class work that Ashigaru would otherwise start; a feature is labeled `triaged` and its question stays in the summary.
+
 ## [2.5.0] - 2026-10-10
 
 ### Added

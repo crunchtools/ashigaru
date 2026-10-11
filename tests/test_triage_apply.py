@@ -30,6 +30,11 @@ def test_questions_need_info(category):
     assert decide(verdict(category), AUTO, 0.7) == NEEDS_INFO
 
 
+def test_a_feature_with_an_open_question_still_waits_as_triaged():
+    """Most needs-info issues were features: the label hid them from the work waiting on a decision."""
+    assert decide(verdict("feature", needs_info=True), AUTO, 0.7) == TRIAGED
+
+
 def test_bug_that_needs_info_is_not_coded():
     assert decide(verdict("bug", needs_info=True), AUTO, 0.7) == NEEDS_INFO
 
