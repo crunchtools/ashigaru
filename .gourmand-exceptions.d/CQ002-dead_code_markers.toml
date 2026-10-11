@@ -1,0 +1,6 @@
+check = "CQ002-dead_code_markers"
+
+[[locations]]
+path = "scripts/release.py"
+justification = "'Deprecated' here is the Keep a Changelog section heading (`### Deprecated`) that the release stage reads to choose a minor bump, in a regex and the docstring that explains it. Nothing in this file is marked as dead code."
+classification = "gourmand_bug"

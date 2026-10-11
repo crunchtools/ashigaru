@@ -6,6 +6,7 @@ from inbox import (
     MAX_REVIEWS,
     due,
     handed_over,
+    held_releases,
     last_review,
     outside_issues,
     outside_pulls,
@@ -113,6 +114,31 @@ def test_handed_over_and_unanswered_are_read_from_labels():
         unanswered([issue(1, labels=("needs-info",)), issue(2), issue(3, labels=("needs-info",), pr=True)])
         == 1
     )
+
+
+def release_pull(number, version="1.2.3", **overrides):
+    head = {
+        "headRefName": f"ashigaru/release-{version}",
+        "autoMergeRequest": None,
+        "isCrossRepository": False,
+    }
+    return (
+        pull(number, author="app/ashigaru-crunchtools", labels=overrides.pop("labels", ())) | head | overrides
+    )
+
+
+def test_a_release_pull_request_that_will_not_merge_on_its_own_waits_on_a_maintainer():
+    pulls = [
+        release_pull(1),
+        release_pull(2, autoMergeRequest={"mergeMethod": "SQUASH"}),
+        release_pull(3, labels=("needs-human",)),
+        release_pull(4, isCrossRepository=True),
+        release_pull(5, headRefName="ashigaru/issue-5"),
+    ]
+    held = held_releases("o/r", pulls)
+    assert [item["number"] for item in held] == [1]
+    body = render([], {}, [], held, {})
+    assert "merging it publishes the release" in body and "Labeled needs-human" not in body
 
 
 def test_the_list_says_what_ashigaru_made_of_each_item_and_notifies_nobody():

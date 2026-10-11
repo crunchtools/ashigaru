@@ -11,7 +11,17 @@ from __future__ import annotations
 import re
 from collections.abc import Callable
 
-from common import INBOX, NEEDS_HUMAN, NEEDS_INFO, STATE_LABELS, TYPE_LABELS, api, ensure_labels, gh
+from common import (
+    BRANCH_PREFIX,
+    INBOX,
+    NEEDS_HUMAN,
+    NEEDS_INFO,
+    STATE_LABELS,
+    TYPE_LABELS,
+    api,
+    ensure_labels,
+    gh,
+)
 
 MARKER = "<!-- ashigaru:inbox -->"
 TITLE = "Waiting on a maintainer"
@@ -27,6 +37,10 @@ INTRO = (
 )
 RECOMMENDATIONS = {"merge": "merge", "changes": "request changes", "close": "close"}
 """What a review may recommend, and the words shown for each. Any other value is not a verdict."""
+RELEASE_BRANCH = f"{BRANCH_PREFIX}release-"
+"""Where a release pull request comes from; the version follows."""
+HANDED_OVER = "Labeled needs-human."
+HELD_RELEASE = "Release pull request with auto-merge off; merging it publishes the release."
 Writes = Callable[[str, str], bool]
 
 
@@ -108,6 +122,29 @@ def handed_over(repo: str, pulls: list[dict]) -> list[dict]:
     ]
 
 
+def held_releases(repo: str, pulls: list[dict]) -> list[dict]:
+    """Ashigaru's release pull requests that will not merge on their own.
+
+    The repository asked for a pull request only, or the bump is above its limit.
+    One labeled needs-human is already listed by `handed_over`.
+    """
+    return [
+        {
+            "repo": repo,
+            "number": pull["number"],
+            "title": pull["title"],
+            "url": pull["url"],
+            "created_at": pull["createdAt"],
+            "note": HELD_RELEASE,
+        }
+        for pull in pulls
+        if pull["headRefName"].startswith(RELEASE_BRANCH)
+        and not pull.get("autoMergeRequest")
+        and not pull["isCrossRepository"]
+        and NEEDS_HUMAN not in names(pull)
+    ]
+
+
 def unanswered(issues: list[dict]) -> int:
     """Issues in one repo that triage could not act on without an answer."""
     return sum(1 for issue in issues if "pull_request" not in issue and NEEDS_INFO in names(issue))
@@ -158,11 +195,11 @@ def verdict(review: dict | None) -> str:
     return "Ashigaru could not review it." if review else "Not reviewed yet."
 
 
-def section(title: str, rows: list[str]) -> list[str]:
+def section(title: str, rows: list[str], empty: str = "Nothing waiting.") -> list[str]:
     """A headed list with its count, cut to MAX_LISTED rows with a note of how many were left out."""
     shown = rows[:MAX_LISTED]
     extra = [f"- and {len(rows) - MAX_LISTED} more"] if len(rows) > MAX_LISTED else []
-    return [f"## {title} ({len(rows)})", "", *(shown or ["Nothing waiting."]), *extra, ""]
+    return [f"## {title} ({len(rows)})", "", *(shown or [empty]), *extra, ""]
 
 
 def render(pulls: list[dict], reviews: dict[str, dict | None], issues: list[dict],
@@ -182,19 +219,19 @@ def render(pulls: list[dict], reviews: dict[str, dict | None], issues: list[dict
     )
     lines += section(
         "Pull requests Ashigaru handed over",
-        [row(pull, "Labeled needs-human.") for pull in sorted(stopped, key=by_age)],
+        [row(pull, pull.get("note", HANDED_OVER)) for pull in sorted(stopped, key=by_age)],
     )
     asked = [f"- {repo.split('/', 1)[-1]}: {count}" for repo, count in sorted(questions.items()) if count]
     lines += section("Issues waiting on an answer, by repo", asked)
     return "\n".join(lines).rstrip() + "\n"
 
 
-def publish(repo: str, body: str) -> str:
-    """Create the inbox issue, or edit it when the list changed. Returns what was done."""
-    ensure_labels(repo, [INBOX])
-    found = api(f"repos/{repo}/issues?state=open&labels={INBOX}&per_page=1")
+def publish(repo: str, body: str, label: str = INBOX, title: str = TITLE) -> str:
+    """Create the issue that carries `label`, or edit it when its list changed. Returns what was done."""
+    ensure_labels(repo, [label])
+    found = api(f"repos/{repo}/issues?state=open&labels={label}&per_page=1")
     if not found:
-        gh("issue", "create", "--repo", repo, "--title", TITLE, "--label", INBOX, "--body", body)
+        gh("issue", "create", "--repo", repo, "--title", title, "--label", label, "--body", body)
         return "created"
     if (found[0].get("body") or "").replace("\r\n", "\n").strip() == body.strip():
         return "unchanged"
