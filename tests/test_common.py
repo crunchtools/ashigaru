@@ -71,3 +71,10 @@ def test_agent_text_is_posted_without_credentials_mentions_or_links():
     assert "://" not in common.publishable("go to https://evil.example/login now")
     plain = "src/ask.py: the task list is skipped at a1b2c3d4e5f6a7b8c9d0."
     assert common.publishable(plain) == plain
+
+
+def test_a_paginated_read_passes_extra_arguments_to_gh(monkeypatch):
+    calls = []
+    monkeypatch.setattr(common, "gh", lambda *args: calls.append(args) or "[[1, 2], [3]]")
+    assert common.api_pages("repos/o/r/issues/1/comments", "-H", "Accept: x") == [1, 2, 3]
+    assert calls == [("api", "--paginate", "--slurp", "repos/o/r/issues/1/comments", "-H", "Accept: x")]

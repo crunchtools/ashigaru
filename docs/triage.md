@@ -8,7 +8,7 @@ Issues filed in passing pile up unlabeled, and nobody goes back to sort them. So
 
 ## How it works
 
-`triage.yml` has two jobs. `Classify` runs the agent with a read-only token and the tools `Read`, `Glob` and `Grep`; it returns a verdict as structured output. `Apply verdict` runs no model: `scripts/triage_apply.py` turns the verdict into a label and a comment.
+`triage.yml` has two jobs. `Classify` runs the agent with a read-only token and the tools `Read`, `Glob` and `Grep`; it returns a verdict as structured output. Images in the issue are downloaded for it beforehand and listed in the prompt, so a screenshot counts as evidence; the agent itself has no network. `Apply verdict` runs no model: `scripts/triage_apply.py` turns the verdict into a label and a comment.
 
 | Verdict | Label | What happens next |
 |---------|-------|-------------------|
@@ -26,7 +26,7 @@ Triage runs when an issue is opened, and when `ready-for-triage` is added.
 
 ```yaml
 triage:
-  uses: crunchtools/ashigaru/.github/workflows/triage.yml@v2.4.0
+  uses: crunchtools/ashigaru/.github/workflows/triage.yml@v2.5.0
   with:
     auto_code_categories: "bug,documentation"   # keep performance work for a person
     min_confidence: "0.8"

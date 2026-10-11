@@ -80,9 +80,9 @@ def api(path: str, *args: str) -> Any:
     return json.loads(gh("api", path, *args))
 
 
-def api_pages(path: str) -> list[Any]:
+def api_pages(path: str, *args: str) -> list[Any]:
     """Every item of a paginated list endpoint."""
-    pages = json.loads(gh("api", "--paginate", "--slurp", path))
+    pages = json.loads(gh("api", "--paginate", "--slurp", path, *args))
     return [item for page in pages for item in page]
 
 
