@@ -26,7 +26,7 @@ Triage runs when an issue is opened, and when `ready-for-triage` is added.
 
 ```yaml
 triage:
-  uses: crunchtools/ashigaru/.github/workflows/triage.yml@v2.5.0
+  uses: crunchtools/ashigaru/.github/workflows/triage.yml@v2
   with:
     auto_code_categories: "bug,documentation"   # keep performance work for a person
     min_confidence: "0.8"

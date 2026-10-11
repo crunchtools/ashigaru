@@ -9,10 +9,12 @@ import yaml
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOWS = ROOT / ".github" / "workflows"
 VERSION = (ROOT / "VERSION").read_text().strip()
-PRODUCT = ("triage.yml", "code.yml", "fix.yml", "sweep.yml", "review.yml")
+# The tag callers use. Each release moves it, so no caller is edited to get a release.
+MAJOR = f"v{VERSION.split('.')[0]}"
+PRODUCT = ("triage.yml", "code.yml", "fix.yml", "sweep.yml", "review.yml", "major-tag.yml")
 REUSABLE = PRODUCT[:3]
 AGENTS = (*REUSABLE, "review.yml")
-"""Workflows that run a model. Each fetches its scripts at the release tag."""
+"""Workflows that run a model. Each fetches its scripts at the major tag."""
 BASE_ACTION = "anthropics/claude-code-action/base-action@"
 WRITE = {"write"}
 
@@ -87,23 +89,23 @@ def test_an_agent_that_reads_outside_text_cannot_edit(name):
 
 
 @pytest.mark.parametrize("name", AGENTS)
-def test_reusable_workflows_fetch_their_own_release(name):
-    """A called workflow cannot name its own ref, so the release is a literal."""
+def test_reusable_workflows_fetch_their_scripts_at_the_major_tag(name):
+    """A called workflow cannot name its own ref, so the tag is a literal: the one callers use."""
     fetches = [
         step["with"]["ref"]
         for _, job in jobs(name)
         for step in steps_of(job)
         if step.get("with", {}).get("repository") == "crunchtools/ashigaru"
     ]
-    assert fetches and set(fetches) == {f"v{VERSION}"}
+    assert fetches and set(fetches) == {MAJOR}
 
 
-def test_the_caller_pins_this_release_and_matches_the_example():
+def test_the_caller_uses_the_major_tag_and_matches_the_example():
     example = (ROOT / "examples" / "ashigaru.yml").read_text()
     assert (WORKFLOWS / "ashigaru.yml").read_text() == example
-    pins = {name: job["uses"] for name, job in yaml.safe_load(example)["jobs"].items()}
-    assert pins == {
-        name: f"crunchtools/ashigaru/.github/workflows/{name}.yml@v{VERSION}"
+    calls = {name: job["uses"] for name, job in yaml.safe_load(example)["jobs"].items()}
+    assert calls == {
+        name: f"crunchtools/ashigaru/.github/workflows/{name}.yml@{MAJOR}"
         for name in ("triage", "code", "fix")
     }
 
@@ -166,8 +168,8 @@ def test_the_review_never_checks_out_the_pull_request():
     for _, job in jobs("review.yml"):
         for step in steps_of(job):
             if str(step.get("uses", "")).startswith("actions/checkout@"):
-                # Ashigaru at this release, or the branch the pull request targets.
-                assert step["with"]["ref"] in (f"v{VERSION}", "${{ inputs.base }}")
+                # Ashigaru itself, or the branch the pull request targets.
+                assert step["with"]["ref"] in (MAJOR, "${{ inputs.base }}")
     assert "pull_request_target" not in (WORKFLOWS / "review.yml").read_text().split("on:")[1]
 
 

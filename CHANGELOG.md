@@ -6,6 +6,13 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [2.6.0] - 2026-10-11
+
+### Changed
+
+- Repositories call the workflows at the major tag, `@v2`, and no longer at an exact release. Publishing a release runs the new `major-tag.yml`, which moves `v2` to it when it is the newest release of its major, and every enrolled repository runs that release from then on with no change of its own. Before, each release had to be re-pinned in every repository by a Dependabot pull request; three releases in one day left repositories one and two releases behind. Every release still has its own `vX.Y.Z` tag, so a release is undone by moving `v2` back. The reusable workflows fetch their scripts at `v2` as well. A repository on an exact pin keeps working until it copies the new caller file.
+- Releasing Ashigaru no longer edits any pin: `VERSION` and the CHANGELOG are the whole release commit.
+
 ### Fixed
 
 - A feature request with an open question was labeled `needs-info`, which took it off the list of work waiting for a maintainer's decision. After the fleet backlog was triaged, 44 of 48 `needs-info` issues were features. `needs_info` now holds back only bug-class work that Ashigaru would otherwise start; a feature is labeled `triaged` and its question stays in the summary.

@@ -27,7 +27,7 @@ Each repository:
 
 ```bash
 mkdir -p .github/workflows
-curl -fsSL https://raw.githubusercontent.com/crunchtools/ashigaru/v2.5.0/examples/ashigaru.yml \
+curl -fsSL https://raw.githubusercontent.com/crunchtools/ashigaru/v2/examples/ashigaru.yml \
   -o .github/workflows/ashigaru.yml
 ```
 

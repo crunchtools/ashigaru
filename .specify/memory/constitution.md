@@ -1,6 +1,6 @@
 # ashigaru Constitution
 
-> **Version:** 2.5.0
+> **Version:** 2.6.0
 > **Ratified:** 2026-10-10
 > **Status:** Active
 > **Inherits:** [crunchtools/constitution](https://github.com/crunchtools/constitution) v1.23.0
@@ -60,6 +60,8 @@ depend on. Changing one is a MAJOR release.
 
 ## Release Coupling
 
-A called workflow cannot name its own ref. Each reusable workflow fetches the
-scripts at a literal tag that equals `VERSION`; `tests/test_workflows.py` holds
-the workflows, the example, this repo's caller and the CHANGELOG together.
+A called workflow cannot name its own ref. Callers use the major tag (`v2`) and
+each reusable workflow fetches the scripts at that same literal tag;
+`tests/test_workflows.py` holds the workflows, the example and this repo's
+caller to it. Publishing a release moves the major tag, so a release reaches
+every enrolled repo at once and is undone by moving the tag back.

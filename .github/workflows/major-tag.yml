@@ -1,0 +1,43 @@
+# Major tag — deliver a published release to every enrolled repository.
+#
+# Callers use `@v2`. When a release is published this moves `v2` to it, and
+# that is the whole rollout: no caller file changes anywhere. The tag moves
+# forward only: a release older than the newest of its major leaves it alone.
+# To undo a release, move the tag back by hand (docs/enrollment.md).
+
+name: Major tag
+
+on:
+  release:
+    types: [published]
+
+permissions: {}
+
+# One at a time: each run reads the tags afresh, so two releases published
+# together cannot leave the major tag on the older one.
+concurrency:
+  group: major-tag
+  cancel-in-progress: false
+
+jobs:
+  move:
+    name: Move the major tag
+    if: vars.ASHIGARU_ENABLED == 'true' && !github.event.release.prerelease
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      # The script comes from the default branch, not from the release it
+      # promotes: the code holding the write token is code already merged.
+      - name: Check out the default branch
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+
+      - name: Move the tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.release.tag_name }}
+        run: python3 scripts/major_tag.py --repo "$GITHUB_REPOSITORY" --tag "$TAG"

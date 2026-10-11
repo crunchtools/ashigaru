@@ -4,7 +4,7 @@ Setting up an organization, enrolling a repository, and releasing Ashigaru itsel
 
 ## Why it matters
 
-The supported wiring is one caller file, copied unchanged. Everything a repository might tune is an input, so the file stays identical across a fleet and Dependabot can keep its pin current.
+The supported wiring is one caller file, copied unchanged. Everything a repository might tune is an input, so the file stays identical across a fleet. It calls the workflows at the major tag (`@v2`), which the newest release moves, so a release reaches every repository without a change there.
 
 ## How it works
 
@@ -53,7 +53,11 @@ See [Release](release.md) for what the repository's `CHANGELOG.md` must look lik
 
 ## Releasing
 
-A called workflow cannot name its own ref, so each reusable workflow fetches the scripts at a literal tag. To release `X.Y.Z`: set `VERSION`, replace the previous tag in `.github/workflows/{triage,code,fix,review,ashigaru}.yml` and `examples/ashigaru.yml`, add the CHANGELOG entry, merge, then tag `vX.Y.Z` and publish the GitHub Release. `tests/test_workflows.py` fails if any of those disagree. Between the merge and the tag, this repository's own caller points at a tag that does not exist yet; tag promptly.
+Callers use the major tag, `@v2`, and each reusable workflow fetches its scripts at the same tag: a called workflow cannot name its own ref, so it is a literal. To release `X.Y.Z`: set `VERSION`, add the CHANGELOG entry, merge, then tag `vX.Y.Z` and publish the GitHub Release. Publishing runs `major-tag.yml`, which moves `v2` to the release when it is the newest of its major, and from that moment every enrolled repository runs it. A late patch to an older minor is published without moving `v2`. Like every workflow here it stops when `ASHIGARU_ENABLED` is not `true`; re-run it once the switch is back on. No file in any other repository changes. `tests/test_workflows.py` fails if a workflow, the example or this repository's caller names anything but the major tag.
+
+**Rolling back.** Every release keeps its own tag. To undo one, move the major tag back: `git tag -f v2 vX.Y.Z && git push -f origin v2`. A repository that needs to stay on one release can call `@vX.Y.Z`, but the scripts are still fetched at `v2`, so this holds only the workflow files.
+
+**A new major.** A change to the public interface is a new major tag, `v3`. Repositories move to it by editing their caller file, on their own schedule.
 
 ## Related
 

@@ -78,11 +78,11 @@ jobs:
     outputs:
       action: ${{ steps.collect.outputs.action }}
     steps:
-      - name: Fetch Ashigaru at this release
+      - name: Fetch Ashigaru
         uses: actions/checkout@v7
         with:
           repository: crunchtools/ashigaru
-          ref: v2.5.0
+          ref: v2
           path: .ashigaru-src
           persist-credentials: false
 
@@ -168,11 +168,11 @@ jobs:
     permissions:
       contents: read
     steps:
-      - name: Fetch Ashigaru at this release
+      - name: Fetch Ashigaru
         uses: actions/checkout@v7
         with:
           repository: crunchtools/ashigaru
-          ref: v2.5.0
+          ref: v2
           path: .ashigaru-src
           persist-credentials: false
 
