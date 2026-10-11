@@ -13,7 +13,7 @@ import argparse
 import json
 import sys
 
-from common import REMOVED, SECRET, api, api_pages, gh
+from common import api, api_pages, gh, publishable
 from inbox import RECOMMENDATIONS, last_review, review_marker
 
 UNKNOWN = "unknown"
@@ -50,9 +50,7 @@ def points(result: dict, key: str) -> list[str]:
     found = result.get(key)
     if not isinstance(found, list):
         return []
-    return [SECRET.sub(REMOVED, str(item).strip())[:POINT_LIMIT] for item in found if str(item).strip()][
-        :MAX_POINTS
-    ]
+    return [publishable(str(item).strip())[:POINT_LIMIT] for item in found if str(item).strip()][:MAX_POINTS]
 
 
 def checks(rollup: list[dict]) -> str:
@@ -77,7 +75,7 @@ def comment(result: dict | None, sha: str, facts: dict) -> str:
     if result is None:
         lines += [FAILED, ""]
     else:
-        summary = SECRET.sub(REMOVED, result["summary"].strip())[:SUMMARY_LIMIT]
+        summary = publishable(result["summary"].strip())[:SUMMARY_LIMIT]
         lines += [f"Recommendation: **{RECOMMENDATIONS[recommendation]}**", "", summary, ""]
         if fixed:
             lines += ["The base branch already contains this change or an equivalent one.", ""]

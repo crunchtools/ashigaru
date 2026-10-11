@@ -35,8 +35,10 @@ def test_a_long_thread_is_cut_to_the_latest_comments(monkeypatch):
 
 def pull_request(monkeypatch, body, files, diff):
     pull = {"user": {"login": "visitor"}, "base": {"ref": "release-1"}, "title": "T", "body": body}
-    monkeypatch.setattr(prompt, "api", lambda path: pull)
-    monkeypatch.setattr(prompt, "api_pages", lambda path: [{"filename": name} for name in files])
+    listing = [{"filename": name} for name in files]
+    monkeypatch.setattr(
+        prompt, "api", lambda path: listing if path.endswith(f"per_page={prompt.FILES_KEPT}") else pull
+    )
     monkeypatch.setattr(prompt, "gh", lambda *args: diff)
     return prompt.pull_values("o/r", 9)
 
@@ -61,10 +63,8 @@ def test_an_empty_pull_request_says_so(monkeypatch):
 
 
 def test_a_huge_pull_request_is_cut_and_marked(monkeypatch):
-    names = [f"f{n}.py" for n in range(prompt.FILES_KEPT + 5)]
-    values = pull_request(monkeypatch, "b" * (prompt.BODY_LIMIT + 9), names, "d" * (prompt.DIFF_LIMIT + 1))
+    values = pull_request(monkeypatch, "b" * (prompt.BODY_LIMIT + 9), ["a.py"], "d" * (prompt.DIFF_LIMIT + 1))
     assert len(values["body"]) == prompt.BODY_LIMIT
-    assert len(values["files"].splitlines()) == prompt.FILES_KEPT
     assert values["diff"] == "d" * prompt.DIFF_LIMIT + prompt.CUT
 
 
@@ -72,9 +72,7 @@ def test_a_diff_github_will_not_render_does_not_stop_the_review(monkeypatch):
     def refuse(*args):
         raise subprocess.CalledProcessError(1, "gh", stderr="HTTP 406: diff exceeded the maximum")
 
-    monkeypatch.setattr(
-        prompt, "api", lambda path: {"user": {"login": "v"}, "base": {"ref": "main"}, "title": "T"}
-    )
-    monkeypatch.setattr(prompt, "api_pages", lambda path: [{"filename": "big.bin"}])
+    pull = {"user": {"login": "v"}, "base": {"ref": "main"}, "title": "T"}
+    monkeypatch.setattr(prompt, "api", lambda path: [] if "/files" in path else pull)
     monkeypatch.setattr(prompt, "gh", refuse)
     assert prompt.pull_values("o/r", 9)["diff"] == prompt.NO_DIFF

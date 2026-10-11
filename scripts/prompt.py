@@ -22,7 +22,7 @@ COMMENT_LIMIT = 4_000
 COMMENTS_KEPT = 20
 LOG_LIMIT = 20_000
 DIFF_LIMIT = 150_000
-FILES_KEPT = 200
+FILES_KEPT = 100
 NO_DIFF = "[GitHub could not render this diff, usually because it is too large. Review the files listed.]"
 CUT = "\n[diff cut here: too long to show in full]"
 SLOT = re.compile(r"\{\{(\w+)\}\}")
@@ -58,7 +58,7 @@ def issue_values(repo: str, number: int) -> dict[str, str]:
 def pull_values(repo: str, number: int) -> dict[str, str]:
     """A pull request as data for the reviewer. The diff is text; nothing from the fork is checked out."""
     pull = api(f"repos/{repo}/pulls/{number}")
-    files = api_pages(f"repos/{repo}/pulls/{number}/files?per_page=100")
+    files = api(f"repos/{repo}/pulls/{number}/files?per_page={FILES_KEPT}")  # one page is enough
     try:
         # GitHub answers 406 instead of rendering a diff past its size limit, which bounds this read.
         diff = gh("api", f"repos/{repo}/pulls/{number}", "-H", "Accept: application/vnd.github.diff")
@@ -72,7 +72,7 @@ def pull_values(repo: str, number: int) -> dict[str, str]:
         "base": pull["base"]["ref"],
         "title": pull["title"],
         "body": (pull.get("body") or "(empty)")[:BODY_LIMIT],
-        "files": "\n".join(entry["filename"] for entry in files[:FILES_KEPT]) or "(none)",
+        "files": "\n".join(entry["filename"] for entry in files) or "(none)",
         "diff": diff if len(diff) <= DIFF_LIMIT else diff[:DIFF_LIMIT] + CUT,
     }
 

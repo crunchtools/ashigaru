@@ -7,7 +7,7 @@ import argparse
 import json
 import sys
 
-from common import NEEDS_INFO, READY_TO_CODE, REMOVED, SECRET, TRIAGED, gh, set_output, set_state
+from common import NEEDS_INFO, READY_TO_CODE, TRIAGED, gh, publishable, set_output, set_state
 
 CATEGORIES = ("bug", "documentation", "performance", "feature", "question", "unclear")
 TYPE_LABEL = {
@@ -65,7 +65,7 @@ def comment(result: dict, state: str, next_step: str) -> str:
     category = result.get("category", "unknown")
     confidence = result.get("confidence")
     shown = f"{confidence:.0%}" if isinstance(confidence, (int, float)) else "n/a"
-    summary = SECRET.sub(REMOVED, str(result.get("summary", "")).strip()) or "No summary returned."
+    summary = publishable(str(result.get("summary", "")).strip()) or "No summary returned."
     return f"{MARKER}\n**Ashigaru triage:** {category} ({shown})\n\n{summary}\n\n{next_step}"
 
 

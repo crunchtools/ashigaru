@@ -23,7 +23,7 @@ All notable changes to this project are documented here. The format follows
 ### Security
 
 - No agent can read its own environment. With `Read,Glob,Grep` allowed, `Grep` on `/proc/self/environ` returned the process environment, which holds the Claude token. Every agent step now passes settings that deny `/proc` and `/sys` to the file tools, and a test requires it.
-- Agent-written text is scrubbed of anything shaped like a Claude or GitHub token before it is posted as a comment.
+- Agent-written text is cleaned before it is posted as a comment: anything shaped like a Claude or GitHub token is blanked, and mentions, HTML and Markdown links are made inert, since an agent that read a stranger's words may repeat them.
 
 ## [2.2.0] - 2026-10-10
 

@@ -36,7 +36,10 @@ def review_marker(sha: str, verdict: str, fixed: bool) -> str:
 
 
 def last_review(comments: list[dict], bot: str) -> dict | None:
-    """The newest first-pass review Ashigaru left on a pull request, if any."""
+    """The newest first-pass review Ashigaru left on a pull request, if any.
+
+    `comments` is oldest first, as the API lists them.
+    """
     for comment in reversed(comments):
         found = REVIEWED.search(comment.get("body") or "")
         if found and comment["user"]["login"] == bot:
