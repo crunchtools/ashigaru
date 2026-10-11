@@ -6,6 +6,12 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [2.4.0] - 2026-10-10
+
+### Added
+
+- The triage and code agents see the screenshots in an issue. Before the agent runs, `scripts/prompt.py` downloads the images from the issue body and from maintainers' comments to the runner and lists the files in the prompt; the agent opens them with `Read`. Until now an image reached the agent as a URL it had no way to open, so a report whose evidence was a screenshot came back `needs-info`. Up to five images of 5 MB each are kept, only from URLs GitHub serves, and only PNG, JPEG, GIF or WebP as judged by the bytes. An image in a comment from someone without write access is not downloaded. The agents get no new tool and no network.
+
 ## [2.3.0] - 2026-10-10
 
 ### Added

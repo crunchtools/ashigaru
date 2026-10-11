@@ -57,7 +57,7 @@ jobs:
         uses: actions/checkout@v7
         with:
           repository: crunchtools/ashigaru
-          ref: v2.3.0
+          ref: v2.4.0
           path: .ashigaru-src
           persist-credentials: false
 
@@ -84,7 +84,8 @@ jobs:
           ISSUE: ${{ github.event.issue.number }}
         run: |
           python3 "$RUNNER_TEMP/ashigaru/scripts/prompt.py" code \
-            --repo "$GITHUB_REPOSITORY" --issue "$ISSUE" --out "$RUNNER_TEMP/prompt.md"
+            --repo "$GITHUB_REPOSITORY" --issue "$ISSUE" --out "$RUNNER_TEMP/prompt.md" \
+            --attachments "$RUNNER_TEMP/attachments"
           echo "schema=$(jq -c . "$RUNNER_TEMP/ashigaru/schemas/code.json")" >> "$GITHUB_OUTPUT"
           # The hook config as the base branch has it; the agent cannot change this copy.
           if [ -f .pre-commit-config.yaml ]; then
@@ -204,7 +205,7 @@ jobs:
         uses: actions/checkout@v7
         with:
           repository: crunchtools/ashigaru
-          ref: v2.3.0
+          ref: v2.4.0
           path: .ashigaru-src
           persist-credentials: false
 
