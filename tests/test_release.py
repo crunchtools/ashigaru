@@ -128,6 +128,8 @@ PROJECTS = {"mcp-pcloud-crunchtools"}
         '      version="2.6.0" \\\n',
         'mcp = FastMCP("mcp-pcloud-crunchtools", version="2.6.0")\n',
         "> **Version:** 2.6.0\n",
+        'LABEL org.opencontainers.image.version="2.6.0"\n',
+        "VERSION: 2.6.0\n",
     ],
 )
 def test_a_line_that_states_the_version_is_moved(line):
@@ -140,6 +142,9 @@ def test_a_line_that_states_the_version_is_moved(line):
         'dependencies = ["httpx>=2.6.0"]\n',
         "| 2.6.0 | 2026-09-01 | Manifest updated |\n",
         "podman pull quay.io/example/other:2.6.0\n",
+        'minimum_version = "2.6.0"\n',
+        'target-version = "2.6.0"\n',
+        'versions = ["2.6.0"]\n',
         'version = "12.6.0"\n',
         'version = "2.6.0.1"\n',
         'version = "2.6.0-rc1"\n',

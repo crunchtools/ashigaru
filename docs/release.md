@@ -42,7 +42,7 @@ Below 1.0.0 a breaking change bumps the minor.
 **The release pull request** comes from `ashigaru/release-X.Y.Z`, titled `chore: release X.Y.Z`, with the changelog entry as its body. Its one commit:
 
 - moves the unreleased entries under `## [X.Y.Z] - date`, leaves `[Unreleased]` empty, and updates the compare links at the foot if the changelog has them;
-- replaces the old version with the new one in tracked files, but only on a line that contains the word `version` (`version = "1.2.3"`, `"version": "1.2.3"`, `__version__`, a `version=` label), or in a file that holds nothing else, such as `VERSION`. In a lock file only the version under the project's own name moves. A dependency that happens to share the number stays as it is.
+- replaces the old version with the new one in tracked files, but only on a line that carries the word `version` on its own (`version = "1.2.3"`, `"version": "1.2.3"`, `__version__`, a `version=` label; not `minimum_version` or `python-version`), or in a file that holds nothing else, such as `VERSION`. In a lock file only the version under the project's own name moves. A dependency that happens to share the number stays as it is.
 
 Files under a dot directory (`.github/`, `.specify/`) are never edited. If the old version is stated nowhere outside the changelog, nothing is opened and the record says so.
 

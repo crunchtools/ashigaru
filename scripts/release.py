@@ -62,6 +62,8 @@ FEATURE = re.compile(r"^### (?:Added|Changed|Deprecated)\b", re.MULTILINE)
 COMPARE = re.compile(
     r"^\[Unreleased\]: (\S+?)/compare/v?\d+\.\d+\.\d+\.\.\.HEAD$", re.MULTILINE | re.IGNORECASE
 )
+STATES = re.compile(r"(?<![\w-])(?:__version__|version)(?![\w-])", re.IGNORECASE)
+"""The word `version` standing alone: a key, a label or a heading, not part of a longer name."""
 QUOTED = re.compile(r'"([^"]+)"')
 LOCK_FILES = ("package-lock.json",)
 MANIFESTS = (
@@ -164,9 +166,10 @@ def normal(name: str) -> str:
 def rewrite(name: str, text: str, old: str, new: str, projects: set[str]) -> str:
     """One file's text with the project's version moved from `old` to `new`.
 
-    Only where the file says it is a version: a file that holds nothing else, or a
-    line that carries the word. In a lock file, only the version line that follows
-    the project's own name, so a dependency at the same version is left alone.
+    Only where the file says it is the version: a file that holds nothing else, or a
+    line that carries the word on its own (`version`, `__version__`), which leaves
+    `minimum_version` and `python-version` alone. In a lock file, only the version line
+    that follows the project's own name, so a dependency at the same version stays.
     """
     if text.strip() == old:
         return text.replace(old, new)
@@ -176,7 +179,7 @@ def rewrite(name: str, text: str, old: str, new: str, projects: set[str]) -> str
     previous = ""
     for index, line in enumerate(lines):
         named = {normal(quoted) for quoted in QUOTED.findall(previous)} & projects
-        if "version" in line.lower() and (named or not locked):
+        if STATES.search(line) and (named or not locked):
             lines[index] = exact.sub(new, line)
         if line.strip():
             previous = line
