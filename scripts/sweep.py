@@ -13,11 +13,12 @@ import argparse
 import json
 import subprocess
 import sys
-from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 
+import inbox
 from common import (
     BRANCH_PREFIX,
+    INBOX,
     NEEDS_HUMAN,
     READY_FOR_TRIAGE,
     READY_TO_CODE,
@@ -27,6 +28,7 @@ from common import (
     can_write,
     ensure_labels,
     gh,
+    set_output,
 )
 
 CALLER = ".github/workflows/ashigaru.yml"
@@ -36,34 +38,33 @@ WINDOW = timedelta(hours=1)
 """The span the coding budget is counted over."""
 SETTLE = timedelta(minutes=20)
 """An issue touched more recently than this may have a fix in flight; leave it for the next run."""
+PULL_FIELDS = (
+    "number,headRefName,headRefOid,baseRefName,mergeable,author,"
+    "isCrossRepository,isDraft,labels,title,url,createdAt"
+)
 OLDEST_OPEN = "issues?state=open&sort=created&direction=asc&per_page=100"
 """One page per repo: the globally oldest MAX_LIMIT are always within each repo's oldest 100."""
 
 
 def candidates(repo: str, issues: list[dict]) -> list[dict]:
-    """Open issues in one repo that carry none of Ashigaru's state labels."""
+    """Open issues in one repo, written by a person, that carry none of Ashigaru's labels."""
     return [
-        {
-            "repo": repo,
-            "number": issue["number"],
-            "created_at": issue["created_at"],
-            "author": issue["user"]["login"],
-        }
+        {"repo": repo, "number": issue["number"], "created_at": issue["created_at"]}
         for issue in issues
         if "pull_request" not in issue
-        and not {label["name"] for label in issue.get("labels", [])} & set(STATE_LABELS)
+        and issue["user"].get("type") == "User"
+        and not {label["name"] for label in issue.get("labels", [])} & {*STATE_LABELS, INBOX}
     ]
 
 
-def select(found: list[dict], limit: int, writes: Callable[[str, str], bool] = can_write) -> list[dict]:
-    """Oldest first across every repo, authors with write access only, at most `limit`."""
-    chosen: list[dict] = []
-    for item in sorted(found, key=lambda item: (item["created_at"], item["repo"], item["number"])):
-        if len(chosen) >= min(max(limit, 0), MAX_LIMIT):
-            break
-        if writes(item["repo"], item["author"]):
-            chosen.append(item)
-    return chosen
+def select(found: list[dict], limit: int) -> list[dict]:
+    """Oldest first across every repo, at most `limit`.
+
+    Outside authors are included: triage only reads, and its guard keeps their
+    issues away from the code agent.
+    """
+    ordered = sorted(found, key=lambda item: (item["created_at"], item["repo"], item["number"]))
+    return ordered[: min(max(limit, 0), MAX_LIMIT)]
 
 
 def conflicted(repo: str, pulls: list[dict], bot: str) -> list[dict]:
@@ -120,7 +121,7 @@ def requeue(item: dict) -> None:
 
 def open_pulls(repo: str) -> list[dict]:
     listing = gh("pr", "list", "--repo", repo, "--state", "open", "--limit", "100",
-                 "--json", "number,headRefName,mergeable,author,isCrossRepository,labels")  # fmt: skip
+                 "--json", PULL_FIELDS)  # fmt: skip
     return json.loads(listing)
 
 
@@ -151,12 +152,28 @@ def queue_triage(items: list[dict], dry_run: bool) -> None:
            "--add-label", READY_FOR_TRIAGE)  # fmt: skip
 
 
+def reviews_of(pulls: list[dict], bot: str) -> dict[str, dict | None]:
+    """Ashigaru's latest review of each pull request given, keyed by its URL.
+
+    One comments request per pull request, which is why the sweep tracks only
+    the oldest MAX_LISTED outside pull requests.
+    """
+    login = f"{bot.removeprefix('app/')}[bot]"
+    return {
+        pull["url"]: inbox.last_review(
+            api_pages(f"repos/{pull['repo']}/issues/{pull['number']}/comments?per_page=100"), login
+        )
+        for pull in pulls
+    }
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--org", required=True)
     parser.add_argument("--limit", default=MAX_LIMIT, type=int, help="issues to queue for triage")
     parser.add_argument("--code-per-hour", default=5, type=int, help="fixes started per hour, fleet-wide")
     parser.add_argument("--bot", default="app/ashigaru-crunchtools")
+    parser.add_argument("--inbox-repo", default="", help="repo whose inbox issue lists what waits on people")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
 
@@ -169,6 +186,10 @@ def main() -> int:
     untriaged: list[dict] = []
     stuck: list[dict] = []
     ready: list[dict] = []
+    visitors: list[dict] = []
+    reports: list[dict] = []
+    stopped: list[dict] = []
+    questions: dict[str, int] = {}
     for repo in repos:
         if not enrolled(repo):
             continue
@@ -177,6 +198,11 @@ def main() -> int:
         untriaged += candidates(repo, issues)
         stuck += conflicted(repo, pulls, args.bot)
         ready += waiting(repo, issues, {pull["headRefName"] for pull in pulls}, stamp(now - SETTLE))
+        # can_write is cached per repo and account, so each author costs one lookup per sweep.
+        visitors += inbox.outside_pulls(repo, pulls, can_write)
+        reports += inbox.outside_issues(repo, issues, can_write)
+        stopped += inbox.handed_over(repo, pulls)
+        questions[repo] = inbox.unanswered(issues)
 
     used = opened_since(args.org, args.bot, stamp(now - WINDOW))
     budget = remaining(args.code_per_hour, used)
@@ -189,6 +215,19 @@ def main() -> int:
     chosen = select(untriaged, args.limit)
     print(f"sweep: {len(untriaged)} untriaged issue(s) in enrolled repos, queueing {len(chosen)}")
     queue_triage(chosen, args.dry_run)
+
+    # The same set is looked up, reviewed and listed, so nothing is reviewed twice for want of a lookup.
+    tracked = sorted(visitors, key=inbox.by_age)[: inbox.MAX_LISTED]
+    reviews = reviews_of(tracked, args.bot)
+    to_review = inbox.due(tracked, reviews)
+    print(f"sweep: {len(visitors)} outside pull request(s), {len(reports)} outside issue(s), "
+          f"reviewing {len(to_review)}")  # fmt: skip
+    for item in to_review:
+        print(f"  review {item['repo']}#{item['number']}")
+    set_output("reviews", json.dumps([] if args.dry_run else to_review))
+    if args.inbox_repo and not args.dry_run:
+        body = inbox.render(visitors, reviews, reports, stopped, questions)
+        print(f"sweep: inbox {inbox.publish(args.inbox_repo, body)}")
     return 0
 
 

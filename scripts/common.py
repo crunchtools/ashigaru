@@ -23,9 +23,41 @@ STATE_LABELS = {
     NEEDS_HUMAN: ("d93f0b", "Ashigaru: automation stopped, a human takes over"),
 }
 
+TYPE_LABELS = {
+    "bug": ("d73a4a", "Something isn't working"),
+    "documentation": ("0075ca", "Improvements or additions to documentation"),
+    "enhancement": ("a2eeef", "New feature or request"),
+    "performance": ("5319e7", "Slower or heavier than it should be"),
+    "question": ("d876e3", "Further information is requested"),
+}
+"""What an issue is, next to the state label that says where it stands."""
+INBOX = "ashigaru-inbox"
+"""Marks the one issue the sweep keeps as the list of what waits on a maintainer."""
+MANAGED_LABELS = STATE_LABELS | TYPE_LABELS | {INBOX: ("ededed", "Ashigaru: what is waiting on a maintainer")}
+
 WRITE_PERMISSIONS = {"admin", "write"}  # the API folds maintain into write, triage into read
 BRANCH_PREFIX = "ashigaru/"
 PROTECTED_DIR = ".github/"
+SECRET = re.compile(r"sk-ant-[\w-]{16,}|gh[pousr]_\w{20,}|github_pat_\w{20,}")
+"""Anything shaped like a Claude or GitHub token. Blanked out of agent-written text before it
+is posted: the agent jobs are denied the files that hold their token, and this is the second
+lock, on the door the text leaves by."""
+REMOVED = "[removed]"
+# Applied to agent-written text before it is posted. An agent that read a stranger's words may
+# repeat them, so the text gets no mentions, no HTML, and no Markdown links or images.
+INERT = str.maketrans({"@": "@\u200b", "<": "&lt;", "[": "(", "]": ")"})
+UNLINKED = ":\u200b//"
+
+
+def publishable(text: str) -> str:
+    """Agent-written text made safe to post.
+
+    Mentions, HTML and Markdown links are made inert, a bare URL is broken so
+    it does not become a link, and anything shaped like a credential is blanked.
+    """
+    return SECRET.sub(REMOVED, text.translate(INERT).replace("://", UNLINKED))
+
+
 DIFF_HEADER = re.compile(r"^diff --git a/(\S+) b/(\S+)$", re.MULTILINE)
 
 
@@ -77,12 +109,12 @@ def set_output(name: str, value: str) -> None:
 
 
 def ensure_labels(repo: str, names: list[str]) -> set[str]:
-    """Create the state labels a repo is missing and return every label it has."""
+    """Create the Ashigaru labels a repo is missing and return every label it has."""
     existing = {label["name"] for label in api_pages(f"repos/{repo}/labels?per_page=100")}
     for name in names:
-        if name in existing or name not in STATE_LABELS:
+        if name in existing or name not in MANAGED_LABELS:
             continue
-        color, description = STATE_LABELS[name]
+        color, description = MANAGED_LABELS[name]
         try:
             gh("label", "create", name, "--repo", repo, "--color", color, "--description", description)
         except subprocess.CalledProcessError as error:
@@ -93,8 +125,8 @@ def ensure_labels(repo: str, names: list[str]) -> set[str]:
 
 
 def set_state(repo: str, number: int, state: str, extra: tuple[str, ...] = ()) -> None:
-    """Give an issue or PR exactly one state label, plus extra labels the repo already has."""
-    existing = ensure_labels(repo, [state])
+    """Give an issue or PR exactly one state label, plus the type labels in `extra`."""
+    existing = ensure_labels(repo, [state, *extra])
     add = [state, *(name for name in extra if name in existing)]
     current = {label["name"] for label in api(f"repos/{repo}/issues/{number}")["labels"]}
     args = ["issue", "edit", str(number), "--repo", repo, "--add-label", ",".join(add)]

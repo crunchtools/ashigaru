@@ -6,6 +6,25 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [2.3.0] - 2026-10-10
+
+### Added
+
+- Issues from people without write access are triaged. They get the same labels and summary as any other issue, but a bug-class verdict is labeled `triaged`, not `ready-to-code`: the fix starts only when a maintainer adds that label. The sweep queues outside issues from the backlog as well.
+- First-pass review of outside pull requests. Each hour the sweep sends up to five open pull requests from outside contributors to the new `review.yml`, which leaves one comment for the maintainers: what the change does, a recommendation (merge, request changes, close), whether the base branch already has it, and whether it merges and passes its checks. The comment is updated when the contributor pushes. The fork's code is never checked out or run, no event a fork can fire starts the workflow, and nothing is labeled, merged or closed.
+- An inbox. The sweep keeps one issue in the Ashigaru repository, labeled `ashigaru-inbox`, listing what waits on a maintainer across the organization: outside pull requests with Ashigaru's recommendation, outside issues with their category, pull requests labeled `needs-human`, and a count of `needs-info` issues per repository. It is edited only when the list changes.
+- Type labels for every category with a meaning: `performance` and `question` join `bug`, `documentation` and `enhancement`, and a repository that lacks one gets it created.
+
+### Changed
+
+- `scripts/guard.py` returns a trust level (`maintainer`, `outside`, `none`) and takes `--stage`. Triage runs for `maintainer` and `outside`; the code agent runs for `maintainer` only. On an issue someone without write access wrote, only a maintainer adding `ready-to-code` vouches for it; before, any label from a maintainer did. When the sweep re-adds `ready-to-code` to an outside issue, the guard reads the label history and proceeds only if a person with write access added that label before.
+- The caller file's header says where the switch, the author check and the branch check are enforced. Its jobs are unchanged apart from the pins.
+
+### Security
+
+- No agent can read its own environment. With `Read,Glob,Grep` allowed, `Grep` on `/proc/self/environ` returned the process environment, which holds the Claude token. Every agent step now passes settings that deny `/proc` and `/sys` to the file tools, and a test requires it.
+- Agent-written text is cleaned before it is posted as a comment: anything shaped like a Claude or GitHub token is blanked, and mentions, HTML and Markdown links are made inert, since an agent that read a stranger's words may repeat them.
+
 ## [2.2.0] - 2026-10-10
 
 ### Changed

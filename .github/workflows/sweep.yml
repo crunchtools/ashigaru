@@ -9,6 +9,11 @@
 # pull request yet, and Ashigaru pull requests that conflict. `code_per_hour` is
 # the budget: fixes started per hour across every repo, counting the pull
 # requests Ashigaru already opened in the past hour.
+#
+# Last, it looks after what only a person can move. It keeps one issue here,
+# labeled `ashigaru-inbox`, listing outside contributions and work Ashigaru
+# stopped on, and it sends up to five outside pull requests per run to
+# review.yml for a first-pass review comment.
 
 name: Ashigaru sweep
 
@@ -40,6 +45,8 @@ jobs:
     timeout-minutes: 15
     permissions:
       contents: read
+    outputs:
+      reviews: ${{ steps.sweep.outputs.reviews }}
     steps:
       # Always the default branch: a manual run started from another branch must
       # not put that branch's scripts next to the app token.
@@ -60,6 +67,7 @@ jobs:
           permission-pull-requests: read
 
       - name: Queue triage and start waiting fixes
+        id: sweep
         env:
           GH_TOKEN: ${{ steps.app.outputs.token }}
           # A schedule has no inputs; a manual 0 stays 0.
@@ -67,6 +75,29 @@ jobs:
           CODE_PER_HOUR: ${{ github.event_name == 'schedule' && 5 || inputs.code_per_hour }}
           DRY_RUN: ${{ inputs.dry_run }}
         run: |
-          args=(--org "$GITHUB_REPOSITORY_OWNER" --limit "$LIMIT" --code-per-hour "$CODE_PER_HOUR")
+          args=(--org "$GITHUB_REPOSITORY_OWNER" --limit "$LIMIT" --code-per-hour "$CODE_PER_HOUR"
+                --inbox-repo "$GITHUB_REPOSITORY")
           if [ "$DRY_RUN" = "true" ]; then args+=(--dry-run); fi
           python3 scripts/sweep.py "${args[@]}"
+
+  review:
+    name: Review ${{ matrix.repo }}#${{ matrix.number }}
+    needs: sweep
+    if: needs.sweep.outputs.reviews != '' && needs.sweep.outputs.reviews != '[]'
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        include: ${{ fromJSON(needs.sweep.outputs.reviews) }}
+    permissions:
+      contents: read
+    uses: ./.github/workflows/review.yml
+    with:
+      repo: ${{ matrix.repo }}
+      number: ${{ matrix.number }}
+      sha: ${{ matrix.sha }}
+      base: ${{ matrix.base }}
+    secrets:
+      CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+      ASHIGARU_APP_ID: ${{ secrets.ASHIGARU_APP_ID }}
+      ASHIGARU_APP_KEY: ${{ secrets.ASHIGARU_APP_KEY }}

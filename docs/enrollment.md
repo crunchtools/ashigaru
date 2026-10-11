@@ -39,7 +39,7 @@ On a GitHub Free organization, organization secrets reach public repositories on
 
 ## Releasing
 
-A called workflow cannot name its own ref, so each reusable workflow fetches the scripts at a literal tag. To release `X.Y.Z`: set `VERSION`, replace the previous tag in `.github/workflows/{triage,code,fix,ashigaru}.yml` and `examples/ashigaru.yml`, add the CHANGELOG entry, merge, then tag `vX.Y.Z` and publish the GitHub Release. `tests/test_workflows.py` fails if any of those disagree. Between the merge and the tag, this repository's own caller points at a tag that does not exist yet; tag promptly.
+A called workflow cannot name its own ref, so each reusable workflow fetches the scripts at a literal tag. To release `X.Y.Z`: set `VERSION`, replace the previous tag in `.github/workflows/{triage,code,fix,review,ashigaru}.yml` and `examples/ashigaru.yml`, add the CHANGELOG entry, merge, then tag `vX.Y.Z` and publish the GitHub Release. `tests/test_workflows.py` fails if any of those disagree. Between the merge and the tag, this repository's own caller points at a tag that does not exist yet; tag promptly.
 
 ## Related
 

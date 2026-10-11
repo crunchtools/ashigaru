@@ -1,0 +1,39 @@
+{
+  "type": "object",
+  "properties": {
+    "summary": {
+      "type": "string"
+    },
+    "recommendation": {
+      "type": "string",
+      "enum": [
+        "merge",
+        "changes",
+        "close"
+      ]
+    },
+    "already_fixed": {
+      "type": "boolean"
+    },
+    "concerns": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "blockers": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "required": [
+    "summary",
+    "recommendation",
+    "already_fixed",
+    "concerns",
+    "blockers"
+  ],
+  "additionalProperties": false
+}

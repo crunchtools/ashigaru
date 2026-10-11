@@ -3,7 +3,7 @@
 import pytest
 
 from common import NEEDS_INFO, READY_TO_CODE, TRIAGED
-from triage_apply import NEXT_STEP, QUEUED, comment, decide, starts_now
+from triage_apply import NEXT_STEP, QUEUED, TYPE_LABEL, VOUCH, comment, decide, settle, starts_now
 
 AUTO = {"bug", "documentation", "performance"}
 
@@ -60,3 +60,27 @@ def test_a_bug_triaged_from_the_backlog_waits_for_the_hourly_budget():
 def test_nothing_but_ready_to_code_ever_starts_the_code_agent():
     assert not starts_now(TRIAGED, "fresh")
     assert not starts_now(NEEDS_INFO, "fresh")
+
+
+def test_a_bug_reported_from_outside_waits_for_a_maintainer_to_vouch():
+    assert settle(READY_TO_CODE, "outside") == (TRIAGED, VOUCH)
+    assert not starts_now(settle(READY_TO_CODE, "outside")[0], "fresh")
+
+
+@pytest.mark.parametrize("state", [TRIAGED, NEEDS_INFO])
+def test_other_verdicts_on_outside_issues_are_left_as_they_are(state):
+    assert settle(state, "outside") == (state, None)
+
+
+def test_a_maintainers_issue_is_not_held_back():
+    assert settle(READY_TO_CODE, "maintainer") == (READY_TO_CODE, None)
+
+
+def test_every_category_with_a_meaning_gets_a_type_label():
+    assert TYPE_LABEL == {
+        "bug": "bug",
+        "documentation": "documentation",
+        "performance": "performance",
+        "feature": "enhancement",
+        "question": "question",
+    }

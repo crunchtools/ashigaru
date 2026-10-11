@@ -61,3 +61,13 @@ def test_other_label_creation_failures_propagate(monkeypatch):
     monkeypatch.setattr(common, "gh", create)
     with pytest.raises(subprocess.CalledProcessError):
         common.ensure_labels("o/r", [common.TRIAGED])
+
+
+def test_agent_text_is_posted_without_credentials_mentions_or_links():
+    leaked = "token sk-ant-oat01-AbCdEfGhIjKlMnOpQrStUv and ghs_" + "a" * 36
+    assert common.publishable(leaked) == "token [removed] and [removed]"
+    hostile = common.publishable("ping @maintainer, see [here](http://evil) <img src=x>")
+    assert "@maintainer" not in hostile and "](" not in hostile and "<" not in hostile
+    assert "://" not in common.publishable("go to https://evil.example/login now")
+    plain = "src/ask.py: the task list is skipped at a1b2c3d4e5f6a7b8c9d0."
+    assert common.publishable(plain) == plain

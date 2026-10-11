@@ -11,8 +11,8 @@ Triage runs when an issue is opened, so issues that predate enrollment would nev
 `sweep.yml` runs on a schedule in the Ashigaru repository only. `scripts/sweep.py`:
 
 1. lists the organization's public, non-archived repositories and keeps those that carry `.github/workflows/ashigaru.yml`;
-2. reads each one's hundred oldest open issues and keeps those with none of Ashigaru's state labels;
-3. walks them oldest first across all repositories, skips authors without write access, and adds `ready-for-triage` to the first `limit` (20 on the schedule, never more than 20).
+2. reads each one's hundred oldest open issues and keeps those a person wrote that carry none of Ashigaru's labels;
+3. walks them oldest first across all repositories and adds `ready-for-triage` to the first `limit` (20 on the schedule, never more than 20). Issues from outside contributors are included; the [guard](authority.md) keeps them to triage.
 
 **Starting fixes.** A newly opened issue that triage marks `ready-to-code` goes to the code agent in the same run. An issue triaged any other way (queued by the sweep, or re-triaged after a question was answered) is labeled `ready-to-code` and waits. Each hour the sweep counts the pull requests Ashigaru opened across the organization in the past hour, subtracts that from `code_per_hour` (default 5), and starts that many fixes by removing and re-adding `ready-to-code` with the app token. It starts, in order:
 
@@ -22,6 +22,8 @@ Triage runs when an issue is opened, so issues that predate enrollment would nev
 A maintainer who adds `ready-to-code` by hand starts the fix at once; it counts against the next hour's budget once its pull request opens.
 
 The label is added with the app token, so it starts each repository's own workflow. From there the issue follows the normal path through [triage](triage.md).
+
+**What waits on a person.** After that the sweep picks up to five outside pull requests for a [first-pass review](review.md) and rewrites the inbox issue when its list changed.
 
 ## Example
 
@@ -34,4 +36,5 @@ gh workflow run sweep.yml -R crunchtools/ashigaru -f limit=10 -f dry_run=true
 ## Related
 
 - [Triage](triage.md)
+- [Review](review.md)
 - [Authority and limits](authority.md)
