@@ -20,10 +20,12 @@ from common import (
     BRANCH_PREFIX,
     INBOX,
     NEEDS_HUMAN,
+    NEEDS_INFO,
     READY_FOR_TRIAGE,
     READY_TO_CODE,
     RELEASES,
     STATE_LABELS,
+    TRIAGED,
     api,
     api_pages,
     can_write,
@@ -56,6 +58,33 @@ def candidates(repo: str, issues: list[dict]) -> list[dict]:
         and issue["user"].get("type") == "User"
         and not {label["name"] for label in issue.get("labels", [])} & {*STATE_LABELS, INBOX, RELEASES}
     ]
+
+
+def stale(repo: str, issues: list[dict], before: str, events) -> list[dict]:
+    """Issues Ashigaru itself left `triaged` or `needs-info` before `before`, to triage again.
+
+    For after a classifier fix: verdicts the old prompt got wrong are not
+    revisited otherwise, since the label hides the issue from `candidates`. A
+    state label a person set is their call and stays. `events(repo, number)`
+    returns the issue's event history.
+    """
+    found = []
+    for issue in issues:
+        labels = {label["name"] for label in issue.get("labels", [])}
+        held = labels & {TRIAGED, NEEDS_INFO}
+        if "pull_request" in issue or not held or labels & {READY_FOR_TRIAGE, READY_TO_CODE}:
+            continue
+        set_by = [
+            event for event in events(repo, issue["number"])
+            if event.get("event") == "labeled" and event["label"]["name"] in held
+        ]  # fmt: skip
+        if (
+            set_by
+            and (set_by[-1].get("actor") or {}).get("type") == "Bot"
+            and set_by[-1]["created_at"] < before
+        ):
+            found.append({"repo": repo, "number": issue["number"], "created_at": issue["created_at"]})
+    return found
 
 
 def select(found: list[dict], limit: int) -> list[dict]:
@@ -120,6 +149,10 @@ def requeue(item: dict) -> None:
     gh("issue", "edit", issue, "--repo", repo, "--add-label", READY_TO_CODE)
 
 
+def events(repo: str, number: int) -> list[dict]:
+    return api_pages(f"repos/{repo}/issues/{number}/events?per_page=100")
+
+
 def open_pulls(repo: str) -> list[dict]:
     listing = gh("pr", "list", "--repo", repo, "--state", "open", "--limit", "100",
                  "--json", PULL_FIELDS)  # fmt: skip
@@ -175,6 +208,11 @@ def main() -> int:
     parser.add_argument("--code-per-hour", default=5, type=int, help="fixes started per hour, fleet-wide")
     parser.add_argument("--bot", default="app/ashigaru-crunchtools")
     parser.add_argument("--inbox-repo", default="", help="repo whose inbox issue lists what waits on people")
+    parser.add_argument(
+        "--retriage-before",
+        default="",
+        help="also queue issues Ashigaru labeled triaged/needs-info before this date",
+    )
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
 
@@ -197,6 +235,8 @@ def main() -> int:
         issues = api(f"repos/{repo}/{OLDEST_OPEN}")
         pulls = open_pulls(repo)
         untriaged += candidates(repo, issues)
+        if args.retriage_before:
+            untriaged += stale(repo, issues, args.retriage_before, events)
         stuck += conflicted(repo, pulls, args.bot)
         ready += waiting(repo, issues, {pull["headRefName"] for pull in pulls}, stamp(now - SETTLE))
         # can_write is cached per repo and account, so each author costs one lookup per sweep.

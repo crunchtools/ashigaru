@@ -7,7 +7,19 @@ import argparse
 import json
 import sys
 
-from common import NEEDS_INFO, READY_TO_CODE, TRIAGED, api, api_pages, gh, publishable, set_output, set_state
+from common import (
+    NEEDS_INFO,
+    READY_FOR_TRIAGE,
+    READY_TO_CODE,
+    TRIAGED,
+    api,
+    api_pages,
+    ensure_labels,
+    gh,
+    publishable,
+    set_output,
+    set_state,
+)
 
 CATEGORIES = ("bug", "documentation", "performance", "feature", "question", "unclear")
 TYPE_LABEL = {
@@ -127,6 +139,9 @@ def main() -> int:
     )
     add, remove = type_labels(str(result.get("category", "")), history, current)
     set_state(args.repo, args.issue, state, extra=add, remove=remove)
+    if state == NEEDS_INFO:
+        # The comment tells the reader to add this label; most repos have never had it.
+        ensure_labels(args.repo, [READY_FOR_TRIAGE])
     now = starts_now(state, args.queue)
     if note:
         next_step = note

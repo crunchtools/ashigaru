@@ -1,6 +1,6 @@
 """The sweep's limits are the budget: triage per run, fixes per hour (profile IV)."""
 
-from sweep import MAX_LIMIT, candidates, conflicted, remaining, select, waiting
+from sweep import MAX_LIMIT, candidates, conflicted, remaining, select, stale, waiting
 
 
 def issue(number, created, author="maintainer", labels=(), **overrides):
@@ -115,3 +115,40 @@ def test_the_hourly_budget_is_what_the_past_hour_left():
     assert remaining(per_hour, 2) == per_hour - 2
     assert remaining(per_hour, 9) == 0
     assert remaining(MAX_LIMIT + 50, 0) == MAX_LIMIT
+
+
+FIX = "2026-10-16"
+
+
+def labeled(name, actor_type, at):
+    return {"event": "labeled", "label": {"name": name}, "actor": {"type": actor_type}, "created_at": at}
+
+
+def test_a_verdict_ashigaru_gave_before_the_fix_is_triaged_again():
+    """mcp-pcloud#40: a bug labeled a feature before 2.7.0, never revisited."""
+    history = {40: [labeled("enhancement", "Bot", "2026-10-11"), labeled("triaged", "Bot", "2026-10-11")]}
+    issues = [issue(40, "2026-10-11", labels=("enhancement", "triaged"))]
+    assert [item["number"] for item in stale("o/r", issues, FIX, lambda repo, n: history[n])] == [40]
+
+
+def test_newer_verdicts_and_a_persons_label_are_left_alone():
+    history = {
+        1: [labeled("needs-info", "Bot", "2026-10-17")],
+        2: [labeled("triaged", "Bot", "2026-10-01"), labeled("triaged", "User", "2026-10-02")],
+    }
+    issues = [issue(1, "2026-10-01", labels=("needs-info",)), issue(2, "2026-10-01", labels=("triaged",))]
+    assert stale("o/r", issues, FIX, lambda repo, n: history[n]) == []
+
+
+def test_issues_already_queued_or_unlabeled_cost_no_lookup():
+    issues = [
+        issue(1, "2026-10-01"),
+        issue(2, "2026-10-01", labels=("triaged", "ready-for-triage")),
+        issue(3, "2026-10-01", labels=("ready-to-code",)),
+        issue(4, "2026-10-01", labels=("triaged",), pr=True),
+    ]
+
+    def events(repo, number):
+        raise AssertionError(f"looked up #{number}")
+
+    assert stale("o/r", issues, FIX, events) == []

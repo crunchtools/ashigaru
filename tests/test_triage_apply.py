@@ -162,7 +162,8 @@ def test_every_category_with_a_meaning_gets_a_type_label():
 
 
 def run_main(monkeypatch, result, labels, history):
-    calls = {"pages": [], "state": None, "comment": None, "outputs": {}}
+    calls = {"pages": [], "state": None, "comment": None, "outputs": {}, "ensured": []}
+    monkeypatch.setattr(triage_apply, "ensure_labels", lambda repo, names: calls["ensured"].extend(names))
     monkeypatch.setattr(triage_apply, "api", lambda path: {"labels": [{"name": n} for n in labels]})
 
     def pages(path):
@@ -195,3 +196,14 @@ def test_main_skips_the_event_history_when_no_type_label_is_present(monkeypatch)
     assert calls["pages"] == []
     assert calls["state"] == (READY_TO_CODE, ("bug",), ())
     assert calls["outputs"] == {"state": READY_TO_CODE, "auto_code": "true"}
+
+
+def test_main_creates_the_label_a_needs_info_comment_asks_for(monkeypatch):
+    calls = run_main(monkeypatch, verdict("question"), set(), [])
+    assert calls["state"][0] == NEEDS_INFO
+    assert calls["comment"].endswith(NEXT_STEP[NEEDS_INFO])
+    assert calls["ensured"] == ["ready-for-triage"]
+
+
+def test_main_creates_no_extra_label_for_other_verdicts(monkeypatch):
+    assert run_main(monkeypatch, verdict("bug"), set(), [])["ensured"] == []
