@@ -1,6 +1,9 @@
 """The sweep's limits are the budget: triage per run, fixes per hour (profile IV)."""
 
-from sweep import MAX_LIMIT, candidates, conflicted, remaining, select, stale, waiting
+import pytest
+
+import sweep
+from sweep import MAX_LIMIT, candidates, conflicted, cutoff, remaining, select, setters, stale, waiting
 
 
 def issue(number, created, author="maintainer", labels=(), **overrides):
@@ -120,24 +123,38 @@ def test_the_hourly_budget_is_what_the_past_hour_left():
 FIX = "2026-10-16"
 
 
-def labeled(name, actor_type, at):
-    return {"event": "labeled", "label": {"name": name}, "actor": {"type": actor_type}, "created_at": at}
+ASHIGARU = setters(BOT)
+
+
+def labeled(name, login, at):
+    return {"event": "labeled", "label": {"name": name}, "actor": {"login": login}, "created_at": at}
 
 
 def test_a_verdict_ashigaru_gave_before_the_fix_is_triaged_again():
     """mcp-pcloud#40: a bug labeled a feature before 2.7.0, never revisited."""
-    history = {40: [labeled("enhancement", "Bot", "2026-10-11"), labeled("triaged", "Bot", "2026-10-11")]}
+    history = {
+        40: [
+            labeled("enhancement", "github-actions[bot]", "2026-10-11T09:00:00Z"),
+            labeled("triaged", "github-actions[bot]", "2026-10-11T09:00:00Z"),
+        ]
+    }
     issues = [issue(40, "2026-10-11", labels=("enhancement", "triaged"))]
-    assert [item["number"] for item in stale("o/r", issues, FIX, lambda repo, n: history[n])] == [40]
+    assert [item["number"] for item in stale("o/r", issues, FIX, lambda repo, n: history[n], ASHIGARU)] == [
+        40
+    ]
 
 
 def test_newer_verdicts_and_a_persons_label_are_left_alone():
     history = {
-        1: [labeled("needs-info", "Bot", "2026-10-17")],
-        2: [labeled("triaged", "Bot", "2026-10-01"), labeled("triaged", "User", "2026-10-02")],
+        1: [labeled("needs-info", "github-actions[bot]", "2026-10-17T09:00:00Z")],
+        2: [
+            labeled("triaged", "github-actions[bot]", "2026-10-01T09:00:00Z"),
+            labeled("triaged", "fatherlinux", "2026-10-02T09:00:00Z"),
+        ],
+        3: [labeled("triaged", "other-automation[bot]", "2026-10-01T09:00:00Z")],
     }
-    issues = [issue(1, "2026-10-01", labels=("needs-info",)), issue(2, "2026-10-01", labels=("triaged",))]
-    assert stale("o/r", issues, FIX, lambda repo, n: history[n]) == []
+    issues = [issue(n, "2026-10-01", labels=(history[n][-1]["label"]["name"],)) for n in history]
+    assert stale("o/r", issues, FIX, lambda repo, n: history[n], ASHIGARU) == []
 
 
 def test_issues_already_queued_or_unlabeled_cost_no_lookup():
@@ -151,4 +168,27 @@ def test_issues_already_queued_or_unlabeled_cost_no_lookup():
     def events(repo, number):
         raise AssertionError(f"looked up #{number}")
 
-    assert stale("o/r", issues, FIX, events) == []
+    assert stale("o/r", issues, FIX, events, ASHIGARU) == []
+
+
+@pytest.mark.parametrize(
+    ("at", "queued"),
+    [("2026-10-15T23:59:59Z", True), ("2026-10-16T00:00:00Z", False), ("2026-10-16T18:00:00Z", False)],
+)
+def test_the_cutoff_date_itself_is_not_before_it(at, queued):
+    history = [labeled("triaged", "ashigaru-crunchtools[bot]", at)]
+    issues = [issue(1, "2026-10-01", labels=("triaged",))]
+    assert bool(stale("o/r", issues, FIX, lambda repo, n: history, ASHIGARU)) is queued
+
+
+@pytest.mark.parametrize("value", ["2026-99-99", "yesterday", "2026-10-16T00:00"])
+def test_a_malformed_cutoff_is_refused(value):
+    with pytest.raises(ValueError):
+        cutoff(value)
+
+
+def test_events_reads_the_issue_event_history(monkeypatch):
+    asked = []
+    monkeypatch.setattr(sweep, "api_pages", lambda path: asked.append(path) or [])
+    assert sweep.events("o/r", 40) == []
+    assert asked == ["repos/o/r/issues/40/events?per_page=100"]

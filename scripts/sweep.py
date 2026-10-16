@@ -13,7 +13,7 @@ import argparse
 import json
 import subprocess
 import sys
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 
 import inbox
 from common import (
@@ -60,13 +60,13 @@ def candidates(repo: str, issues: list[dict]) -> list[dict]:
     ]
 
 
-def stale(repo: str, issues: list[dict], before: str, events) -> list[dict]:
+def stale(repo: str, issues: list[dict], before: str, events, setters: set[str]) -> list[dict]:
     """Issues Ashigaru itself left `triaged` or `needs-info` before `before`, to triage again.
 
     For after a classifier fix: verdicts the old prompt got wrong are not
     revisited otherwise, since the label hides the issue from `candidates`. A
-    state label a person set is their call and stays. `events(repo, number)`
-    returns the issue's event history.
+    state label anyone outside `setters` (Ashigaru's logins) set stays.
+    `events(repo, number)` returns the issue's event history.
     """
     found = []
     for issue in issues:
@@ -80,7 +80,7 @@ def stale(repo: str, issues: list[dict], before: str, events) -> list[dict]:
         ]  # fmt: skip
         if (
             set_by
-            and (set_by[-1].get("actor") or {}).get("type") == "Bot"
+            and (set_by[-1].get("actor") or {}).get("login") in setters
             and set_by[-1]["created_at"] < before
         ):
             found.append({"repo": repo, "number": issue["number"], "created_at": issue["created_at"]})
@@ -149,6 +149,16 @@ def requeue(item: dict) -> None:
     gh("issue", "edit", issue, "--repo", repo, "--add-label", READY_TO_CODE)
 
 
+def setters(bot: str) -> set[str]:
+    """Who applies Ashigaru's verdicts: the triage workflow's token, or the app's."""
+    return {"github-actions[bot]", f"{bot.removeprefix('app/')}[bot]"}
+
+
+def cutoff(value: str) -> str:
+    """A `--retriage-before` date, checked: a malformed one would compare as any string."""
+    return date.fromisoformat(value).isoformat()
+
+
 def events(repo: str, number: int) -> list[dict]:
     return api_pages(f"repos/{repo}/issues/{number}/events?per_page=100")
 
@@ -211,6 +221,7 @@ def main() -> int:
     parser.add_argument(
         "--retriage-before",
         default="",
+        type=cutoff,
         help="also queue issues Ashigaru labeled triaged/needs-info before this date",
     )
     parser.add_argument("--dry-run", action="store_true")
@@ -236,7 +247,7 @@ def main() -> int:
         pulls = open_pulls(repo)
         untriaged += candidates(repo, issues)
         if args.retriage_before:
-            untriaged += stale(repo, issues, args.retriage_before, events)
+            untriaged += stale(repo, issues, args.retriage_before, events, setters(args.bot))
         stuck += conflicted(repo, pulls, args.bot)
         ready += waiting(repo, issues, {pull["headRefName"] for pull in pulls}, stamp(now - SETTLE))
         # can_write is cached per repo and account, so each author costs one lookup per sweep.
