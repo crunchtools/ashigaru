@@ -20,6 +20,9 @@
     "needs_info": {
       "type": "boolean"
     },
+    "needs_decision": {
+      "type": "boolean"
+    },
     "summary": {
       "type": "string"
     }
@@ -28,6 +31,7 @@
     "category",
     "confidence",
     "needs_info",
+    "needs_decision",
     "summary"
   ],
   "additionalProperties": false

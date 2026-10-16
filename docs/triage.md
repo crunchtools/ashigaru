@@ -12,11 +12,14 @@ Issues filed in passing pile up unlabeled, and nobody goes back to sort them. So
 
 | Verdict | Label | What happens next |
 |---------|-------|-------------------|
-| `bug`, `documentation` or `performance`, confidence at or above `min_confidence` | `ready-to-code` | The caller chains [code](code.md) in the same run |
+| `bug`, `documentation` or `performance`, confidence at or above `min_confidence`, no `needs_decision` | `ready-to-code` | The caller chains [code](code.md) in the same run |
+| Any category with `needs_decision` | `triaged` | Waits. Answer the question in a comment, then add `ready-to-code`; the code agent reads maintainer comments |
 | `feature`, or any category below the threshold, or a malformed verdict | `triaged` | Waits. Add `ready-to-code` to have it fixed |
 | `question` or `unclear`, or a bug-class issue with `needs_info` | `needs-info` | Waits. Answer, then add `ready-for-triage` |
 
-The matching type label (`bug`, `documentation`, `performance`, `enhancement` for a feature, `question`) is added, and created when the repository lacks it.
+The verdict answers two questions separately. `category` says what the issue is: a bug is a bug even when its fix needs a design choice. `needs_decision` says whether a maintainer has to choose before code is written: several reasonable fixes, a change to an API, schema or visible behaviour, or production systems the agent cannot reach. Before 2.7.0 one field did both jobs, so bugs that needed a decision were filed as features.
+
+The matching type label (`bug`, `documentation`, `performance`, `enhancement` for a feature, `question`) is added, and created when the repository lacks it. A type label a person put on the issue wins: Ashigaru adds none of its own and removes any it added earlier that disagree.
 
 Triage runs when an issue is opened, and when `ready-for-triage` is added.
 
