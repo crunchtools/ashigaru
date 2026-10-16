@@ -36,6 +36,10 @@ on:
         description: "Fixes to start per hour across all repos."
         type: number
         default: 5
+      retriage_before:
+        description: "Also queue issues Ashigaru labeled triaged or needs-info before this UTC date (YYYY-MM-DD), after a triage fix."
+        type: string
+        default: ""
       dry_run:
         description: "List what would be queued without labeling."
         type: boolean
@@ -79,10 +83,12 @@ jobs:
           # A schedule has no inputs; a manual 0 stays 0.
           LIMIT: ${{ github.event_name == 'schedule' && 20 || inputs.limit }}
           CODE_PER_HOUR: ${{ github.event_name == 'schedule' && 5 || inputs.code_per_hour }}
+          RETRIAGE_BEFORE: ${{ inputs.retriage_before }}
           DRY_RUN: ${{ inputs.dry_run }}
         run: |
           args=(--org "$GITHUB_REPOSITORY_OWNER" --limit "$LIMIT" --code-per-hour "$CODE_PER_HOUR"
                 --inbox-repo "$GITHUB_REPOSITORY")
+          if [ -n "$RETRIAGE_BEFORE" ]; then args+=(--retriage-before "$RETRIAGE_BEFORE"); fi
           if [ "$DRY_RUN" = "true" ]; then args+=(--dry-run); fi
           python3 scripts/sweep.py "${args[@]}"
 
@@ -120,9 +126,11 @@ jobs:
         id: plan
         env:
           GH_TOKEN: ${{ steps.reader.outputs.token }}
+          RETRIAGE_BEFORE: ${{ inputs.retriage_before }}
           DRY_RUN: ${{ inputs.dry_run }}
         run: |
           args=(--plan "$RUNNER_TEMP/releases.json" --org "$GITHUB_REPOSITORY_OWNER")
+          if [ -n "$RETRIAGE_BEFORE" ]; then args+=(--retriage-before "$RETRIAGE_BEFORE"); fi
           if [ "$DRY_RUN" = "true" ]; then args+=(--dry-run); fi
           python3 scripts/release.py plan "${args[@]}"
 
@@ -150,9 +158,11 @@ jobs:
         if: ${{ !cancelled() && steps.plan.outcome == 'success' }}
         env:
           GH_TOKEN: ${{ steps.reader.outputs.token }}
+          RETRIAGE_BEFORE: ${{ inputs.retriage_before }}
           DRY_RUN: ${{ inputs.dry_run }}
         run: |
           args=(--plan "$RUNNER_TEMP/releases.json" --repo "$GITHUB_REPOSITORY")
+          if [ -n "$RETRIAGE_BEFORE" ]; then args+=(--retriage-before "$RETRIAGE_BEFORE"); fi
           if [ "$DRY_RUN" = "true" ]; then args+=(--dry-run); fi
           python3 scripts/release.py record "${args[@]}"
 

@@ -162,7 +162,8 @@ def test_every_category_with_a_meaning_gets_a_type_label():
 
 
 def run_main(monkeypatch, result, labels, history):
-    calls = {"pages": [], "state": None, "comment": None, "outputs": {}}
+    calls = {"pages": [], "state": None, "comment": None, "outputs": {}, "ensured": []}
+    monkeypatch.setattr(triage_apply, "ensure_labels", lambda repo, names: calls["ensured"].extend(names))
     monkeypatch.setattr(triage_apply, "api", lambda path: {"labels": [{"name": n} for n in labels]})
 
     def pages(path):
@@ -195,3 +196,10 @@ def test_main_skips_the_event_history_when_no_type_label_is_present(monkeypatch)
     assert calls["pages"] == []
     assert calls["state"] == (READY_TO_CODE, ("bug",), ())
     assert calls["outputs"] == {"state": READY_TO_CODE, "auto_code": "true"}
+
+
+@pytest.mark.parametrize("category", ["question", "feature", "bug"])
+def test_main_creates_the_labels_its_comment_tells_the_reader_to_add(monkeypatch, category):
+    """43 of 62 repos lacked ready-for-triage and 54 lacked ready-to-code, so the next step failed."""
+    calls = run_main(monkeypatch, verdict(category), set(), [])
+    assert calls["ensured"] == ["ready-for-triage", "ready-to-code"]
