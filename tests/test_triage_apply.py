@@ -198,12 +198,8 @@ def test_main_skips_the_event_history_when_no_type_label_is_present(monkeypatch)
     assert calls["outputs"] == {"state": READY_TO_CODE, "auto_code": "true"}
 
 
-def test_main_creates_the_label_a_needs_info_comment_asks_for(monkeypatch):
-    calls = run_main(monkeypatch, verdict("question"), set(), [])
-    assert calls["state"][0] == NEEDS_INFO
-    assert calls["comment"].endswith(NEXT_STEP[NEEDS_INFO])
-    assert calls["ensured"] == ["ready-for-triage"]
-
-
-def test_main_creates_no_extra_label_for_other_verdicts(monkeypatch):
-    assert run_main(monkeypatch, verdict("bug"), set(), [])["ensured"] == []
+@pytest.mark.parametrize("category", ["question", "feature", "bug"])
+def test_main_creates_the_labels_its_comment_tells_the_reader_to_add(monkeypatch, category):
+    """43 of 62 repos lacked ready-for-triage and 54 lacked ready-to-code, so the next step failed."""
+    calls = run_main(monkeypatch, verdict(category), set(), [])
+    assert calls["ensured"] == ["ready-for-triage", "ready-to-code"]

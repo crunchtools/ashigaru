@@ -10,7 +10,7 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
-- A `needs-info` verdict creates the `ready-for-triage` label before its comment tells the reader to add it. Labels were created only on first use, so 43 of 62 enrolled repositories lacked it and the documented way back into triage failed with "label not found".
+- Every triage verdict creates `ready-for-triage` and `ready-to-code` before its comment tells the reader to add one. Labels were created only on first use, so 43 of 62 enrolled repositories lacked `ready-for-triage` and 54 lacked `ready-to-code`, and the next step a triage comment gave failed with "label not found".
 - Verdicts given before a triage fix can be revisited. A manual sweep run with `retriage_before` set to a date also queues issues Ashigaru labeled `triaged` or `needs-info` before it. Before, the label hid them from the sweep for good: mcp-pcloud#40, a bug labeled a feature before 2.7.0, never reached the code agent.
 
 ## [2.7.0] - 2026-10-16
