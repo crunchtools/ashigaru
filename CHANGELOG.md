@@ -6,6 +6,11 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- Triage separates what an issue is from whether Ashigaru can fix it alone. The verdict has a new field, `needs_decision`, set when a maintainer must choose before code is written: several reasonable fixes, a change to an API, schema or visible behaviour, or production systems the agent cannot reach. Such an issue keeps its real category, is labeled `triaged`, and its comment says to answer the question and add `ready-to-code`. Before, the prompt told the agent to call anything involving a design choice a feature, so bugs were relabeled `enhancement` (rotv#770: a stale database flag on 612 places, filed as a bug, came back as "feature (60%)").
+- A type label a person put on an issue wins. Ashigaru no longer adds `enhancement` next to a reporter's `bug`; it removes a type label it added itself when a person's disagrees, and replaces its own earlier label on re-triage.
+
 ## [2.6.0] - 2026-10-11
 
 ### Changed

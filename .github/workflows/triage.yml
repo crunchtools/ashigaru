@@ -6,7 +6,7 @@
 #   • apply    — no LLM. Turns the verdict into a label and a comment.
 #
 # bug / documentation / performance -> ready-to-code (the caller chains code.yml)
-# feature                           -> triaged       (waits for a maintainer)
+# feature, or needs_decision        -> triaged       (waits for a maintainer)
 # question / unclear / needs_info   -> needs-info
 #
 # The guard runs first and is plain code. An issue from an account without

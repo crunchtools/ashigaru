@@ -133,13 +133,17 @@ def ensure_labels(repo: str, names: list[str]) -> set[str]:
     return existing
 
 
-def set_state(repo: str, number: int, state: str, extra: tuple[str, ...] = ()) -> None:
-    """Give an issue or PR exactly one state label, plus the type labels in `extra`."""
+def set_state(
+    repo: str, number: int, state: str, extra: tuple[str, ...] = (), remove: tuple[str, ...] = ()
+) -> None:
+    """Give an issue or PR exactly one state label, plus the type labels in `extra`, minus `remove`."""
     existing = ensure_labels(repo, [state, *extra])
     add = [state, *(name for name in extra if name in existing)]
     current = {label["name"] for label in api(f"repos/{repo}/issues/{number}")["labels"]}
     args = ["issue", "edit", str(number), "--repo", repo, "--add-label", ",".join(add)]
-    drop = [name for name in STATE_LABELS if name != state and name in current]
+    drop = [
+        name for name in [*STATE_LABELS, *remove] if name != state and name not in add and name in current
+    ]
     if drop:
         args += ["--remove-label", ",".join(drop)]
     gh(*args)
