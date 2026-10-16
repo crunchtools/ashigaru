@@ -12,7 +12,7 @@ Issues filed in passing pile up unlabeled, and nobody goes back to sort them. So
 
 | Verdict | Label | What happens next |
 |---------|-------|-------------------|
-| `bug`, `documentation` or `performance`, confidence at or above `min_confidence` | `ready-to-code` | The caller chains [code](code.md) in the same run |
+| `bug`, `documentation` or `performance`, confidence at or above `min_confidence`, no `needs_decision` | `ready-to-code` | The caller chains [code](code.md) in the same run |
 | Any category with `needs_decision` | `triaged` | Waits. Answer the question in a comment, then add `ready-to-code`; the code agent reads maintainer comments |
 | `feature`, or any category below the threshold, or a malformed verdict | `triaged` | Waits. Add `ready-to-code` to have it fixed |
 | `question` or `unclear`, or a bug-class issue with `needs_info` | `needs-info` | Waits. Answer, then add `ready-for-triage` |

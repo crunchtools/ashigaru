@@ -134,7 +134,12 @@ def ensure_labels(repo: str, names: list[str]) -> set[str]:
 
 
 def set_state(
-    repo: str, number: int, state: str, extra: tuple[str, ...] = (), remove: tuple[str, ...] = ()
+    repo: str,
+    number: int,
+    state: str,
+    *,
+    extra: tuple[str, ...] = (),
+    remove: tuple[str, ...] = (),
 ) -> None:
     """Give an issue or PR exactly one state label, plus the type labels in `extra`, minus `remove`."""
     existing = ensure_labels(repo, [state, *extra])

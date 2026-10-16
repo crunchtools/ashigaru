@@ -1,7 +1,10 @@
 """Verdict to label: only confident bug-class verdicts reach the code agent."""
 
+import json
+
 import pytest
 
+import triage_apply
 from common import NEEDS_INFO, READY_TO_CODE, TRIAGED
 from triage_apply import (
     DECIDE,
@@ -156,3 +159,39 @@ def test_every_category_with_a_meaning_gets_a_type_label():
         "feature": "enhancement",
         "question": "question",
     }
+
+
+def run_main(monkeypatch, result, labels, history):
+    calls = {"pages": [], "state": None, "comment": None, "outputs": {}}
+    monkeypatch.setattr(triage_apply, "api", lambda path: {"labels": [{"name": n} for n in labels]})
+
+    def pages(path):
+        calls["pages"].append(path)
+        return history
+
+    def state(repo, number, label, *, extra=(), remove=()):
+        calls["state"] = (label, extra, remove)
+
+    monkeypatch.setattr(triage_apply, "api_pages", pages)
+    monkeypatch.setattr(triage_apply, "set_state", state)
+    monkeypatch.setattr(triage_apply, "gh", lambda *args: calls.update(comment=args[-1]))
+    monkeypatch.setattr(triage_apply, "set_output", lambda key, value: calls["outputs"].update({key: value}))
+    argv = ["triage_apply.py", "--repo", "o/r", "--issue", "770", "--result", json.dumps(result)]
+    monkeypatch.setattr("sys.argv", argv)
+    assert triage_apply.main() == 0
+    return calls
+
+
+def test_main_keeps_a_reporters_bug_label_and_asks_for_the_decision(monkeypatch):
+    history = [labeled("bug", "User"), labeled("enhancement", "Bot")]
+    calls = run_main(monkeypatch, verdict("bug", needs_decision=True), {"bug", "enhancement"}, history)
+    assert calls["state"] == (TRIAGED, (), ("enhancement",))
+    assert calls["comment"].endswith(DECIDE)
+    assert calls["outputs"] == {"state": TRIAGED, "auto_code": "false"}
+
+
+def test_main_skips_the_event_history_when_no_type_label_is_present(monkeypatch):
+    calls = run_main(monkeypatch, verdict("bug"), set(), [])
+    assert calls["pages"] == []
+    assert calls["state"] == (READY_TO_CODE, ("bug",), ())
+    assert calls["outputs"] == {"state": READY_TO_CODE, "auto_code": "true"}

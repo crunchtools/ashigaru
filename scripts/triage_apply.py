@@ -118,8 +118,13 @@ def main() -> int:
     auto = {name.strip() for name in args.auto_categories.split(",") if name.strip()}
     state, note = settle(decide(result, auto, args.min_confidence), args.trust)
 
-    history = api_pages(f"repos/{args.repo}/issues/{args.issue}/events?per_page=100")
     current = {label["name"] for label in api(f"repos/{args.repo}/issues/{args.issue}")["labels"]}
+    # Who set a type label matters only when one is there; most issues arrive with none.
+    history = (
+        api_pages(f"repos/{args.repo}/issues/{args.issue}/events")
+        if current & set(TYPE_LABEL.values())
+        else []
+    )
     add, remove = type_labels(str(result.get("category", "")), history, current)
     set_state(args.repo, args.issue, state, extra=add, remove=remove)
     now = starts_now(state, args.queue)
