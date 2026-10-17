@@ -25,9 +25,11 @@ Nothing is labeled, approved, merged or closed. The recommendation is an opinion
 - issues from outside contributors, each with its type and state labels;
 - pull requests labeled `needs-human`, where Ashigaru stopped after five rounds;
 - [release](release.md) pull requests that do not merge on their own;
-- a count of `needs-info` issues per repository.
+- a count of `needs-info` issues per repository;
+- issues labeled `ready-to-code` that closed as completed in the past seven days, which is what Ashigaru fixed;
+- open issues labeled `triaged` in the past seven days, which wait on a maintainer to add `ready-to-code` or close them.
 
-The body has no timestamps and names people without an `@`, so it is edited only when the list changes and never notifies anyone.
+The last two come from one GraphQL search of public repositories each, which also returns each issue's recent label events, so the triage date costs no extra request. The body has no timestamps and names people without an `@`, so it is edited only when the list changes, including when an item ages out of the week, and never notifies anyone.
 
 ## Example
 

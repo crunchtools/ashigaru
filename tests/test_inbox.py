@@ -5,13 +5,17 @@ from inbox import (
     MAX_LISTED,
     MAX_REVIEWS,
     due,
+    fixed,
     handed_over,
     held_releases,
     last_review,
     outside_issues,
     outside_pulls,
+    past_week,
+    recently_triaged,
     render,
     review_marker,
+    triaged_at,
     unanswered,
 )
 
@@ -205,3 +209,55 @@ def test_a_pull_request_whose_author_is_gone_is_not_listed():
     orphan = pull(1)
     orphan["author"] = None
     assert outside_pulls("o/r", [orphan], writes) == []
+
+
+def hit(number, repo="mcp-trove", labels=(), closed=None, events=()):
+    return {
+        "repository": {"nameWithOwner": f"o/{repo}"},
+        "number": number,
+        "title": f"Bug {number}",
+        "url": f"https://github.com/o/{repo}/issues/{number}",
+        "createdAt": "2026-10-01T09:00:00Z",
+        "closedAt": closed,
+        "labels": {"nodes": [{"name": name} for name in labels]},
+        "timelineItems": {"nodes": [{"createdAt": at, "label": {"name": name}} for name, at in events]},
+    }
+
+
+def test_fixes_are_listed_newest_first_with_the_day_they_closed():
+    done = fixed([hit(3, closed="2026-10-12T08:00:00Z"), hit(7, repo="rotv", closed="2026-10-15T08:00:00Z")])
+    assert [item["number"] for item in done] == [7, 3] and done[0]["repo"] == "o/rotv"
+    body = past_week(done, [])
+    assert "## Fixed by Ashigaru, past 7 days (2)" in body
+    assert (
+        "- [rotv#7](https://github.com/o/rotv/issues/7) `Bug 7`, opened 2026-10-01. Closed 2026-10-15."
+        in (body)
+    )
+
+
+def test_the_last_triaged_label_says_when_an_issue_was_triaged():
+    events = [("triaged", "2026-10-02T00:00:00Z"), ("bug", "2026-10-14T00:00:00Z"),
+              ("triaged", "2026-10-11T00:00:00Z")]  # fmt: skip
+    assert triaged_at(hit(1, events=events)) == "2026-10-11T00:00:00Z"
+    assert triaged_at(hit(1, events=[("bug", "2026-10-14T00:00:00Z")])) is None
+
+
+def test_only_issues_triaged_inside_the_window_are_listed_oldest_verdict_first():
+    nodes = [
+        hit(1, labels=("enhancement", "triaged"), events=[("triaged", "2026-10-14T00:00:00Z")]),
+        hit(2, events=[("triaged", "2026-10-10T00:00:00Z")]),
+        hit(3, events=[("triaged", "2026-10-01T00:00:00Z")]),  # updated lately, triaged before the window
+        hit(4),
+    ]
+    listed = recently_triaged(nodes, "2026-10-09T00:00:00Z")
+    assert [item["number"] for item in listed] == [2, 1]
+    body = past_week([], listed)
+    assert "## Triaged, past 7 days, still open (2)" in body
+    assert "`Bug 1`, opened 2026-10-01. Triaged 2026-10-14: enhancement." in body
+    assert "`Bug 2`, opened 2026-10-01. Triaged 2026-10-10." in body
+
+
+def test_an_empty_week_says_so():
+    body = past_week([], [])
+    assert "## Fixed by Ashigaru, past 7 days (0)\n\nNothing fixed." in body
+    assert "## Triaged, past 7 days, still open (0)\n\nNothing triaged." in body

@@ -17,6 +17,7 @@ from common import (
     NEEDS_HUMAN,
     NEEDS_INFO,
     STATE_LABELS,
+    TRIAGED,
     TYPE_LABELS,
     api,
     ensure_labels,
@@ -41,6 +42,8 @@ RELEASE_BRANCH = f"{BRANCH_PREFIX}release-"
 """Where a release pull request comes from; the version follows."""
 HANDED_OVER = "Labeled needs-human."
 HELD_RELEASE = "Release pull request with auto-merge off; merging it publishes the release."
+RECENT_DAYS = 7
+"""How far back the fixed and triaged lists look."""
 Writes = Callable[[str, str], bool]
 
 
@@ -145,6 +148,48 @@ def held_releases(repo: str, pulls: list[dict]) -> list[dict]:
     ]
 
 
+def found(node: dict, **extra: object) -> dict:
+    """An issue from a search as a list item."""
+    return {
+        "repo": node["repository"]["nameWithOwner"],
+        "number": node["number"],
+        "title": node["title"],
+        "url": node["url"],
+        "created_at": node["createdAt"],
+        **extra,
+    }
+
+
+def fixed(nodes: list[dict]) -> list[dict]:
+    """Issues cleared for the code agent that closed as completed. Newest first."""
+    done = [found(node, closed_at=node["closedAt"]) for node in nodes]
+    return sorted(done, key=lambda item: (item["closed_at"], item["repo"], item["number"]), reverse=True)
+
+
+def triaged_at(node: dict) -> str | None:
+    """When the issue was last labeled triaged, from its label events. None if it never was."""
+    events = node["timelineItems"]["nodes"]
+    return max((event["createdAt"] for event in events if event["label"]["name"] == TRIAGED), default=None)
+
+
+def recently_triaged(nodes: list[dict], since: str) -> list[dict]:
+    """Open issues labeled triaged since `since`, oldest verdict first: the ones sitting longest.
+
+    Search can only say an issue was updated in the window, which a comment does
+    too, so the label events decide.
+    """
+    recent = [
+        found(
+            node,
+            triaged_at=stamp,
+            labels=sorted({label["name"] for label in node["labels"]["nodes"]} & set(TYPE_LABELS)),
+        )
+        for node in nodes
+        if (stamp := triaged_at(node)) and stamp >= since
+    ]
+    return sorted(recent, key=lambda item: (item["triaged_at"], item["repo"], item["number"]))
+
+
 def unanswered(issues: list[dict]) -> int:
     """Issues in one repo that triage could not act on without an answer."""
     return sum(1 for issue in issues if "pull_request" not in issue and NEEDS_INFO in names(issue))
@@ -195,6 +240,11 @@ def verdict(review: dict | None) -> str:
     return "Ashigaru could not review it." if review else "Not reviewed yet."
 
 
+def kinds(item: dict) -> str:
+    """The type labels triage gave, after a colon, or nothing."""
+    return f": {', '.join(item['labels'])}" if item["labels"] else ""
+
+
 def section(title: str, rows: list[str], empty: str = "Nothing waiting.") -> list[str]:
     """A headed list with its count, cut to MAX_LISTED rows with a note of how many were left out."""
     shown = rows[:MAX_LISTED]
@@ -223,6 +273,24 @@ def render(pulls: list[dict], reviews: dict[str, dict | None], issues: list[dict
     )
     asked = [f"- {repo.split('/', 1)[-1]}: {count}" for repo, count in sorted(questions.items()) if count]
     lines += section("Issues waiting on an answer, by repo", asked)
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def past_week(done: list[dict], still_open: list[dict]) -> str:
+    """The tail of the inbox: the past week's fixes, and triage verdicts nobody has acted on.
+
+    These change as items age out of the window, the only clock in the body.
+    """
+    lines = section(
+        f"Fixed by Ashigaru, past {RECENT_DAYS} days",
+        [row(item, f"Closed {item['closed_at'][:10]}.") for item in done],
+        "Nothing fixed.",
+    )
+    lines += section(
+        f"Triaged, past {RECENT_DAYS} days, still open",
+        [row(item, f"Triaged {item['triaged_at'][:10]}{kinds(item)}.") for item in still_open],
+        "Nothing triaged.",
+    )
     return "\n".join(lines).rstrip() + "\n"
 
 

@@ -1,5 +1,7 @@
 """The sweep's limits are the budget: triage per run, fixes per hour (profile IV)."""
 
+import json
+
 import pytest
 
 import sweep
@@ -207,3 +209,26 @@ def test_events_reads_the_issue_event_history(monkeypatch):
     monkeypatch.setattr(sweep, "api_pages", lambda path: asked.append(path) or [])
     assert sweep.events("o/r", 40) == []
     assert asked == ["repos/o/r/issues/40/events?per_page=100"]
+
+
+def test_the_past_week_is_one_paginated_search_of_public_repos_per_list(monkeypatch):
+    calls = []
+    labeled = {"createdAt": "2026-10-12T00:00:00Z", "label": {"name": "triaged"}}
+    node = {"repository": {"nameWithOwner": "o/rotv"}, "number": 5, "title": "t", "url": "u",
+            "createdAt": "2026-10-01T00:00:00Z", "closedAt": None, "labels": {"nodes": []},
+            "timelineItems": {"nodes": [labeled]}}  # fmt: skip
+
+    def gh(*args):
+        calls.append(args)
+        page = {"data": {"search": {"nodes": [node] if "is:open" in args[-1] else []}}}
+        return json.dumps([page, {"data": {"search": {"nodes": []}}}])
+
+    monkeypatch.setattr(sweep, "gh", gh)
+    done, still_open = sweep.past_week("o", "2026-10-09T00:00:00Z")
+    assert done == [] and [item["number"] for item in still_open] == [5]
+    fixed_query, triaged_query = (call[-1] for call in calls)
+    assert all("--paginate" in call and "since=2026-10-09T00:00:00Z" in call for call in calls)
+    queries = [fixed_query, triaged_query]
+    assert all("org:o is:issue is:public" in query for query in queries)
+    assert "is:closed reason:completed label:ready-to-code closed:>=2026-10-09T00:00:00Z" in queries[0]
+    assert "is:open label:triaged updated:>=2026-10-09T00:00:00Z" in queries[1]
