@@ -161,7 +161,7 @@ def test_the_guard_is_told_which_stage_it_guards():
 
 def test_no_event_a_fork_can_fire_starts_a_review():
     assert set(load("review.yml")[True]) == {"workflow_call"}
-    assert set(load("sweep.yml")[True]) == {"schedule", "workflow_dispatch"}
+    assert set(load("sweep.yml")[True]) == {"workflow_dispatch"}
 
 
 def test_the_review_never_checks_out_the_pull_request():
