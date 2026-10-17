@@ -6,6 +6,12 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [2.7.2] - 2026-10-16
+
+### Fixed
+
+- The hourly sweep runs again. 2.7.1 checked `--retriage-before` as a date but left its default as an empty string, and argparse checks a string default too, so every scheduled run without the flag exited with "invalid cutoff value: ''".
+
 ## [2.7.1] - 2026-10-16
 
 ### Fixed
