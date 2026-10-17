@@ -6,6 +6,10 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- The inbox issue lists what Ashigaru fixed in the past seven days (issues labeled `ready-to-code` that closed as completed) and what it triaged in that time that is still open, so a fix and a verdict nobody acted on both reach the weekend report.
+
 ## [2.7.3] - 2026-10-16
 
 ### Fixed

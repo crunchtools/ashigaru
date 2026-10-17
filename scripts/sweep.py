@@ -141,6 +141,42 @@ def opened_since(org: str, bot: str, since: str) -> int:
     return int(gh("api", "-X", "GET", "search/issues", "-f", f"q={query}", "--jq", ".total_count"))
 
 
+SEARCH = """
+query($q: String!, $endCursor: String) {
+  search(type: ISSUE, query: $q, first: 100, after: $endCursor) {
+    pageInfo { hasNextPage endCursor }
+    nodes { ... on Issue {
+      number title url createdAt closedAt repository { nameWithOwner }
+      labels(first: 20) { nodes { name } }
+      timelineItems(last: 20, itemTypes: [LABELED_EVENT]) {
+        nodes { ... on LabeledEvent { createdAt label { name } } }
+      }
+    } }
+  }
+}
+"""
+"""Issues with their labels and recent label events, so triage dates cost no request per issue."""
+
+
+def search(query: str) -> list[dict]:
+    """Every issue a search finds, up to the thousand search allows."""
+    pages = json.loads(
+        gh("api", "graphql", "--paginate", "--slurp", "-f", f"query={SEARCH}", "-f", f"q={query}")
+    )
+    return [node for page in pages for node in page["data"]["search"]["nodes"]]
+
+
+def past_week(org: str, since: str) -> tuple[list[dict], list[dict]]:
+    """What Ashigaru fixed since `since`, and what it triaged since then that is still open.
+
+    Public repositories only: the inbox is a public issue.
+    """
+    scope = f"org:{org} is:issue is:public"
+    done = search(f"{scope} is:closed reason:completed label:{READY_TO_CODE} closed:>={since}")
+    touched = search(f"{scope} is:open label:{TRIAGED} updated:>={since}")
+    return inbox.fixed(done), inbox.recently_triaged(touched, since)
+
+
 def requeue(item: dict) -> None:
     """Send the issue back to the code agent. The label must go away first to fire again."""
     issue, repo = str(item["number"]), item["repo"]
@@ -280,7 +316,12 @@ def main() -> int:
         print(f"  review {item['repo']}#{item['number']}")
     set_output("reviews", json.dumps([] if args.dry_run else to_review))
     if args.inbox_repo and not args.dry_run:
-        body = inbox.render(visitors, reviews, reports, stopped, questions)
+        done, sorted_out = past_week(args.org, stamp(now - timedelta(days=inbox.RECENT_DAYS)))
+        body = (
+            inbox.render(visitors, reviews, reports, stopped, questions)
+            + "\n"
+            + inbox.past_week(done, sorted_out)
+        )
         print(f"sweep: inbox {inbox.publish(args.inbox_repo, body)}")
     return 0
 
