@@ -6,6 +6,10 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- A fix round turns auto-merge back on after it pushes. GitHub turns auto-merge off when the branch is pushed, so every pull request that needed a fix round sat green and unmerged (mcp-gitlab#39).
+
 ## [2.7.2] - 2026-10-16
 
 ### Fixed

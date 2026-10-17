@@ -1,7 +1,7 @@
 """What may become a pull request, and what may be pushed in a fix round."""
 
 from common import touches_protected
-from fix_publish import replies
+from fix_publish import next_step, replies
 from publish import commit_message, refusal, stale
 
 PATCH = "diff --git a/src/app.py b/src/app.py\n--- a/src/app.py\n+++ b/src/app.py\n@@ -1 +1 @@\n-a\n+b\n"
@@ -62,6 +62,18 @@ def test_not_a_bug_without_a_reason_is_not_answered():
 
 def test_dispositions_for_unknown_findings_are_ignored():
     assert replies(FINDINGS, [{"id": 99, "disposition": "not_a_bug", "reason": "r"}], "abc") == {}
+
+
+def test_a_round_that_pushed_turns_auto_merge_back_on():
+    assert next_step("abc123", 0, False) == "rearm"
+    assert next_step("abc123", 0, True) == "rearm"
+    assert next_step("abc123", 2, False) is None
+
+
+def test_a_round_that_changed_nothing_with_work_left_goes_to_a_human():
+    assert next_step(None, 1, False) == "hand_off"
+    assert next_step(None, 0, True) == "hand_off"
+    assert next_step(None, 0, False) is None
 
 
 def test_a_branch_with_no_open_pull_request_may_be_built():
