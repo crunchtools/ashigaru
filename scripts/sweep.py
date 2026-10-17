@@ -142,27 +142,27 @@ def opened_since(org: str, bot: str, since: str) -> int:
 
 
 SEARCH = """
-query($q: String!, $endCursor: String) {
+query($q: String!, $since: DateTime!, $endCursor: String) {
   search(type: ISSUE, query: $q, first: 100, after: $endCursor) {
     pageInfo { hasNextPage endCursor }
     nodes { ... on Issue {
       number title url createdAt closedAt repository { nameWithOwner }
       labels(first: 20) { nodes { name } }
-      timelineItems(last: 20, itemTypes: [LABELED_EVENT]) {
+      timelineItems(last: 100, since: $since, itemTypes: [LABELED_EVENT]) {
         nodes { ... on LabeledEvent { createdAt label { name } } }
       }
     } }
   }
 }
 """
-"""Issues with their labels and recent label events, so triage dates cost no request per issue."""
+"""Issues with their labels and the label events since the window opened, so triage dates cost no
+request per issue."""
 
 
-def search(query: str) -> list[dict]:
-    """Every issue a search finds, up to the thousand search allows."""
-    pages = json.loads(
-        gh("api", "graphql", "--paginate", "--slurp", "-f", f"query={SEARCH}", "-f", f"q={query}")
-    )
+def search(query: str, since: str) -> list[dict]:
+    """Every issue a search finds, up to the thousand search allows, with label events since `since`."""
+    pages = json.loads(gh("api", "graphql", "--paginate", "--slurp", "-f", f"query={SEARCH}",
+                          "-f", f"since={since}", "-f", f"q={query}"))  # fmt: skip
     return [node for page in pages for node in page["data"]["search"]["nodes"]]
 
 
@@ -172,8 +172,8 @@ def past_week(org: str, since: str) -> tuple[list[dict], list[dict]]:
     Public repositories only: the inbox is a public issue.
     """
     scope = f"org:{org} is:issue is:public"
-    done = search(f"{scope} is:closed reason:completed label:{READY_TO_CODE} closed:>={since}")
-    touched = search(f"{scope} is:open label:{TRIAGED} updated:>={since}")
+    done = search(f"{scope} is:closed reason:completed label:{READY_TO_CODE} closed:>={since}", since)
+    touched = search(f"{scope} is:open label:{TRIAGED} updated:>={since}", since)
     return inbox.fixed(done), inbox.recently_triaged(touched, since)
 
 

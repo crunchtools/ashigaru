@@ -227,7 +227,7 @@ def test_the_past_week_is_one_paginated_search_of_public_repos_per_list(monkeypa
     done, sorted_out = sweep.past_week("o", "2026-10-09T00:00:00Z")
     assert done == [] and [item["number"] for item in sorted_out] == [5]
     fixed_query, triaged_query = (call[-1] for call in calls)
-    assert all("--paginate" in call for call in calls)
+    assert all("--paginate" in call and "since=2026-10-09T00:00:00Z" in call for call in calls)
     queries = [fixed_query, triaged_query]
     assert all("org:o is:issue is:public" in query for query in queries)
     assert "is:closed reason:completed label:ready-to-code closed:>=2026-10-09T00:00:00Z" in queries[0]
