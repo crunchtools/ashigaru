@@ -148,7 +148,7 @@ def held_releases(repo: str, pulls: list[dict]) -> list[dict]:
     ]
 
 
-def found(node: dict, **extra: str) -> dict:
+def found(node: dict, **extra: object) -> dict:
     """An issue from a search as a list item."""
     return {
         "repo": node["repository"]["nameWithOwner"],
@@ -276,7 +276,7 @@ def render(pulls: list[dict], reviews: dict[str, dict | None], issues: list[dict
     return "\n".join(lines).rstrip() + "\n"
 
 
-def past_week(done: list[dict], sorted_out: list[dict]) -> str:
+def past_week(done: list[dict], still_open: list[dict]) -> str:
     """The tail of the inbox: the past week's fixes, and triage verdicts nobody has acted on.
 
     These change as items age out of the window, the only clock in the body.
@@ -288,7 +288,7 @@ def past_week(done: list[dict], sorted_out: list[dict]) -> str:
     )
     lines += section(
         f"Triaged, past {RECENT_DAYS} days, still open",
-        [row(item, f"Triaged {item['triaged_at'][:10]}{kinds(item)}.") for item in sorted_out],
+        [row(item, f"Triaged {item['triaged_at'][:10]}{kinds(item)}.") for item in still_open],
         "Nothing triaged.",
     )
     return "\n".join(lines).rstrip() + "\n"

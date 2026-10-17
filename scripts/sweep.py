@@ -316,11 +316,11 @@ def main() -> int:
         print(f"  review {item['repo']}#{item['number']}")
     set_output("reviews", json.dumps([] if args.dry_run else to_review))
     if args.inbox_repo and not args.dry_run:
-        done, sorted_out = past_week(args.org, stamp(now - timedelta(days=inbox.RECENT_DAYS)))
+        done, still_open = past_week(args.org, stamp(now - timedelta(days=inbox.RECENT_DAYS)))
         body = (
             inbox.render(visitors, reviews, reports, stopped, questions)
             + "\n"
-            + inbox.past_week(done, sorted_out)
+            + inbox.past_week(done, still_open)
         )
         print(f"sweep: inbox {inbox.publish(args.inbox_repo, body)}")
     return 0

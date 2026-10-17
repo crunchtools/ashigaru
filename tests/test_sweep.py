@@ -224,8 +224,8 @@ def test_the_past_week_is_one_paginated_search_of_public_repos_per_list(monkeypa
         return json.dumps([page, {"data": {"search": {"nodes": []}}}])
 
     monkeypatch.setattr(sweep, "gh", gh)
-    done, sorted_out = sweep.past_week("o", "2026-10-09T00:00:00Z")
-    assert done == [] and [item["number"] for item in sorted_out] == [5]
+    done, still_open = sweep.past_week("o", "2026-10-09T00:00:00Z")
+    assert done == [] and [item["number"] for item in still_open] == [5]
     fixed_query, triaged_query = (call[-1] for call in calls)
     assert all("--paginate" in call and "since=2026-10-09T00:00:00Z" in call for call in calls)
     queries = [fixed_query, triaged_query]
