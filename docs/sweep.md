@@ -8,11 +8,11 @@ Triage runs when an issue is opened, so issues that predate enrollment would nev
 
 ## How it works
 
-`sweep.yml` runs on a schedule in the Ashigaru repository only. `scripts/sweep.py`:
+`sweep.yml` runs in the Ashigaru repository only, dispatched hourly by Kagetora's "Ashigaru Sweep Trigger" Hermes job; GitHub's own schedule fired only every four or five hours. `scripts/sweep.py`:
 
 1. lists the organization's public, non-archived repositories and keeps those that carry `.github/workflows/ashigaru.yml`;
 2. reads each one's hundred oldest open issues and keeps those a person wrote that carry none of Ashigaru's labels;
-3. walks them oldest first across all repositories and adds `ready-for-triage` to the first `limit` (20 on the schedule, never more than 20). Issues from outside contributors are included; the [guard](authority.md) keeps them to triage.
+3. walks them oldest first across all repositories and adds `ready-for-triage` to the first `limit` (20 by default, never more than 20). Issues from outside contributors are included; the [guard](authority.md) keeps them to triage.
 
 **Re-triage after a triage fix.** An issue Ashigaru already labeled `triaged` or `needs-info` is not queued again, so a verdict the old prompt got wrong stays wrong. A manual run with `retriage_before` set to a date (`YYYY-MM-DD`, UTC) also queues issues whose state label Ashigaru itself set before that date, under the same per-run limit. Run it once per 20 issues until it queues none. A state label a person set is left alone, and so is a type label a person set when the issue is triaged again ([triage](triage.md)).
 

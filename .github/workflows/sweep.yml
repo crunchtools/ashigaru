@@ -24,10 +24,8 @@
 name: Ashigaru sweep
 
 on:
-  # GitHub throttles this to every few hours. Kagetora's "Ashigaru Sweep
-  # Trigger" Hermes job dispatches it hourly; the schedule is the backstop.
-  schedule:
-    - cron: "17 * * * *"   # hourly
+  # No `schedule`: GitHub throttled it to every few hours. Kagetora's
+  # "Ashigaru Sweep Trigger" Hermes job dispatches this hourly.
   workflow_dispatch:
     inputs:
       limit:

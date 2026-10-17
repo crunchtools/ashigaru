@@ -12,7 +12,8 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
-- Only one sweep runs at a time. Kagetora now dispatches the sweep hourly from a Hermes monitor-mode job, because GitHub throttles the hourly schedule to every few hours; the schedule stays as a backstop, and two overlapping sweeps would each start a full hour of fixes.
+- Only one sweep runs at a time. Kagetora now dispatches the sweep hourly from a Hermes monitor-mode job, because GitHub throttles the hourly schedule to every few hours; two overlapping sweeps would each start a full hour of fixes.
+- The sweep has no GitHub `schedule` any more; Kagetora's Hermes job is its only trigger.
 
 ## [2.7.3] - 2026-10-16
 
