@@ -35,6 +35,20 @@ def replies(findings: list[dict], dispositions: list[dict], sha: str | None) -> 
     return out
 
 
+def next_step(sha: str | None, left: int, failed_checks: bool) -> str | None:
+    """What follows a round: a human, re-armed auto-merge, or nothing.
+
+    GitHub turns auto-merge off when the branch is pushed, so a round that
+    pushed and answered every finding turns it back on. One that pushed with
+    findings left waits for the next round.
+    """
+    if sha:
+        return None if left else "rearm"
+    if left or failed_checks:
+        return "hand_off"
+    return None
+
+
 def hand_off(repo: str, number: int, why: str) -> None:
     set_state(repo, number, NEEDS_HUMAN)
     gh("pr", "merge", str(number), "--repo", repo, "--disable-auto")
@@ -93,10 +107,13 @@ def main() -> int:
         f"{len(answered)} finding(s) answered, {left} left, "
         f"{'pushed ' + sha if sha else 'no code change'}.",
     )  # fmt: skip
-    if not sha and (left or collected["failed_checks"]):
+    step = next_step(sha, left, bool(collected["failed_checks"]))
+    if step == "hand_off":
         hand_off(
             args.repo, number, "The round changed no code and work remains, so another round would not help."
         )
+    elif step == "rearm":
+        gh("pr", "merge", str(number), "--repo", args.repo, "--auto", "--squash")
     return 0
 
 
