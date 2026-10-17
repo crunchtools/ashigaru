@@ -10,6 +10,10 @@ All notable changes to this project are documented here. The format follows
 
 - The inbox issue lists what Ashigaru fixed in the past seven days (issues labeled `ready-to-code` that closed as completed) and what it triaged in that time that is still open, so a fix and a verdict nobody acted on both reach the weekend report.
 
+### Changed
+
+- Only one sweep runs at a time. Kagetora now dispatches the sweep hourly from a Hermes monitor-mode job, because GitHub throttles the hourly schedule to every few hours; the schedule stays as a backstop, and two overlapping sweeps would each start a full hour of fixes.
+
 ## [2.7.3] - 2026-10-16
 
 ### Fixed

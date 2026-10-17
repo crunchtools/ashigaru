@@ -24,6 +24,8 @@
 name: Ashigaru sweep
 
 on:
+  # GitHub throttles this to every few hours. Kagetora's "Ashigaru Sweep
+  # Trigger" Hermes job dispatches it hourly; the schedule is the backstop.
   schedule:
     - cron: "17 * * * *"   # hourly
   workflow_dispatch:
@@ -46,6 +48,11 @@ on:
         default: false
 
 permissions: {}
+
+# One sweep at a time: two at once would each start a full hour of fixes.
+concurrency:
+  group: ashigaru-sweep
+  cancel-in-progress: false
 
 jobs:
   sweep:
