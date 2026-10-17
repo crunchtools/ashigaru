@@ -187,6 +187,21 @@ def test_a_malformed_cutoff_is_refused(value):
         cutoff(value)
 
 
+class Parsed(Exception):
+    """Raised by the first API call, so reaching it means the arguments parsed."""
+
+
+@pytest.mark.parametrize("extra", [[], ["--retriage-before", "2026-10-16"]])
+def test_the_sweep_starts_with_or_without_a_cutoff(monkeypatch, extra):
+    def first_call(path):
+        raise Parsed
+
+    monkeypatch.setattr(sweep, "api_pages", first_call)
+    monkeypatch.setattr("sys.argv", ["sweep.py", "--org", "o", *extra])
+    with pytest.raises(Parsed):
+        sweep.main()
+
+
 def test_events_reads_the_issue_event_history(monkeypatch):
     asked = []
     monkeypatch.setattr(sweep, "api_pages", lambda path: asked.append(path) or [])

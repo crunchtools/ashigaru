@@ -220,7 +220,9 @@ def main() -> int:
     parser.add_argument("--inbox-repo", default="", help="repo whose inbox issue lists what waits on people")
     parser.add_argument(
         "--retriage-before",
-        default="",
+        # None, not "": argparse runs `type` over a string default, and
+        # cutoff("") refuses it, which failed every scheduled sweep.
+        default=None,
         type=cutoff,
         help="also queue issues Ashigaru labeled triaged/needs-info before this date",
     )
