@@ -9,6 +9,7 @@ All notable changes to this project are documented here. The format follows
 ### Added
 
 - The inbox issue lists what Ashigaru fixed in the past seven days (issues labeled `ready-to-code` that closed as completed) and what it triaged in that time that is still open, so a fix and a verdict nobody acted on both reach the weekend report.
+- A fix commit and its pull request say "Reported by @login." when the issue came from someone without write access to the repository, so outside reporters get credit (mcp-trove#52 fixed mcp-trove#7 without naming its reporter). Bots and maintainers are not credited.
 
 ### Changed
 
