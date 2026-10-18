@@ -1,8 +1,10 @@
 """What may become a pull request, and what may be pushed in a fix round."""
 
+from unittest.mock import patch
+
 from common import touches_protected
 from fix_publish import next_step, replies
-from publish import commit_message, refusal, stale
+from publish import commit_message, credit, refusal, stale
 
 PATCH = "diff --git a/src/app.py b/src/app.py\n--- a/src/app.py\n+++ b/src/app.py\n@@ -1 +1 @@\n-a\n+b\n"
 WORKFLOW_PATCH = PATCH.replace("src/app.py", ".github/workflows/ci.yml")
@@ -36,6 +38,25 @@ def test_commit_message_closes_the_issue_and_carries_the_trailer():
     message = commit_message("Digest shows the wrong date", 12, "Off by one.")
     assert message.startswith("fix: Digest shows the wrong date (#12)\n")
     assert "Closes #12" in message and "Co-Authored-By:" in message
+    assert "Reported by" not in message
+
+
+def test_commit_message_thanks_the_reporter_before_closing():
+    message = commit_message("Digest shows the wrong date", 12, "Off by one.", "Reported by @someone.")
+    assert "Off by one.\n\nReported by @someone.\n\nCloses #12" in message
+
+
+def test_an_outside_reporter_is_credited():
+    with patch("publish.can_write", return_value=False):
+        assert credit("o/r", {"login": "someone", "type": "User"}) == "Reported by @someone."
+
+
+def test_maintainers_and_bots_are_not_credited():
+    with patch("publish.can_write", return_value=True):
+        assert credit("o/r", {"login": "fatherlinux", "type": "User"}) == ""
+    with patch("publish.can_write", return_value=False):
+        assert credit("o/r", {"login": "dependabot[bot]", "type": "Bot"}) == ""
+        assert credit("o/r", {}) == ""
 
 
 FINDINGS = [{"id": 1}, {"id": 2}, {"id": 3}]

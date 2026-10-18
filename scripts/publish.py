@@ -13,7 +13,17 @@ import subprocess
 import sys
 from pathlib import Path
 
-from common import BRANCH_PREFIX, NEEDS_HUMAN, api, gh, git, set_output, set_state, touches_protected
+from common import (
+    BRANCH_PREFIX,
+    NEEDS_HUMAN,
+    api,
+    can_write,
+    gh,
+    git,
+    set_output,
+    set_state,
+    touches_protected,
+)
 
 BOT_NAME = "ashigaru-crunchtools[bot]"
 BOT_EMAIL = "ashigaru-crunchtools[bot]@users.noreply.github.com"
@@ -35,8 +45,18 @@ def refusal(result: dict, patch: str) -> str | None:
     return None
 
 
-def commit_message(title: str, issue: int, summary: str) -> str:
-    return f"fix: {title} (#{issue})\n\n{summary}\n\nCloses #{issue}\n\n{TRAILER}\n"
+def credit(repo: str, author: dict) -> str:
+    """A thank-you line for an outside reporter, or "" for a bot or anyone with write access."""
+    login = str(author.get("login", ""))
+    if not login or author.get("type") == "Bot" or can_write(repo, login):
+        return ""
+    return f"Reported by @{login}."
+
+
+def commit_message(title: str, issue: int, summary: str, thanks: str = "") -> str:
+    """The fix commit's message; a non-empty `thanks` line goes just before `Closes #N`."""
+    closes = f"{thanks}\n\nCloses #{issue}" if thanks else f"Closes #{issue}"
+    return f"fix: {title} (#{issue})\n\n{summary}\n\n{closes}\n\n{TRAILER}\n"
 
 
 def hand_off(repo: str, issue: int, why: str) -> None:
@@ -97,7 +117,9 @@ def main() -> int:
         set_output("pr", "")
         return 0
 
-    title = api(f"repos/{args.repo}/issues/{args.issue}")["title"].strip()
+    found = api(f"repos/{args.repo}/issues/{args.issue}")
+    title = found["title"].strip()
+    thanks = credit(args.repo, found.get("user") or {})
     summary = str(result.get("summary", "")).strip() or "Automated fix."
     git("config", "user.name", BOT_NAME)
     git("config", "user.email", BOT_EMAIL)
@@ -108,14 +130,15 @@ def main() -> int:
         hand_off(args.repo, args.issue, "The fix no longer applies to the default branch.")
         set_output("pr", "")
         return 0
-    git("commit", "-m", commit_message(title, args.issue, summary))
+    git("commit", "-m", commit_message(title, args.issue, summary, thanks))
     git("push", "--force", "origin", branch)
 
     if open_prs:
         url = open_prs[0]["url"]
         gh("pr", "comment", url, "--body", REBUILT)
     else:
-        body = f"{summary}\n\nCloses #{args.issue}\n\n{FOOTER}\n"
+        closes = f"{thanks}\n\nCloses #{args.issue}" if thanks else f"Closes #{args.issue}"
+        body = f"{summary}\n\n{closes}\n\n{FOOTER}\n"
         url = announce(args.repo, branch, args.base, f"fix: {title} (#{args.issue})", body)
     print(f"publish: published {url}")
     set_output("pr", url)
