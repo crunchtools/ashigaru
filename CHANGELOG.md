@@ -6,6 +6,10 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- A run that was still in flight when Ashigaru's own pull request merged no longer marks the already-closed issue `needs-human` ("fix no longer applies"); it does nothing.
+
 ## [2.8.0] - 2026-10-20
 
 ### Added

@@ -73,6 +73,15 @@ def stale(open_prs: list[dict]) -> bool:
     return not open_prs or open_prs[0].get("mergeable") == CONFLICTING
 
 
+def landed(issue: dict, merged_prs: list[dict]) -> bool:
+    """True when the issue is closed and Ashigaru's own pull request for it has merged.
+
+    A run that started before that merge finds its patch already applied; that is
+    success, so it must not hand the issue to a human.
+    """
+    return issue.get("state") == "closed" and bool(merged_prs)
+
+
 def announce(repo: str, branch: str, base: str, title: str, body: str) -> str:
     """Open the pull request and turn on auto-merge. Returns its URL."""
     url = gh(
@@ -111,13 +120,20 @@ def main() -> int:
         print(f"publish: PR #{open_prs[0]['number']} is already open for {branch}; nothing to do")
         return 0
 
+    found = api(f"repos/{args.repo}/issues/{args.issue}")
+    merged = json.loads(gh("pr", "list", "--repo", args.repo, "--head", branch, "--state", "merged",
+                           "--json", "number"))  # fmt: skip
+    if landed(found, merged):
+        print(f"publish: issue #{args.issue} was already closed by a merged {branch}; nothing to do")
+        set_output("pr", "")
+        return 0
+
     why = refusal(result, patch)
     if why:
         hand_off(args.repo, args.issue, why)
         set_output("pr", "")
         return 0
 
-    found = api(f"repos/{args.repo}/issues/{args.issue}")
     title = found["title"].strip()
     thanks = credit(args.repo, found.get("user") or {})
     summary = str(result.get("summary", "")).strip() or "Automated fix."
