@@ -159,11 +159,76 @@ query($q: String!, $since: DateTime!, $endCursor: String) {
 request per issue."""
 
 
+DEFAULT_BRANCHES = """
+query($org: String!, $endCursor: String) {
+  organization(login: $org) {
+    repositories(first: 100, after: $endCursor, privacy: PUBLIC, isArchived: false,
+                 orderBy: {field: NAME, direction: ASC}) {
+      pageInfo { hasNextPage endCursor }
+      nodes {
+        nameWithOwner isArchived
+        defaultBranchRef { name target { ... on Commit { oid url statusCheckRollup { state
+          contexts(first: 50) { nodes {
+            ... on CheckRun { name conclusion detailsUrl }
+            ... on StatusContext { context state targetUrl }
+          } }
+        } } } }
+      }
+    }
+  }
+}
+"""
+"""Each public repository's default branch head and its check rollup, a hundred repositories a
+request. Public only: the inbox is a public issue."""
+WATCHED_REPO = "constitution"
+WATCHED_WORKFLOWS = ("fleet-drift.yml", "validate-cascade.yml")
+"""Run by hand or by dispatch, never on a push, so their result is not in any branch's rollup."""
+
+
+def graphql(query: str, **variables: str) -> list[dict]:
+    """The `data` of every page of a GraphQL query that pages on `$endCursor`."""
+    fields = [arg for name, value in variables.items() for arg in ("-f", f"{name}={value}")]
+    pages = json.loads(gh("api", "graphql", "--paginate", "--slurp", "-f", f"query={query}", *fields))
+    return [page["data"] for page in pages]
+
+
 def search(query: str, since: str) -> list[dict]:
     """Every issue a search finds, up to the thousand search allows, with label events since `since`."""
-    pages = json.loads(gh("api", "graphql", "--paginate", "--slurp", "-f", f"query={SEARCH}",
-                          "-f", f"since={since}", "-f", f"q={query}"))  # fmt: skip
-    return [node for page in pages for node in page["data"]["search"]["nodes"]]
+    return [node for page in graphql(SEARCH, since=since, q=query) for node in page["search"]["nodes"]]
+
+
+def last_run(repo: str, workflow: str) -> dict | None:
+    """The latest completed run of one workflow, or None if it never completed."""
+    runs = api(f"repos/{repo}/actions/workflows/{workflow}/runs?status=completed&per_page=1")
+    return next(iter(runs["workflow_runs"]), None)
+
+
+def red(org: str) -> tuple[str, int]:
+    """The inbox part listing red default branches and watched runs, and how many are red.
+
+    A failed read is named in the part, not raised: the rest of the inbox still updates.
+    """
+    unread: list[str] = []
+    try:
+        pages = graphql(DEFAULT_BRANCHES, org=org)
+        branches = inbox.red_branches(
+            [node for page in pages for node in page["organization"]["repositories"]["nodes"]]
+        )
+    except subprocess.CalledProcessError as error:
+        print(f"::warning::could not read the default branches: {error.stderr.strip()}")
+        branches, unread = [], ["the default branches"]
+    runs = []
+    repo = f"{org}/{WATCHED_REPO}"
+    for workflow in WATCHED_WORKFLOWS:
+        try:
+            run = last_run(repo, workflow)
+        except subprocess.CalledProcessError as error:
+            print(f"::warning::could not read {repo} {workflow}: {error.stderr.strip()}")
+            unread.append(f"{WATCHED_REPO} {workflow}")
+            continue
+        if failed := inbox.failed_run(repo, workflow, run):
+            runs.append(failed)
+    return inbox.red(branches, runs, unread), len(branches) + len(runs)
 
 
 def past_week(org: str, since: str) -> tuple[list[dict], list[dict]]:
@@ -247,6 +312,18 @@ def reviews_of(pulls: list[dict], bot: str) -> dict[str, dict | None]:
     }
 
 
+def keep_inbox(args: argparse.Namespace, since: str, waiting_on_people: str) -> None:
+    """Add the past week and what is red to the inbox, and publish it. A dry run prints the red part."""
+    broken, count = red(args.org)
+    print(f"sweep: {count} red on the default branch")
+    if args.dry_run:
+        print(broken)
+        return
+    done, still_open = past_week(args.org, since)
+    body = "\n".join([waiting_on_people, inbox.past_week(done, still_open), broken])
+    print(f"sweep: inbox {inbox.publish(args.inbox_repo, body)}")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--org", required=True)
@@ -315,14 +392,9 @@ def main() -> int:
     for item in to_review:
         print(f"  review {item['repo']}#{item['number']}")
     set_output("reviews", json.dumps([] if args.dry_run else to_review))
-    if args.inbox_repo and not args.dry_run:
-        done, still_open = past_week(args.org, stamp(now - timedelta(days=inbox.RECENT_DAYS)))
-        body = (
-            inbox.render(visitors, reviews, reports, stopped, questions)
-            + "\n"
-            + inbox.past_week(done, still_open)
-        )
-        print(f"sweep: inbox {inbox.publish(args.inbox_repo, body)}")
+    if args.inbox_repo:
+        waiting_on_people = inbox.render(visitors, reviews, reports, stopped, questions)
+        keep_inbox(args, stamp(now - timedelta(days=inbox.RECENT_DAYS)), waiting_on_people)
     return 0
 
 

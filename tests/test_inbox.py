@@ -5,6 +5,7 @@ from inbox import (
     MAX_LISTED,
     MAX_REVIEWS,
     due,
+    failed_run,
     fixed,
     handed_over,
     held_releases,
@@ -13,6 +14,8 @@ from inbox import (
     outside_pulls,
     past_week,
     recently_triaged,
+    red,
+    red_branches,
     render,
     review_marker,
     triaged_at,
@@ -261,3 +264,84 @@ def test_an_empty_week_says_so():
     body = past_week([], [])
     assert "## Fixed by Ashigaru, past 7 days (0)\n\nNothing fixed." in body
     assert "## Triaged, past 7 days, still open (0)\n\nNothing triaged." in body
+
+
+def repo_node(name, state, contexts=(), **overrides):
+    rollup = {"state": state, "contexts": {"nodes": list(contexts)}} if state else None
+    return {
+        "nameWithOwner": f"o/{name}",
+        "isArchived": overrides.get("archived", False),
+        "defaultBranchRef": {
+            "name": "main",
+            "target": {"oid": "abc1234def", "url": f"https://github.com/o/{name}/commit/abc1234def",
+                       "statusCheckRollup": rollup},
+        },
+    }  # fmt: skip
+
+
+def check(name, conclusion, url="https://github.com/o/r/actions/runs/1/job/2"):
+    return {"name": name, "conclusion": conclusion, "detailsUrl": url}
+
+
+def test_only_failed_or_errored_rollups_are_red():
+    repos = [
+        repo_node("green", "SUCCESS"),
+        repo_node("waiting", "PENDING"),
+        repo_node("expected", "EXPECTED"),
+        repo_node("unchecked", None),
+        repo_node("old", "FAILURE", archived=True),
+        repo_node("errored", "ERROR"),
+        repo_node("broken", "FAILURE"),
+        {"nameWithOwner": "o/empty", "isArchived": False, "defaultBranchRef": None},
+    ]
+    assert [item["repo"] for item in red_branches(repos)] == ["o/broken", "o/errored"]
+
+
+def test_a_red_branch_links_its_failed_checks_and_statuses_but_not_the_cancelled():
+    contexts = [
+        check("test (3.11)", "CANCELLED"),
+        check("test (3.12)", "FAILURE"),
+        check("lint", "SUCCESS"),
+        check("build", None),
+        {"context": "ci/legacy", "state": "ERROR", "targetUrl": "https://ci.example.com/9"},
+        {"context": "ci/ok", "state": "SUCCESS", "targetUrl": "https://ci.example.com/8"},
+    ]
+    body = red(red_branches([repo_node("mcp-x", "FAILURE", contexts)]), [], [])
+    assert body.startswith("## Red on the default branch (1)\n\n")
+    assert (
+        "- [mcp-x](https://github.com/o/mcp-x/commit/abc1234def) `main` at `abc1234`: failure. "
+        "Failing: [`test (3.12)`](https://github.com/o/r/actions/runs/1/job/2), "
+        "[`ci/legacy`](https://ci.example.com/9)."
+    ) in body
+
+
+def test_a_red_branch_with_no_failed_check_listed_still_says_where_to_look():
+    body = red(red_branches([repo_node("mcp-x", "FAILURE", [check("t", "CANCELLED")])]), [], [])
+    assert "failure. No check failed outright; see the commit." in body
+
+
+def test_a_strangers_check_name_and_link_stay_inert():
+    hostile = check("x` [click](http://evil) @maintainer\n![i](http://evil)", "FAILURE",
+                    url="https://evil.example/a) [more](http://evil")  # fmt: skip
+    line = red(red_branches([repo_node("r", "FAILURE", [hostile])]), [], []).splitlines()[2]
+    assert line.endswith("Failing: `x' [click](http://evil) @maintainer ![i](http://evil)`.")
+    assert "evil.example" not in line
+
+
+def test_a_watched_run_is_red_only_when_its_last_completed_run_failed():
+    run = {"conclusion": "failure", "html_url": "https://github.com/o/constitution/actions/runs/3",
+           "created_at": "2026-10-18T05:01:01Z"}  # fmt: skip
+    assert failed_run("o/constitution", "fleet-drift.yml", None) is None
+    assert failed_run("o/constitution", "fleet-drift.yml", {**run, "conclusion": "success"}) is None
+    assert failed_run("o/constitution", "fleet-drift.yml", {**run, "conclusion": "cancelled"}) is None
+    body = red([], [failed_run("o/constitution", "fleet-drift.yml", run)], [])
+    assert (
+        "- [constitution](https://github.com/o/constitution/actions/runs/3) `fleet-drift.yml`, "
+        "last run 2026-10-18: failure."
+    ) in body
+
+
+def test_nothing_red_says_so_and_what_could_not_be_read_is_named():
+    assert red([], [], []) == "## Red on the default branch (0)\n\nNothing red.\n"
+    body = red([], [], ["the default branches"])
+    assert "- Could not read the default branches; see the sweep log." in body

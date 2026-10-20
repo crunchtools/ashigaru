@@ -44,6 +44,17 @@ HANDED_OVER = "Labeled needs-human."
 HELD_RELEASE = "Release pull request with auto-merge off; merging it publishes the release."
 RECENT_DAYS = 7
 """How far back the fixed and triaged lists look."""
+RED_ROLLUP = {"FAILURE", "ERROR"}
+"""Rollup states that mean the default branch is red. PENDING and EXPECTED are not."""
+FAILED_CHECKS = {"FAILURE", "TIMED_OUT", "STARTUP_FAILURE", "ACTION_REQUIRED"}
+"""Check run conclusions listed as failing. CANCELLED is left out: a matrix that fails fast
+cancels its siblings, and listing them would bury the job that broke."""
+FAILED_STATUSES = {"FAILURE", "ERROR"}
+"""Commit status states listed as failing."""
+FAILED_RUNS = {"failure", "timed_out", "startup_failure", "action_required"}
+"""Workflow run conclusions, as REST spells them, that count as red."""
+LINKABLE = re.compile(r"https://[^\s()<>\[\]`]+")
+"""A check's link is set by whoever reported the check; anything else is shown without one."""
 Writes = Callable[[str, str], bool]
 
 
@@ -217,15 +228,20 @@ def by_age(item: dict) -> tuple[str, str, int]:
     return item["created_at"], item["repo"], item["number"]
 
 
+def plain(text: str) -> str:
+    """Someone else's text as one line for a code span, where links, images and mentions are inert."""
+    return " ".join(text.replace("`", "'").split())[:TITLE_LIMIT]
+
+
 def row(item: dict, note: str) -> str:
     """One line of the list.
 
-    The title is a stranger's text, so it is shown as a code span, where links,
-    images and mentions are inert. Logins carry no @, so an edit notifies nobody.
+    The title is a stranger's text, so it is shown as a code span. Logins carry
+    no @, so an edit notifies nobody.
     """
     name = item["repo"].split("/", 1)[-1]
     author = f", by {item['author']}" if "author" in item else ""
-    title = " ".join(item["title"].replace("`", "'").split())[:TITLE_LIMIT]
+    title = plain(item["title"])
     return (
         f"- [{name}#{item['number']}]({item['url']}) `{title}`{author}, "
         f"opened {item['created_at'][:10]}. {note}"
@@ -292,6 +308,86 @@ def past_week(done: list[dict], still_open: list[dict]) -> str:
         "Nothing triaged.",
     )
     return "\n".join(lines).rstrip() + "\n"
+
+
+def failing(contexts: list[dict]) -> list[dict]:
+    """The failed checks and statuses of a rollup, as names and links."""
+    found = []
+    for context in contexts:
+        if context.get("conclusion") in FAILED_CHECKS:
+            found.append({"name": context["name"], "url": context.get("detailsUrl")})
+        elif context.get("state") in FAILED_STATUSES:
+            found.append({"name": context["context"], "url": context.get("targetUrl")})
+    return found
+
+
+def red_branches(repos: list[dict]) -> list[dict]:
+    """Repositories whose default branch head has a failed or errored check rollup.
+
+    A repository with no default branch or no checks on its head is not red.
+    """
+    red = []
+    for repo in repos:
+        branch = repo.get("defaultBranchRef") or {}
+        commit = branch.get("target") or {}
+        rollup = commit.get("statusCheckRollup")
+        if repo.get("isArchived") or not rollup or rollup["state"] not in RED_ROLLUP:
+            continue
+        red.append(
+            {
+                "repo": repo["nameWithOwner"],
+                "branch": branch["name"],
+                "sha": commit["oid"],
+                "url": commit["url"],
+                "state": rollup["state"],
+                "checks": failing(rollup["contexts"]["nodes"]),
+            }
+        )
+    return sorted(red, key=lambda item: item["repo"])
+
+
+def failed_run(repo: str, workflow: str, run: dict | None) -> dict | None:
+    """The latest completed run of a workflow, when it did not pass. None when it did or never ran."""
+    if not run or run.get("conclusion") not in FAILED_RUNS:
+        return None
+    return {
+        "repo": repo,
+        "workflow": workflow,
+        "url": run["html_url"],
+        "conclusion": run["conclusion"],
+        "created_at": run["created_at"],
+    }
+
+
+def check_link(check: dict) -> str:
+    """A check's name as inert text, linked when its link is a plain https URL."""
+    label = f"`{plain(check['name'])}`"
+    return f"[{label}]({check['url']})" if LINKABLE.fullmatch(check.get("url") or "") else label
+
+
+def red(branches: list[dict], runs: list[dict], unread: list[str]) -> str:
+    """The inbox part for CI that is red on a default branch, and for watched workflow runs.
+
+    Check names come from other people's workflows, so they are code spans.
+    `unread` names what could not be read, so a gap is not taken for green.
+    """
+    rows = []
+    for item in branches:
+        name = item["repo"].split("/", 1)[-1]
+        checks = ", ".join(check_link(check) for check in item["checks"])
+        failed = f"Failing: {checks}." if checks else "No check failed outright; see the commit."
+        rows.append(
+            f"- [{name}]({item['url']}) `{plain(item['branch'])}` at `{item['sha'][:7]}`: "
+            f"{item['state'].lower()}. {failed}"
+        )
+    for item in runs:
+        name = item["repo"].split("/", 1)[-1]
+        rows.append(
+            f"- [{name}]({item['url']}) `{item['workflow']}`, last run {item['created_at'][:10]}: "
+            f"{item['conclusion']}."
+        )
+    rows += [f"- Could not read {what}; see the sweep log." for what in unread]
+    return "\n".join(section("Red on the default branch", rows, "Nothing red.")).rstrip() + "\n"
 
 
 def publish(repo: str, body: str, label: str = INBOX, title: str = TITLE) -> str:

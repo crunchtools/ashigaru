@@ -9,6 +9,7 @@ All notable changes to this project are documented here. The format follows
 ### Added
 
 - The inbox issue lists what Ashigaru fixed in the past seven days (issues labeled `ready-to-code` that closed as completed) and what it triaged in that time that is still open, so a fix and a verdict nobody acted on both reach the weekend report.
+- The inbox issue has a last part, "Red on the default branch": each public repository whose default branch head has a failed or errored check rollup, with links to the failed checks, plus the constitution's `fleet-drift.yml` and `validate-cascade.yml` when their latest completed run failed. One paginated GraphQL query and two REST requests per sweep. It replaces the one check factory.crunchtools.com made that nothing else did. With nothing red it says "Nothing red."
 - A fix commit and its pull request say "Reported by @login." when the issue came from someone without write access to the repository, so outside reporters get credit (mcp-trove#52 fixed mcp-trove#7 without naming its reporter). Bots and maintainers are not credited.
 
 ### Changed
