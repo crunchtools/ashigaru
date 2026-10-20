@@ -120,9 +120,10 @@ def main() -> int:
         print(f"publish: PR #{open_prs[0]['number']} is already open for {branch}; nothing to do")
         return 0
 
-    found = api(f"repos/{args.repo}/issues/{args.issue}")
+    # Merged PRs first: the merge closes the issue, so an issue read after it is never stale.
     merged = json.loads(gh("pr", "list", "--repo", args.repo, "--head", branch, "--state", "merged",
                            "--json", "number"))  # fmt: skip
+    found = api(f"repos/{args.repo}/issues/{args.issue}")
     if landed(found, merged):
         print(f"publish: issue #{args.issue} was already closed by a merged {branch}; nothing to do")
         set_output("pr", "")
