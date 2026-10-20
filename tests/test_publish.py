@@ -4,7 +4,7 @@ from unittest.mock import patch
 
 from common import touches_protected
 from fix_publish import next_step, replies
-from publish import commit_message, credit, refusal, stale
+from publish import commit_message, credit, landed, refusal, stale
 
 PATCH = "diff --git a/src/app.py b/src/app.py\n--- a/src/app.py\n+++ b/src/app.py\n@@ -1 +1 @@\n-a\n+b\n"
 WORKFLOW_PATCH = PATCH.replace("src/app.py", ".github/workflows/ci.yml")
@@ -108,3 +108,12 @@ def test_an_open_pull_request_that_still_merges_is_never_overwritten():
 
 def test_a_conflicting_pull_request_is_rebuilt():
     assert stale([{"number": 5, "mergeable": "CONFLICTING"}])
+
+
+def test_an_issue_closed_by_our_merged_pull_request_is_not_handed_to_a_human():
+    assert landed({"state": "closed"}, [{"number": 46}])
+
+
+def test_an_open_issue_or_one_without_a_merged_pull_request_is_still_worked():
+    assert not landed({"state": "open"}, [{"number": 46}])
+    assert not landed({"state": "closed"}, [])
