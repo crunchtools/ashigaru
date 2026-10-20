@@ -1,5 +1,6 @@
 """The sweep's limits are the budget: triage per run, fixes per hour (profile IV)."""
 
+import argparse
 import json
 import subprocess
 
@@ -274,3 +275,28 @@ def test_a_read_that_fails_is_named_in_the_part_and_does_not_stop_the_sweep(monk
     assert "- Could not read the default branches; see the sweep log." in body
     assert "- Could not read constitution fleet-drift.yml; see the sweep log." in body
     assert "- Could not read constitution validate-cascade.yml; see the sweep log." in body
+
+
+def inbox_run(monkeypatch, dry_run):
+    calls = []
+    monkeypatch.setattr(sweep, "red", lambda org: ("## Red on the default branch (0)\n\nNothing red.\n", 0))
+    monkeypatch.setattr(sweep, "past_week", lambda org, since: calls.append(("past_week", since)) or ([], []))
+    monkeypatch.setattr(
+        sweep.inbox, "publish", lambda repo, body: calls.append(("publish", repo, body)) or "updated"
+    )
+    args = argparse.Namespace(org="o", inbox_repo="o/ashigaru", dry_run=dry_run)
+    sweep.keep_inbox(args, "2026-10-13T00:00:00Z", "waiting\n")
+    return calls
+
+
+def test_a_dry_run_prints_the_red_part_and_publishes_nothing(monkeypatch, capsys):
+    assert inbox_run(monkeypatch, dry_run=True) == []
+    assert "Nothing red." in capsys.readouterr().out
+
+
+def test_the_red_part_is_published_last_in_the_inbox(monkeypatch):
+    calls = inbox_run(monkeypatch, dry_run=False)
+    assert calls[0] == ("past_week", "2026-10-13T00:00:00Z")
+    ((_, repo, body),) = calls[1:]
+    assert repo == "o/ashigaru" and body.startswith("waiting\n\n")
+    assert body.endswith("## Red on the default branch (0)\n\nNothing red.\n")

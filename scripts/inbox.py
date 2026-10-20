@@ -324,7 +324,9 @@ def failing(contexts: list[dict]) -> list[dict]:
 def red_branches(repos: list[dict]) -> list[dict]:
     """Repositories whose default branch head has a failed or errored check rollup.
 
-    A repository with no default branch or no checks on its head is not red.
+    A repository with no default branch or no checks on its head is not red. The
+    query reads one page of checks; `unread` counts those past it, so a failure
+    there is not hidden.
     """
     red = []
     for repo in repos:
@@ -341,6 +343,7 @@ def red_branches(repos: list[dict]) -> list[dict]:
                 "url": commit["url"],
                 "state": rollup["state"],
                 "checks": failing(rollup["contexts"]["nodes"]),
+                "unread": rollup["contexts"].get("totalCount", 0) - len(rollup["contexts"]["nodes"]),
             }
         )
     return sorted(red, key=lambda item: item["repo"])
@@ -376,6 +379,8 @@ def red(branches: list[dict], runs: list[dict], unread: list[str]) -> str:
         name = item["repo"].split("/", 1)[-1]
         checks = ", ".join(check_link(check) for check in item["checks"])
         failed = f"Failing: {checks}." if checks else "No check failed outright; see the commit."
+        if item.get("unread", 0) > 0:
+            failed += f" {item['unread']} more checks were not read; see the commit."
         rows.append(
             f"- [{name}]({item['url']}) `{plain(item['branch'])}` at `{item['sha'][:7]}`: "
             f"{item['state'].lower()}. {failed}"

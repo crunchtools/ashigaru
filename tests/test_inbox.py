@@ -345,3 +345,12 @@ def test_nothing_red_says_so_and_what_could_not_be_read_is_named():
     assert red([], [], []) == "## Red on the default branch (0)\n\nNothing red.\n"
     body = red([], [], ["the default branches"])
     assert "- Could not read the default branches; see the sweep log." in body
+
+
+def test_checks_past_the_page_read_are_counted_so_a_failure_there_is_not_hidden():
+    node = repo_node("big", "FAILURE", [check("t", "FAILURE")])
+    node["defaultBranchRef"]["target"]["statusCheckRollup"]["contexts"]["totalCount"] = 130
+    assert (
+        "Failing: [`t`](https://github.com/o/r/actions/runs/1/job/2). "
+        "129 more checks were not read; see the commit." in red(red_branches([node]), [], [])
+    )

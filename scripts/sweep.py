@@ -168,7 +168,7 @@ query($org: String!, $endCursor: String) {
       nodes {
         nameWithOwner isArchived
         defaultBranchRef { name target { ... on Commit { oid url statusCheckRollup { state
-          contexts(first: 50) { nodes {
+          contexts(first: 100) { totalCount nodes {
             ... on CheckRun { name conclusion detailsUrl }
             ... on StatusContext { context state targetUrl }
           } }
