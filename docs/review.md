@@ -28,8 +28,9 @@ Nothing is labeled, approved, merged or closed. The recommendation is an opinion
 - a count of `needs-info` issues per repository;
 - issues labeled `ready-to-code` that closed as completed in the past seven days, which is what Ashigaru fixed;
 - open issues labeled `triaged` in the past seven days, which wait on a maintainer to add `ready-to-code` or close them.
+- repositories whose CI is red on the default branch, with links to the failed checks, and the constitution's dispatched `fleet-drift.yml` and `validate-cascade.yml` when their last run failed ([sweep](sweep.md)).
 
-The last two come from one GraphQL search of public repositories each, which also returns each issue's recent label events, so the triage date costs no extra request. The body has no timestamps and names people without an `@`, so it is edited only when the list changes, including when an item ages out of the week, and never notifies anyone.
+The fixed and triaged lists come from one GraphQL search of public repositories each, which also returns each issue's recent label events, so the triage date costs no extra request. The red list comes from one GraphQL query of the organization's repositories and two requests for the constitution's workflow runs. The body has no timestamps and names people without an `@`, so it is edited only when the list changes, including when an item ages out of the week, and never notifies anyone.
 
 ## Example
 

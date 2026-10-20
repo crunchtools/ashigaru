@@ -1,6 +1,8 @@
 """The sweep's limits are the budget: triage per run, fixes per hour (profile IV)."""
 
+import argparse
 import json
+import subprocess
 
 import pytest
 
@@ -232,3 +234,69 @@ def test_the_past_week_is_one_paginated_search_of_public_repos_per_list(monkeypa
     assert all("org:o is:issue is:public" in query for query in queries)
     assert "is:closed reason:completed label:ready-to-code closed:>=2026-10-09T00:00:00Z" in queries[0]
     assert "is:open label:triaged updated:>=2026-10-09T00:00:00Z" in queries[1]
+
+
+def test_red_is_one_paginated_query_of_public_repos_and_one_call_per_watched_workflow(monkeypatch):
+    graphql_calls, rest_calls = [], []
+    node = {"nameWithOwner": "o/r", "isArchived": False, "defaultBranchRef": {"name": "main", "target": {
+        "oid": "abc1234", "url": "https://github.com/o/r/commit/abc1234",
+        "statusCheckRollup": {"state": "FAILURE", "contexts": {"nodes": []}}}}}  # fmt: skip
+
+    def gh(*args):
+        graphql_calls.append(args)
+        page = {"data": {"organization": {"repositories": {"nodes": [node]}}}}
+        return json.dumps([page, {"data": {"organization": {"repositories": {"nodes": []}}}}])
+
+    def api(path):
+        rest_calls.append(path)
+        return {"workflow_runs": []}
+
+    monkeypatch.setattr(sweep, "gh", gh)
+    monkeypatch.setattr(sweep, "api", api)
+    body, count = sweep.red("o")
+    assert count == 1 and "## Red on the default branch (1)" in body
+    (call,) = graphql_calls
+    assert "--paginate" in call and "org=o" in call
+    assert "privacy: PUBLIC" in sweep.DEFAULT_BRANCHES and "isArchived: false" in sweep.DEFAULT_BRANCHES
+    assert rest_calls == [
+        "repos/o/constitution/actions/workflows/fleet-drift.yml/runs?status=completed&per_page=1",
+        "repos/o/constitution/actions/workflows/validate-cascade.yml/runs?status=completed&per_page=1",
+    ]
+
+
+def test_a_read_that_fails_is_named_in_the_part_and_does_not_stop_the_sweep(monkeypatch):
+    def refuse(*args):
+        raise subprocess.CalledProcessError(1, "gh", stderr="HTTP 403: Resource not accessible")
+
+    monkeypatch.setattr(sweep, "gh", refuse)
+    monkeypatch.setattr(sweep, "api", refuse)
+    body, count = sweep.red("o")
+    assert count == 0
+    assert "- Could not read the default branches; see the sweep log." in body
+    assert "- Could not read constitution fleet-drift.yml; see the sweep log." in body
+    assert "- Could not read constitution validate-cascade.yml; see the sweep log." in body
+
+
+def inbox_run(monkeypatch, dry_run):
+    calls = []
+    monkeypatch.setattr(sweep, "red", lambda org: ("## Red on the default branch (0)\n\nNothing red.\n", 0))
+    monkeypatch.setattr(sweep, "past_week", lambda org, since: calls.append(("past_week", since)) or ([], []))
+    monkeypatch.setattr(
+        sweep.inbox, "publish", lambda repo, body: calls.append(("publish", repo, body)) or "updated"
+    )
+    args = argparse.Namespace(org="o", inbox_repo="o/ashigaru", dry_run=dry_run)
+    sweep.keep_inbox(args, "2026-10-13T00:00:00Z", "waiting\n")
+    return calls
+
+
+def test_a_dry_run_prints_the_red_part_and_publishes_nothing(monkeypatch, capsys):
+    assert inbox_run(monkeypatch, dry_run=True) == []
+    assert "Nothing red." in capsys.readouterr().out
+
+
+def test_the_red_part_is_published_last_in_the_inbox(monkeypatch):
+    calls = inbox_run(monkeypatch, dry_run=False)
+    assert calls[0] == ("past_week", "2026-10-13T00:00:00Z")
+    ((_, repo, body),) = calls[1:]
+    assert repo == "o/ashigaru" and body.startswith("waiting\n\n")
+    assert body.endswith("## Red on the default branch (0)\n\nNothing red.\n")
