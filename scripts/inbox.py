@@ -406,7 +406,10 @@ def publish(repo: str, body: str, label: str = INBOX, title: str = TITLE) -> str
     """
     ensure_labels(repo, [label])
     query = f"repos/{repo}/issues?state=open&labels={label}&per_page=100&sort=created&direction=asc"
-    found = api(query) or api(query)
+    found = sorted(
+        (issue for issue in api(query) or api(query) if "pull_request" not in issue),
+        key=lambda issue: issue["number"],
+    )
     if not found:
         gh("issue", "create", "--repo", repo, "--title", title, "--label", label, "--body", body)
         return "created"
