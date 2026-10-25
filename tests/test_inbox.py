@@ -184,6 +184,7 @@ def publishing(monkeypatch, found):
 def test_the_inbox_issue_is_created_once(monkeypatch):
     calls = publishing(monkeypatch, [])
     assert inbox.publish("o/ashigaru", "body\n") == "created"
+    assert len(calls) == 1
     assert calls[0][:2] == ("issue", "create") and "ashigaru-inbox" in calls[0]
 
 
@@ -197,6 +198,29 @@ def test_a_changed_inbox_is_edited_in_place(monkeypatch):
     calls = publishing(monkeypatch, [{"number": 90, "body": "old"}])
     assert inbox.publish("o/ashigaru", "body\n") == "updated"
     assert calls == [("issue", "edit", "90", "--repo", "o/ashigaru", "--body", "body\n")]
+
+
+def test_an_empty_listing_is_asked_again_before_a_second_issue_is_opened(monkeypatch):
+    answers = [[], [{"number": 90, "body": "body"}]]
+    calls = publishing(monkeypatch, None)
+    monkeypatch.setattr(inbox, "api", lambda path: answers.pop(0))
+    assert inbox.publish("o/ashigaru", "body\n") == "unchanged"
+    assert calls == []
+
+
+def test_a_duplicate_is_closed_and_the_oldest_issue_is_edited(monkeypatch):
+    listing = [{"number": 115, "body": "new"}, {"number": 90, "body": "old"}]
+    calls = publishing(monkeypatch, listing)
+    assert inbox.publish("o/ashigaru", "body\n") == "updated"
+    assert calls[0][:3] == ("issue", "close", "115") and "Superseded by #90" in calls[0][-1]
+    assert calls[1] == ("issue", "edit", "90", "--repo", "o/ashigaru", "--body", "body\n")
+
+
+def test_a_labeled_pull_request_is_neither_the_record_nor_closed(monkeypatch):
+    listing = [{"number": 7, "body": "x", "pull_request": {}}, {"number": 90, "body": "body"}]
+    calls = publishing(monkeypatch, listing)
+    assert inbox.publish("o/ashigaru", "body\n") == "unchanged"
+    assert calls == []
 
 
 def test_a_strangers_title_cannot_add_links_images_or_mentions_to_the_list():
