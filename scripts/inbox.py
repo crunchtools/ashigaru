@@ -396,13 +396,25 @@ def red(branches: list[dict], runs: list[dict], unread: list[str]) -> str:
 
 
 def publish(repo: str, body: str, label: str = INBOX, title: str = TITLE) -> str:
-    """Create the issue that carries `label`, or edit it when its list changed. Returns what was done."""
+    """Create the issue that carries `label`, or edit it when its list changed. Returns what was done.
+
+    The oldest open issue with the label is the record, so its number never moves. The label
+    listing once came back empty for an hour-old issue, and the sweep opened a second one; every
+    later run edited the newest, leaving #90 and #94 stale under readers that open them by number.
+    So an empty listing is asked again before anything is created, and a duplicate is closed in
+    favour of the record.
+    """
     ensure_labels(repo, [label])
-    found = api(f"repos/{repo}/issues?state=open&labels={label}&per_page=1")
+    query = f"repos/{repo}/issues?state=open&labels={label}&per_page=100&sort=created&direction=asc"
+    found = api(query) or api(query)
     if not found:
         gh("issue", "create", "--repo", repo, "--title", title, "--label", label, "--body", body)
         return "created"
-    if (found[0].get("body") or "").replace("\r\n", "\n").strip() == body.strip():
+    record, duplicates = found[0], found[1:]
+    for extra in duplicates:
+        gh("issue", "close", str(extra["number"]), "--repo", repo, "--reason", "not planned",
+           "--comment", f"Superseded by #{record['number']}, which the sweep keeps.")  # fmt: skip
+    if (record.get("body") or "").replace("\r\n", "\n").strip() == body.strip():
         return "unchanged"
-    gh("issue", "edit", str(found[0]["number"]), "--repo", repo, "--body", body)
+    gh("issue", "edit", str(record["number"]), "--repo", repo, "--body", body)
     return "updated"

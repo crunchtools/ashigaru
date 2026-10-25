@@ -9,6 +9,7 @@ All notable changes to this project are documented here. The format follows
 ### Fixed
 
 - A run that was still in flight when Ashigaru's own pull request merged no longer marks the already-closed issue `needs-human` ("fix no longer applies"); it does nothing.
+- The inbox and releases issues stay one issue each. A label listing that came back empty for an hour-old issue made the sweep open #114 and #115 beside #94 and #90, and every later run edited the newest, so #90 and #94 went stale under the weekend report. An empty listing is now asked again before an issue is created, the oldest open issue is the one edited, and any newer duplicate is closed pointing at it.
 
 ## [2.8.0] - 2026-10-20
 

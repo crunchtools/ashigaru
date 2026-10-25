@@ -199,6 +199,21 @@ def test_a_changed_inbox_is_edited_in_place(monkeypatch):
     assert calls == [("issue", "edit", "90", "--repo", "o/ashigaru", "--body", "body\n")]
 
 
+def test_an_empty_listing_is_asked_again_before_a_second_issue_is_opened(monkeypatch):
+    answers = [[], [{"number": 90, "body": "body"}]]
+    calls = publishing(monkeypatch, None)
+    monkeypatch.setattr(inbox, "api", lambda path: answers.pop(0))
+    assert inbox.publish("o/ashigaru", "body\n") == "unchanged"
+    assert calls == []
+
+
+def test_a_duplicate_is_closed_and_the_oldest_issue_is_edited(monkeypatch):
+    calls = publishing(monkeypatch, [{"number": 90, "body": "old"}, {"number": 115, "body": "new"}])
+    assert inbox.publish("o/ashigaru", "body\n") == "updated"
+    assert calls[0][:3] == ("issue", "close", "115") and "Superseded by #90" in calls[0][-1]
+    assert calls[1] == ("issue", "edit", "90", "--repo", "o/ashigaru", "--body", "body\n")
+
+
 def test_a_strangers_title_cannot_add_links_images_or_mentions_to_the_list():
     hostile = pull(1)
     hostile["title"] = "fix `x` ![img](http://evil) [click](http://evil)\n@maintainer " + "a" * 300
