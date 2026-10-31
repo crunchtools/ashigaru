@@ -387,14 +387,14 @@ def newest(contexts: list[dict]) -> list[dict]:
     A check re-run by a later event (Gatehouse triage after a reply) is a new run beside the
     failed one, and the old failure would otherwise read as current.
     """
-    runs: dict[str, dict] = {}
-    rest = []
-    for context in contexts:
-        if "conclusion" not in context:
-            rest.append(context)
-        elif (context.get("startedAt") or "") >= (runs.get(context["name"], {}).get("startedAt") or ""):
-            runs[context["name"]] = context
-    return [*runs.values(), *rest]
+    latest = {
+        run["name"]: run
+        for run in sorted(
+            (context for context in contexts if "conclusion" in context),
+            key=lambda run: run.get("startedAt") or "",
+        )
+    }
+    return [*latest.values(), *(context for context in contexts if "conclusion" not in context)]
 
 
 def failing(contexts: list[dict]) -> list[dict]:
@@ -501,6 +501,11 @@ def red(branches: list[dict], runs: list[dict], unread: list[str]) -> str:
         )
     rows += [f"- Could not read {what}; see the sweep log." for what in unread]
     return "\n".join(section("Red on the default branch", rows, "Nothing red.")).rstrip() + "\n"
+
+
+def unwritten(part: str, missed: list[str]) -> str:
+    """The red part with a line for each red-issue change the sweep could not make."""
+    return part + "".join(f"- Could not write {what}; see the sweep log.\n" for what in missed)
 
 
 def publish(repo: str, body: str, label: str = INBOX, title: str = TITLE) -> str:

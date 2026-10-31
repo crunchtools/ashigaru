@@ -289,27 +289,44 @@ def red_issues(org: str) -> list[dict]:
     ]
 
 
-def keep_red(org: str, branches: list[dict], now: datetime, dry_run: bool) -> None:
-    """Open, update and close each repository's red issue. A failed write is a warning, not a stop."""
-    actions = red_actions(branches, red_issues(org), stamp(now - RED_AFTER))
+def keep_red(org: str, branches: list[dict], now: datetime, dry_run: bool) -> list[str]:
+    """Open, update and close each repository's red issue, and return what could not be done.
+
+    One failed write does not stop the rest or the inbox; it is listed there instead.
+    """
+    try:
+        held = red_issues(org)
+    except subprocess.CalledProcessError as error:
+        # Without the open issues every red repository would look new and get a second one.
+        print(f"::warning::could not list the red issues: {error.stderr.strip()}")
+        return ["the red issues"]
+    actions = red_actions(branches, held, stamp(now - RED_AFTER))
     print(f"sweep: {len(actions)} red issue change(s)")
+    missed = []
     for item in actions:
         where = f"{item['repo']}#{item['number']}" if "number" in item else item["repo"]
         print(f"  red {item['action']} {where}")
         if dry_run:
             continue
         try:
-            if item["action"] == "create":
-                ensure_labels(item["repo"], [RED])
-                gh("issue", "create", "--repo", item["repo"], "--title", inbox.RED_TITLE,
-                   "--label", RED, "--body", item["body"])  # fmt: skip
-            elif item["action"] == "update":
-                gh("issue", "edit", str(item["number"]), "--repo", item["repo"], "--body", item["body"])
-            else:
-                gh("issue", "close", str(item["number"]), "--repo", item["repo"], "--reason", "completed",
-                   "--comment", item["why"])  # fmt: skip
+            write_red(item)
         except subprocess.CalledProcessError as error:
             print(f"::warning::red issue {item['action']} failed for {where}: {error.stderr.strip()}")
+            missed.append(f"the red issue in {where} ({item['action']})")
+    return missed
+
+
+def write_red(item: dict) -> None:
+    """Make one red-issue change."""
+    if item["action"] == "create":
+        ensure_labels(item["repo"], [RED])
+        gh("issue", "create", "--repo", item["repo"], "--title", inbox.RED_TITLE,
+           "--label", RED, "--body", item["body"])  # fmt: skip
+    elif item["action"] == "update":
+        gh("issue", "edit", str(item["number"]), "--repo", item["repo"], "--body", item["body"])
+    else:
+        gh("issue", "close", str(item["number"]), "--repo", item["repo"], "--reason", "completed",
+           "--comment", item["why"])  # fmt: skip
 
 
 def past_week(org: str, since: str) -> tuple[list[dict], list[dict]]:
@@ -399,8 +416,9 @@ def keep_inbox(args: argparse.Namespace, since: str, waiting_on_people: str, now
     broken, count, branches = red(args.org)
     print(f"sweep: {count} red on the default branch")
     # Unread is not green: closing every red issue on a failed read would say all is well.
-    if branches is not None:
-        keep_red(args.org, branches, now, args.dry_run)
+    missed = keep_red(args.org, branches, now, args.dry_run) if branches is not None else []
+    if missed:
+        broken = inbox.unwritten(broken, missed)
     if args.dry_run:
         print(broken)
         return

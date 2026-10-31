@@ -279,12 +279,12 @@ def test_a_read_that_fails_is_named_in_the_part_and_does_not_stop_the_sweep(monk
     assert "- Could not read constitution validate-cascade.yml; see the sweep log." in body
 
 
-def inbox_run(monkeypatch, dry_run, branches=()):
+def inbox_run(monkeypatch, dry_run, branches=(), missed=()):
     calls = []
     part = "## Red on the default branch (0)\n\nNothing red.\n"
     monkeypatch.setattr(sweep, "red", lambda org: (part, 0, None if branches is None else list(branches)))
     monkeypatch.setattr(
-        sweep, "keep_red", lambda org, found, now, dry: calls.append(("keep_red", found, dry))
+        sweep, "keep_red", lambda org, found, now, dry: calls.append(("keep_red", found, dry)) or missed
     )
     monkeypatch.setattr(sweep, "past_week", lambda org, since: calls.append(("past_week", since)) or ([], []))
     monkeypatch.setattr(
@@ -384,3 +384,31 @@ def test_the_red_issue_is_not_queued_for_triage():
     issue = {"number": 1, "created_at": "2026-10-31T00:00:00Z", "user": {"type": "User"},
              "labels": [{"name": "ashigaru-red"}]}  # fmt: skip
     assert candidates("o/r", [issue]) == []
+
+
+def test_red_issues_that_could_not_be_listed_change_nothing(monkeypatch, capsys):
+    def refuse(org):
+        raise subprocess.CalledProcessError(1, "gh", stderr="HTTP 502")
+
+    calls = []
+    monkeypatch.setattr(sweep, "red_issues", refuse)
+    monkeypatch.setattr(sweep, "gh", lambda *args: calls.append(args) or "")
+    assert sweep.keep_red("o", [branch("o/r")], NOW, dry_run=False) == ["the red issues"]
+    assert calls == []
+    assert "could not list the red issues: HTTP 502" in capsys.readouterr().out
+
+
+def test_a_red_issue_write_that_fails_is_named_in_the_inbox_and_the_rest_still_run(monkeypatch):
+    def gh(*args):
+        if args[1] == "create":
+            raise subprocess.CalledProcessError(1, "gh", stderr="HTTP 410: Issues are disabled")
+        return ""
+
+    monkeypatch.setattr(sweep, "red_issues", lambda org: [held("o/green", 2)])
+    monkeypatch.setattr(sweep, "ensure_labels", lambda repo, names: set())
+    monkeypatch.setattr(sweep, "gh", gh)
+    assert sweep.keep_red("o", [branch("o/r")], NOW, dry_run=False) == ["the red issue in o/r (create)"]
+    calls = inbox_run(monkeypatch, dry_run=False, missed=["the red issue in o/r (create)"])
+    assert calls[-1][2].endswith(
+        "Nothing red.\n- Could not write the red issue in o/r (create); see the sweep log.\n"
+    )
