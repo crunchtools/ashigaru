@@ -4,12 +4,14 @@ import inbox
 from inbox import (
     MAX_LISTED,
     MAX_REVIEWS,
+    blocked_releases,
     due,
     failed_run,
     fixed,
     handed_over,
     held_releases,
     last_review,
+    open_alerts,
     outside_issues,
     outside_pulls,
     past_week,
@@ -18,6 +20,7 @@ from inbox import (
     red_branches,
     render,
     review_marker,
+    security,
     triaged_at,
     unanswered,
 )
@@ -378,3 +381,53 @@ def test_checks_past_the_page_read_are_counted_so_a_failure_there_is_not_hidden(
         "Failing: [`t`](https://github.com/o/r/actions/runs/1/job/2). "
         "129 more checks were not read; see the commit." in red(red_branches([node]), [], [])
     )
+
+
+def test_an_auto_merge_release_whose_head_failed_is_handed_over_naming_the_check():
+    failed = check("Gatehouse triage", "FAILURE") | {"startedAt": "2026-10-27T02:07:00Z"}
+    passed = check("test (3.12)", "SUCCESS")
+    auto = {"autoMergeRequest": {"mergeMethod": "SQUASH"}}
+    pulls = [
+        release_pull(1, statusCheckRollup=[failed, passed], **auto),
+        release_pull(2, statusCheckRollup=[passed], **auto),
+        release_pull(3, statusCheckRollup=[failed]),
+        release_pull(4, statusCheckRollup=[failed], labels=("needs-human",), **auto),
+        pull(5) | {"headRefName": "ashigaru/issue-5", "isCrossRepository": False,
+                   "statusCheckRollup": [failed], **auto},
+    ]  # fmt: skip
+    (item,) = blocked_releases("o/r", pulls)
+    assert item["number"] == 1
+    assert item["note"] == (
+        "Blocked: [`Gatehouse triage`](https://github.com/o/r/actions/runs/1/job/2) failing; "
+        "holds further releases of this repo."
+    )
+
+
+def test_a_check_that_failed_and_then_passed_on_a_later_run_is_not_failing():
+    old = check("Gatehouse triage", "FAILURE") | {"startedAt": "2026-10-27T02:07:00Z"}
+    new = check("Gatehouse triage", "SUCCESS") | {"startedAt": "2026-10-31T16:00:00Z"}
+    pull_ = release_pull(1, statusCheckRollup=[new, old], autoMergeRequest={"mergeMethod": "SQUASH"})
+    assert blocked_releases("o/r", [pull_]) == []
+    assert inbox.failing([old, new]) == []
+
+
+def test_only_old_open_scan_alerts_are_listed():
+    def alert(
+        number, author="github-actions[bot]", labels=("security", "dependencies"), created="2026-10-26"
+    ):
+        item = issue(number, author=author, labels=labels, kind="Bot")
+        return item | {"created_at": f"{created}T12:33:16Z"}
+
+    issues = [
+        alert(96),
+        alert(97, created="2026-10-30"),
+        alert(98, labels=("security",)),
+        alert(99, author="dependabot[bot]"),
+        alert(100) | {"pull_request": {}},
+    ]
+    found = open_alerts("o/gatehouse", issues, "2026-10-28T12:00:00Z")
+    assert [item["number"] for item in found] == [96]
+    part = security(found)
+    assert part.startswith("## Security alerts open more than 3 days (1)\n\n- [gatehouse#96]")
+    assert part.rstrip().endswith("From the repository's dependency scan.")
+    assert security([]) == "## Security alerts open more than 3 days (0)\n\nNone open.\n"

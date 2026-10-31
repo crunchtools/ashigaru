@@ -24,8 +24,9 @@ Nothing is labeled, approved, merged or closed. The recommendation is an opinion
 - pull requests from outside contributors, each with Ashigaru's recommendation;
 - issues from outside contributors, each with its type and state labels;
 - pull requests labeled `needs-human`, where Ashigaru stopped after five rounds;
-- [release](release.md) pull requests that do not merge on their own;
+- [release](release.md) pull requests that do not merge on their own, including one with auto-merge on whose head has a failed check, named, since auto-merge then waits forever;
 - a count of `needs-info` issues per repository;
+- dependency-scan alerts (issues by `github-actions[bot]` labeled `security` and `dependencies`) open more than three days. The scan files them with the workflow token, which starts no workflow, and triage reads only what people wrote, so this list is the one place they surface;
 - issues labeled `ready-to-code` that closed as completed in the past seven days, which is what Ashigaru fixed;
 - open issues labeled `triaged` in the past seven days, which wait on a maintainer to add `ready-to-code` or close them.
 - repositories whose CI is red on the default branch, with links to the failed checks, and the constitution's dispatched `fleet-drift.yml` and `validate-cascade.yml` when their last run failed ([sweep](sweep.md)).

@@ -13,6 +13,7 @@ import argparse
 import json
 import subprocess
 import sys
+import urllib.parse
 from datetime import UTC, date, datetime, timedelta
 
 import inbox
@@ -23,6 +24,7 @@ from common import (
     NEEDS_INFO,
     READY_FOR_TRIAGE,
     READY_TO_CODE,
+    RED,
     RELEASES,
     STATE_LABELS,
     TRIAGED,
@@ -41,9 +43,11 @@ WINDOW = timedelta(hours=1)
 """The span the coding budget is counted over."""
 SETTLE = timedelta(minutes=20)
 """An issue touched more recently than this may have a fix in flight; leave it for the next run."""
+RED_AFTER = timedelta(hours=1)
+"""A head this young may still be fixed by the next push; no red issue is opened for it yet."""
 PULL_FIELDS = (
     "number,headRefName,headRefOid,baseRefName,mergeable,author,"
-    "isCrossRepository,isDraft,labels,title,url,createdAt,autoMergeRequest"
+    "isCrossRepository,isDraft,labels,title,url,createdAt,autoMergeRequest,statusCheckRollup"
 )
 OLDEST_OPEN = "issues?state=open&sort=created&direction=asc&per_page=100"
 """One page per repo: the globally oldest MAX_LIMIT are always within each repo's oldest 100."""
@@ -56,7 +60,7 @@ def candidates(repo: str, issues: list[dict]) -> list[dict]:
         for issue in issues
         if "pull_request" not in issue
         and issue["user"].get("type") == "User"
-        and not {label["name"] for label in issue.get("labels", [])} & {*STATE_LABELS, INBOX, RELEASES}
+        and not {label["name"] for label in issue.get("labels", [])} & {*STATE_LABELS, INBOX, RELEASES, RED}
     ]
 
 
@@ -166,10 +170,10 @@ query($org: String!, $endCursor: String) {
                  orderBy: {field: NAME, direction: ASC}) {
       pageInfo { hasNextPage endCursor }
       nodes {
-        nameWithOwner isArchived
-        defaultBranchRef { name target { ... on Commit { oid url statusCheckRollup { state
+        nameWithOwner isArchived hasIssuesEnabled
+        defaultBranchRef { name target { ... on Commit { oid url committedDate statusCheckRollup { state
           contexts(first: 100) { totalCount nodes {
-            ... on CheckRun { name conclusion detailsUrl }
+            ... on CheckRun { name conclusion detailsUrl startedAt }
             ... on StatusContext { context state targetUrl }
           } }
         } } } }
@@ -203,12 +207,14 @@ def last_run(repo: str, workflow: str) -> dict | None:
     return next(iter(runs["workflow_runs"]), None)
 
 
-def red(org: str) -> tuple[str, int]:
-    """The inbox part listing red default branches and watched runs, and how many are red.
+def red(org: str) -> tuple[str, int, list[dict] | None]:
+    """The inbox part listing red default branches and watched runs, how many are red, and the
+    red branches themselves, or None when they could not be read.
 
     A failed read is named in the part, not raised: the rest of the inbox still updates.
     """
     unread: list[str] = []
+    branches: list[dict] | None
     try:
         pages = graphql(DEFAULT_BRANCHES, org=org)
         branches = inbox.red_branches(
@@ -216,7 +222,7 @@ def red(org: str) -> tuple[str, int]:
         )
     except subprocess.CalledProcessError as error:
         print(f"::warning::could not read the default branches: {error.stderr.strip()}")
-        branches, unread = [], ["the default branches"]
+        branches, unread = None, ["the default branches"]
     runs = []
     repo = f"{org}/{WATCHED_REPO}"
     for workflow in WATCHED_WORKFLOWS:
@@ -228,7 +234,99 @@ def red(org: str) -> tuple[str, int]:
             continue
         if failed := inbox.failed_run(repo, workflow, run):
             runs.append(failed)
-    return inbox.red(branches, runs, unread), len(branches) + len(runs)
+    listed = branches or []
+    return inbox.red(listed, runs, unread), len(listed) + len(runs), branches
+
+
+def red_actions(branches: list[dict], issues: list[dict], before: str) -> list[dict]:
+    """What to do with each repository's red issue, given the red branches and the open issues.
+
+    A red repository gets its issue opened once its head is older than `before`, and its body
+    rewritten when the failure changed. An issue whose repository is no longer red is closed,
+    and so is any second one in a repository, in favour of the oldest. `issues` are the open
+    issues labeled `ashigaru-red` across the organization, as {repo, number, body}.
+    """
+    held: dict[str, dict] = {}
+    actions = []
+    for issue in sorted(issues, key=lambda item: (item["repo"], item["number"])):
+        if issue["repo"] in held:
+            actions.append({"action": "close", "repo": issue["repo"], "number": issue["number"],
+                            "why": f"Superseded by #{held[issue['repo']]['number']}."})  # fmt: skip
+        else:
+            held[issue["repo"]] = issue
+    red_repos = set()
+    for item in branches:
+        if not item.get("issues", True):
+            continue
+        red_repos.add(item["repo"])
+        body = inbox.red_issue(item)
+        found = held.get(item["repo"])
+        if found and (found.get("body") or "").replace("\r\n", "\n").strip() != body.strip():
+            actions.append(
+                {"action": "update", "repo": item["repo"], "number": found["number"], "body": body}
+            )
+        elif not found and item.get("committed_at", "") < before:
+            actions.append({"action": "create", "repo": item["repo"], "body": body})
+    for repo, issue in sorted(held.items()):
+        if repo not in red_repos:
+            actions.append({"action": "close", "repo": repo, "number": issue["number"],
+                            "why": "The default branch is green again."})  # fmt: skip
+    return actions
+
+
+def red_issues(org: str) -> list[dict]:
+    """The open `ashigaru-red` issues across the organization."""
+    query = f"org:{org} is:issue is:open label:{RED}"
+    # One page: an organization with a hundred red repositories has bigger problems than this list.
+    found = api(f"search/issues?q={urllib.parse.quote(query)}&per_page=100")["items"]
+    return [
+        {
+            "repo": issue["repository_url"].split("/repos/", 1)[-1],
+            "number": issue["number"],
+            "body": issue.get("body") or "",
+        }
+        for issue in found
+    ]
+
+
+def keep_red(org: str, branches: list[dict], now: datetime, dry_run: bool) -> list[str]:
+    """Open, update and close each repository's red issue, and return what could not be done.
+
+    One failed write does not stop the rest or the inbox; it is listed there instead.
+    """
+    try:
+        held = red_issues(org)
+    except subprocess.CalledProcessError as error:
+        # Without the open issues every red repository would look new and get a second one.
+        print(f"::warning::could not list the red issues: {error.stderr.strip()}")
+        return ["the red issues"]
+    actions = red_actions(branches, held, stamp(now - RED_AFTER))
+    print(f"sweep: {len(actions)} red issue change(s)")
+    missed = []
+    for item in actions:
+        where = f"{item['repo']}#{item['number']}" if "number" in item else item["repo"]
+        print(f"  red {item['action']} {where}")
+        if dry_run:
+            continue
+        try:
+            write_red(item)
+        except subprocess.CalledProcessError as error:
+            print(f"::warning::red issue {item['action']} failed for {where}: {error.stderr.strip()}")
+            missed.append(f"the red issue in {where} ({item['action']})")
+    return missed
+
+
+def write_red(item: dict) -> None:
+    """Make one red-issue change."""
+    if item["action"] == "create":
+        ensure_labels(item["repo"], [RED])
+        gh("issue", "create", "--repo", item["repo"], "--title", inbox.RED_TITLE,
+           "--label", RED, "--body", item["body"])  # fmt: skip
+    elif item["action"] == "update":
+        gh("issue", "edit", str(item["number"]), "--repo", item["repo"], "--body", item["body"])
+    else:
+        gh("issue", "close", str(item["number"]), "--repo", item["repo"], "--reason", "completed",
+           "--comment", item["why"])  # fmt: skip
 
 
 def past_week(org: str, since: str) -> tuple[list[dict], list[dict]]:
@@ -312,10 +410,15 @@ def reviews_of(pulls: list[dict], bot: str) -> dict[str, dict | None]:
     }
 
 
-def keep_inbox(args: argparse.Namespace, since: str, waiting_on_people: str) -> None:
-    """Add the past week and what is red to the inbox, and publish it. A dry run prints the red part."""
-    broken, count = red(args.org)
+def keep_inbox(args: argparse.Namespace, since: str, waiting_on_people: str, now: datetime) -> None:
+    """Add the past week and what is red to the inbox, and publish it; keep each red repository's
+    issue. A dry run prints the red part and the issue changes it would make."""
+    broken, count, branches = red(args.org)
     print(f"sweep: {count} red on the default branch")
+    # Unread is not green: closing every red issue on a failed read would say all is well.
+    missed = keep_red(args.org, branches, now, args.dry_run) if branches is not None else []
+    if missed:
+        broken = inbox.unwritten(broken, missed)
     if args.dry_run:
         print(broken)
         return
@@ -354,6 +457,7 @@ def main() -> int:
     visitors: list[dict] = []
     reports: list[dict] = []
     stopped: list[dict] = []
+    alerts: list[dict] = []
     questions: dict[str, int] = {}
     for repo in repos:
         if not enrolled(repo):
@@ -368,7 +472,12 @@ def main() -> int:
         # can_write is cached per repo and account, so each author costs one lookup per sweep.
         visitors += inbox.outside_pulls(repo, pulls, can_write)
         reports += inbox.outside_issues(repo, issues, can_write)
-        stopped += inbox.handed_over(repo, pulls) + inbox.held_releases(repo, pulls)
+        stopped += (
+            inbox.handed_over(repo, pulls)
+            + inbox.held_releases(repo, pulls)
+            + inbox.blocked_releases(repo, pulls)
+        )
+        alerts += inbox.open_alerts(repo, issues, stamp(now - timedelta(days=inbox.ALERT_DAYS)))
         questions[repo] = inbox.unanswered(issues)
 
     used = opened_since(args.org, args.bot, stamp(now - WINDOW))
@@ -393,8 +502,10 @@ def main() -> int:
         print(f"  review {item['repo']}#{item['number']}")
     set_output("reviews", json.dumps([] if args.dry_run else to_review))
     if args.inbox_repo:
-        waiting_on_people = inbox.render(visitors, reviews, reports, stopped, questions)
-        keep_inbox(args, stamp(now - timedelta(days=inbox.RECENT_DAYS)), waiting_on_people)
+        waiting_on_people = "\n".join(
+            [inbox.render(visitors, reviews, reports, stopped, questions), inbox.security(alerts)]
+        )
+        keep_inbox(args, stamp(now - timedelta(days=inbox.RECENT_DAYS)), waiting_on_people, now)
     return 0
 
 
