@@ -3,6 +3,7 @@
 import argparse
 import json
 import subprocess
+from datetime import UTC, datetime
 
 import pytest
 
@@ -253,8 +254,9 @@ def test_red_is_one_paginated_query_of_public_repos_and_one_call_per_watched_wor
 
     monkeypatch.setattr(sweep, "gh", gh)
     monkeypatch.setattr(sweep, "api", api)
-    body, count = sweep.red("o")
+    body, count, branches = sweep.red("o")
     assert count == 1 and "## Red on the default branch (1)" in body
+    assert [item["repo"] for item in branches] == ["o/r"]
     (call,) = graphql_calls
     assert "--paginate" in call and "org=o" in call
     assert "privacy: PUBLIC" in sweep.DEFAULT_BRANCHES and "isArchived: false" in sweep.DEFAULT_BRANCHES
@@ -270,33 +272,115 @@ def test_a_read_that_fails_is_named_in_the_part_and_does_not_stop_the_sweep(monk
 
     monkeypatch.setattr(sweep, "gh", refuse)
     monkeypatch.setattr(sweep, "api", refuse)
-    body, count = sweep.red("o")
-    assert count == 0
+    body, count, branches = sweep.red("o")
+    assert count == 0 and branches is None
     assert "- Could not read the default branches; see the sweep log." in body
     assert "- Could not read constitution fleet-drift.yml; see the sweep log." in body
     assert "- Could not read constitution validate-cascade.yml; see the sweep log." in body
 
 
-def inbox_run(monkeypatch, dry_run):
+def inbox_run(monkeypatch, dry_run, branches=()):
     calls = []
-    monkeypatch.setattr(sweep, "red", lambda org: ("## Red on the default branch (0)\n\nNothing red.\n", 0))
+    part = "## Red on the default branch (0)\n\nNothing red.\n"
+    monkeypatch.setattr(sweep, "red", lambda org: (part, 0, None if branches is None else list(branches)))
+    monkeypatch.setattr(
+        sweep, "keep_red", lambda org, found, now, dry: calls.append(("keep_red", found, dry))
+    )
     monkeypatch.setattr(sweep, "past_week", lambda org, since: calls.append(("past_week", since)) or ([], []))
     monkeypatch.setattr(
         sweep.inbox, "publish", lambda repo, body: calls.append(("publish", repo, body)) or "updated"
     )
     args = argparse.Namespace(org="o", inbox_repo="o/ashigaru", dry_run=dry_run)
-    sweep.keep_inbox(args, "2026-10-13T00:00:00Z", "waiting\n")
+    sweep.keep_inbox(args, "2026-10-13T00:00:00Z", "waiting\n", NOW)
     return calls
 
 
 def test_a_dry_run_prints_the_red_part_and_publishes_nothing(monkeypatch, capsys):
-    assert inbox_run(monkeypatch, dry_run=True) == []
+    assert inbox_run(monkeypatch, dry_run=True) == [("keep_red", [], True)]
     assert "Nothing red." in capsys.readouterr().out
+
+
+def test_red_issues_are_left_alone_when_the_branches_could_not_be_read(monkeypatch):
+    calls = inbox_run(monkeypatch, dry_run=False, branches=None)
+    assert [call[0] for call in calls] == ["past_week", "publish"]
 
 
 def test_the_red_part_is_published_last_in_the_inbox(monkeypatch):
     calls = inbox_run(monkeypatch, dry_run=False)
-    assert calls[0] == ("past_week", "2026-10-13T00:00:00Z")
-    ((_, repo, body),) = calls[1:]
+    assert calls[:2] == [("keep_red", [], False), ("past_week", "2026-10-13T00:00:00Z")]
+    ((_, repo, body),) = calls[2:]
     assert repo == "o/ashigaru" and body.startswith("waiting\n\n")
     assert body.endswith("## Red on the default branch (0)\n\nNothing red.\n")
+
+
+NOW = datetime(2026, 10, 31, 12, 0, tzinfo=UTC)
+BEFORE = "2026-10-31T11:00:00Z"
+
+
+def branch(repo, committed="2026-10-27T01:50:00Z", checks=("build-and-push-quay",), issues=True):
+    return {
+        "repo": repo, "branch": "main", "sha": "c70f6b0ec906", "state": "FAILURE",
+        "url": f"https://github.com/{repo}/commit/c70f6b0ec906", "unread": 0,
+        "checks": [{"name": name, "url": "https://github.com/o/r/actions/runs/1/job/2"} for name in checks],
+        "committed_at": committed, "issues": issues,
+    }  # fmt: skip
+
+
+def held(repo, number, body=""):
+    return {"repo": repo, "number": number, "body": body}
+
+
+def test_a_red_branch_gets_one_issue_once_its_head_is_past_the_grace_hour():
+    actions = sweep.red_actions(
+        [branch("o/old"), branch("o/fresh", committed="2026-10-31T11:30:00Z")], [], BEFORE
+    )
+    assert [(item["action"], item["repo"]) for item in actions] == [("create", "o/old")]
+    assert actions[0]["body"].startswith(sweep.inbox.RED_MARKER)
+    assert "Failing: [`build-and-push-quay`]" in actions[0]["body"]
+
+
+def test_a_red_issue_is_rewritten_only_when_the_failure_changed():
+    red = branch("o/r")
+    same = held("o/r", 3, sweep.inbox.red_issue(red).replace("\n", "\r\n"))
+    assert sweep.red_actions([red], [same], BEFORE) == []
+    moved = branch("o/r", checks=("Trivy",))
+    assert [item["action"] for item in sweep.red_actions([moved], [same], BEFORE)] == ["update"]
+
+
+def test_a_green_branch_closes_its_issue_and_a_second_issue_is_closed_for_the_first():
+    actions = sweep.red_actions([branch("o/r")], [held("o/r", 9), held("o/r", 4), held("o/green", 2)], BEFORE)
+    closed = [(item["repo"], item["number"]) for item in actions if item["action"] == "close"]
+    assert closed == [("o/r", 9), ("o/green", 2)]
+    assert [item["action"] for item in actions if item["repo"] == "o/r"] == ["close", "update"]
+
+
+def test_a_repository_with_issues_off_gets_no_red_issue():
+    assert sweep.red_actions([branch("o/r", issues=False)], [], BEFORE) == []
+
+
+def test_keep_red_writes_each_change_and_a_dry_run_writes_none(monkeypatch, capsys):
+    calls = []
+    monkeypatch.setattr(sweep, "red_issues", lambda org: [held("o/green", 2)])
+    monkeypatch.setattr(sweep, "ensure_labels", lambda repo, names: calls.append(("labels", repo, names)))
+    monkeypatch.setattr(sweep, "gh", lambda *args: calls.append(args) or "")
+    sweep.keep_red("o", [branch("o/r")], NOW, dry_run=True)
+    assert calls == []
+    assert "red create o/r" in capsys.readouterr().out
+    sweep.keep_red("o", [branch("o/r")], NOW, dry_run=False)
+    assert calls[0] == ("labels", "o/r", ["ashigaru-red"])
+    assert calls[1][:7] == ("issue", "create", "--repo", "o/r", "--title", "Default branch is red", "--label")
+    assert calls[2][:4] == ("issue", "close", "2", "--repo")
+
+
+def test_the_red_issues_are_one_search_of_the_organization(monkeypatch):
+    paths = []
+    found = {"items": [{"repository_url": "https://api.github.com/repos/o/r", "number": 5, "body": None}]}
+    monkeypatch.setattr(sweep, "api", lambda path: paths.append(path) or found)
+    assert sweep.red_issues("o") == [{"repo": "o/r", "number": 5, "body": ""}]
+    assert paths == ["search/issues?q=org%3Ao%20is%3Aissue%20is%3Aopen%20label%3Aashigaru-red&per_page=100"]
+
+
+def test_the_red_issue_is_not_queued_for_triage():
+    issue = {"number": 1, "created_at": "2026-10-31T00:00:00Z", "user": {"type": "User"},
+             "labels": [{"name": "ashigaru-red"}]}  # fmt: skip
+    assert candidates("o/r", [issue]) == []

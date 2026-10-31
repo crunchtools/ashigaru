@@ -288,8 +288,26 @@ def test_nothing_is_due_while_empty_unsettled_or_with_ashigaru_work_open(item, f
 def test_an_open_release_pull_request_is_listed_with_how_it_merges():
     waiting = pull(8, "ashigaru/release-2.6.1", autoMergeRequest={"mergeMethod": "SQUASH"})
     assert next_step(status(), CHANGELOG, facts(pulls=[waiting]))["pulls"] == [
-        {"number": 8, "url": "https://github.com/o/r/pull/8", "version": "2.6.1", "auto": True}
+        {"number": 8, "url": "https://github.com/o/r/pull/8", "version": "2.6.1", "auto": True, "failing": []}
     ]
+
+
+def test_a_release_pull_request_whose_head_failed_says_it_is_blocked_not_that_it_will_merge():
+    failed = {"name": "Gatehouse triage", "conclusion": "FAILURE", "startedAt": "2026-10-27T02:07:00Z",
+              "detailsUrl": "https://github.com/o/r/actions/runs/1/job/2"}  # fmt: skip
+    stuck = pull(8, "ashigaru/release-2.6.1", autoMergeRequest={"mergeMethod": "SQUASH"},
+                 statusCheckRollup=[failed])  # fmt: skip
+    (listed,) = next_step(status(), CHANGELOG, facts(pulls=[stuck]))["pulls"]
+    row = release.pull_row({"repo": "o/r"}, listed)
+    assert "Merges when its checks pass" not in row
+    assert row.endswith(
+        "release 2.6.1. Blocked: [`Gatehouse triage`](https://github.com/o/r/actions/runs/1/job/2) failing; "
+        "holds further releases of this repo."
+    )
+    rerun = {**failed, "conclusion": "SUCCESS", "startedAt": "2026-10-31T16:00:00Z"}
+    stuck["statusCheckRollup"].append(rerun)
+    (listed,) = next_step(status(), CHANGELOG, facts(pulls=[stuck]))["pulls"]
+    assert release.pull_row({"repo": "o/r"}, listed).endswith("Merges when its checks pass.")
 
 
 def test_a_release_pull_request_that_no_longer_merges_is_retired():

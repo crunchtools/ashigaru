@@ -35,12 +35,15 @@ INBOX = "ashigaru-inbox"
 """Marks the one issue the sweep keeps as the list of what waits on a maintainer."""
 RELEASES = "ashigaru-releases"
 """Marks the one issue the sweep keeps as the record of what was released and what was not."""
+RED = "ashigaru-red"
+"""Marks the issue the sweep keeps in a repository while its default branch is red."""
 MANAGED_LABELS = (
     STATE_LABELS
     | TYPE_LABELS
     | {
         INBOX: ("ededed", "Ashigaru: what is waiting on a maintainer"),
         RELEASES: ("ededed", "Ashigaru: what was released and what is waiting to be"),
+        RED: ("b60205", "Ashigaru: the default branch is red"),
     }
 )
 

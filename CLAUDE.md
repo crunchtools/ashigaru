@@ -2,7 +2,7 @@
 
 Everything runs from containers; the host needs only git, podman, pre-commit and gh.
 
-- **Lint and test:** `podman run --rm -v .:/src:Z -w /src docker.io/library/python:3.12-slim bash -c 'pip -q install pytest==9.1.1 pyyaml==6.0.3 ruff==0.16.9 && ruff check . && ruff format --check . && pytest -q'`
+- **Lint and test:** `podman run --rm -v .:/src:Z -w /src docker.io/library/python:3.12 bash -c 'pip -q install pytest==9.1.1 pyyaml==6.0.3 ruff==0.16.9 && ruff check . && ruff format --check . && pytest -q'`
 - **Workflows:** `podman run --rm -v .:/repo:Z -w /repo docker.io/rhysd/actionlint:1.7.12`
 
 # Layout

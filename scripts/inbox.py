@@ -42,6 +42,14 @@ RELEASE_BRANCH = f"{BRANCH_PREFIX}release-"
 """Where a release pull request comes from; the version follows."""
 HANDED_OVER = "Labeled needs-human."
 HELD_RELEASE = "Release pull request with auto-merge off; merging it publishes the release."
+HOLDS = "holds further releases of this repo."
+"""Why a blocked release pull request matters: the release job opens no other while one is open."""
+SCANNER = "github-actions[bot]"
+"""Who writes a repository's own security-scan issues: its workflow token."""
+ALERT_LABELS = {"security", "dependencies"}
+"""The labels the fleet's dependency scan puts on the issue it opens."""
+ALERT_DAYS = 3
+"""An alert open this long is listed; younger ones are Dependabot's to clear first."""
 RECENT_DAYS = 7
 """How far back the fixed and triaged lists look."""
 RED_ROLLUP = {"FAILURE", "ERROR"}
@@ -156,6 +164,59 @@ def held_releases(repo: str, pulls: list[dict]) -> list[dict]:
         and not pull.get("autoMergeRequest")
         and not pull["isCrossRepository"]
         and NEEDS_HUMAN not in names(pull)
+    ]
+
+
+def blocked_releases(repo: str, pulls: list[dict]) -> list[dict]:
+    """Ashigaru's release pull requests with auto-merge on whose head has a failed check.
+
+    Auto-merge waits on that check forever: a failed head stays failed until a push,
+    and Ashigaru pushes nothing to its own release branch. mcp-metsuke#66 sat four
+    days like this on one unanswered Gatehouse finding while the record said it
+    would merge on its own. One labeled needs-human is already listed by `handed_over`.
+    """
+    return [
+        {
+            "repo": repo,
+            "number": pull["number"],
+            "title": pull["title"],
+            "url": pull["url"],
+            "created_at": pull["createdAt"],
+            "note": blocked(checks),
+        }
+        for pull in pulls
+        if pull["headRefName"].startswith(RELEASE_BRANCH)
+        and pull.get("autoMergeRequest")
+        and not pull["isCrossRepository"]
+        and NEEDS_HUMAN not in names(pull)
+        and (checks := failing(pull.get("statusCheckRollup") or []))
+    ]
+
+
+def blocked(checks: list[dict]) -> str:
+    """What a release pull request's row says when its head has failed checks."""
+    return f"Blocked: {', '.join(check_link(check) for check in checks)} failing; {HOLDS}"
+
+
+def open_alerts(repo: str, issues: list[dict], before: str) -> list[dict]:
+    """Security-scan issues the repository's own workflow opened before `before`, still open.
+
+    The scan writes them with the workflow token, which starts no workflow, and the
+    sweep triages only what people wrote, so nothing else ever looks at them.
+    """
+    return [
+        {
+            "repo": repo,
+            "number": issue["number"],
+            "title": issue["title"],
+            "url": issue["html_url"],
+            "created_at": issue["created_at"],
+        }
+        for issue in issues
+        if "pull_request" not in issue
+        and issue["user"].get("login") == SCANNER
+        and names(issue) >= ALERT_LABELS
+        and issue["created_at"] < before
     ]
 
 
@@ -292,6 +353,16 @@ def render(pulls: list[dict], reviews: dict[str, dict | None], issues: list[dict
     return "\n".join(lines).rstrip() + "\n"
 
 
+def security(alerts: list[dict]) -> str:
+    """The inbox part for dependency-scan alerts that have stayed open, oldest first."""
+    lines = section(
+        f"Security alerts open more than {ALERT_DAYS} days",
+        [row(alert, "From the repository's dependency scan.") for alert in sorted(alerts, key=by_age)],
+        "None open.",
+    )
+    return "\n".join(lines).rstrip() + "\n"
+
+
 def past_week(done: list[dict], still_open: list[dict]) -> str:
     """The tail of the inbox: the past week's fixes, and triage verdicts nobody has acted on.
 
@@ -310,10 +381,26 @@ def past_week(done: list[dict], still_open: list[dict]) -> str:
     return "\n".join(lines).rstrip() + "\n"
 
 
-def failing(contexts: list[dict]) -> list[dict]:
-    """The failed checks and statuses of a rollup, as names and links."""
-    found = []
+def newest(contexts: list[dict]) -> list[dict]:
+    """A rollup with only the newest run of each check name, as a required check is judged.
+
+    A check re-run by a later event (Gatehouse triage after a reply) is a new run beside the
+    failed one, and the old failure would otherwise read as current.
+    """
+    runs: dict[str, dict] = {}
+    rest = []
     for context in contexts:
+        if "conclusion" not in context:
+            rest.append(context)
+        elif (context.get("startedAt") or "") >= (runs.get(context["name"], {}).get("startedAt") or ""):
+            runs[context["name"]] = context
+    return [*runs.values(), *rest]
+
+
+def failing(contexts: list[dict]) -> list[dict]:
+    """The failed checks and statuses of a rollup, newest run per check, as names and links."""
+    found = []
+    for context in newest(contexts):
         if context.get("conclusion") in FAILED_CHECKS:
             found.append({"name": context["name"], "url": context.get("detailsUrl")})
         elif context.get("state") in FAILED_STATUSES:
@@ -344,6 +431,8 @@ def red_branches(repos: list[dict]) -> list[dict]:
                 "state": rollup["state"],
                 "checks": failing(rollup["contexts"]["nodes"]),
                 "unread": rollup["contexts"].get("totalCount", 0) - len(rollup["contexts"]["nodes"]),
+                "committed_at": commit.get("committedDate", ""),
+                "issues": repo.get("hasIssuesEnabled", True),
             }
         )
     return sorted(red, key=lambda item: item["repo"])
@@ -368,23 +457,42 @@ def check_link(check: dict) -> str:
     return f"[{label}]({check['url']})" if LINKABLE.fullmatch(check.get("url") or "") else label
 
 
+def red_row(item: dict) -> str:
+    """One red default branch as a line: the commit, its state, and the checks that failed."""
+    name = item["repo"].split("/", 1)[-1]
+    checks = ", ".join(check_link(check) for check in item["checks"])
+    failed = f"Failing: {checks}." if checks else "No check failed outright; see the commit."
+    if item.get("unread", 0) > 0:
+        failed += f" {item['unread']} more checks were not read; see the commit."
+    return (
+        f"- [{name}]({item['url']}) `{plain(item['branch'])}` at `{item['sha'][:7]}`: "
+        f"{item['state'].lower()}. {failed}"
+    )
+
+
+RED_MARKER = "<!-- ashigaru:red -->"
+RED_TITLE = "Default branch is red"
+
+
+def red_issue(item: dict) -> str:
+    """The body of the issue a red repository carries. No timestamps: the same failure renders the same."""
+    return "\n".join([
+        RED_MARKER,
+        "The default branch head has failed checks. The hourly Ashigaru sweep keeps this issue "
+        "current and closes it once the branch is green again.",
+        "",
+        red_row(item),
+        "",
+    ])  # fmt: skip
+
+
 def red(branches: list[dict], runs: list[dict], unread: list[str]) -> str:
     """The inbox part for CI that is red on a default branch, and for watched workflow runs.
 
     Check names come from other people's workflows, so they are code spans.
     `unread` names what could not be read, so a gap is not taken for green.
     """
-    rows = []
-    for item in branches:
-        name = item["repo"].split("/", 1)[-1]
-        checks = ", ".join(check_link(check) for check in item["checks"])
-        failed = f"Failing: {checks}." if checks else "No check failed outright; see the commit."
-        if item.get("unread", 0) > 0:
-            failed += f" {item['unread']} more checks were not read; see the commit."
-        rows.append(
-            f"- [{name}]({item['url']}) `{plain(item['branch'])}` at `{item['sha'][:7]}`: "
-            f"{item['state'].lower()}. {failed}"
-        )
+    rows = [red_row(item) for item in branches]
     for item in runs:
         name = item["repo"].split("/", 1)[-1]
         rows.append(

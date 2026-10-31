@@ -6,9 +6,20 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- A repository whose default branch is red gets one issue, labeled `ashigaru-red` and titled "Default branch is red", once the red head is more than an hour old. The sweep rewrites it when the failing checks change and closes it when the branch is green. openclaw was red for four days with only a line in the inbox to show for it.
+- The inbox lists dependency-scan alerts (issues by `github-actions[bot]` labeled `security` and `dependencies`) open more than three days. The scan files them with the workflow token, which starts no workflow, and triage reads only what people wrote, so gatehouse#96 sat five days after its fix with nothing looking at it.
+
+### Changed
+
+- A release pull request with auto-merge on whose head has a failed check is listed in the inbox under "Pull requests Ashigaru handed over", and the releases record says "Blocked:" with the check named, where it said "Merges when its checks pass." mcp-metsuke#66 sat four days on one unanswered Gatehouse finding while the record said it would merge on its own.
+- Failing checks are judged by the newest run of each check name, as a required check is, so a check that failed and passed on a later run is not reported as failing.
+
 ### Fixed
 
 - A run that was still in flight when Ashigaru's own pull request merged no longer marks the already-closed issue `needs-human` ("fix no longer applies"); it does nothing.
+- The documented lint-and-test command runs in `python:3.12` rather than `-slim`, which has no `git`, so four release tests no longer fail locally while passing in CI.
 - The inbox and releases issues stay one issue each. A label listing that came back empty for an hour-old issue made the sweep open #114 and #115 beside #94 and #90, and every later run edited the newest, so #90 and #94 went stale under the weekend report. An empty listing is now asked again before an issue is created, the oldest open issue is the one edited, and any newer duplicate is closed pointing at it.
 
 ## [2.8.0] - 2026-10-20

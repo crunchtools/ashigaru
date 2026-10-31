@@ -284,6 +284,7 @@ def listing(pull: dict) -> dict:
         "url": pull["url"],
         "version": pull["headRefName"].removeprefix(inbox.RELEASE_BRANCH),
         "auto": bool(pull.get("autoMergeRequest")),
+        "failing": inbox.failing(pull.get("statusCheckRollup") or []),
     }
 
 
@@ -429,7 +430,11 @@ def short(repo: str) -> str:
 
 
 def pull_row(item: dict, pull: dict) -> str:
-    fate = "Merges when its checks pass." if pull["auto"] else "Waiting on a maintainer."
+    """One open release pull request. Auto-merge only waits on checks, so a failed one is named."""
+    if pull.get("failing"):
+        fate = inbox.blocked(pull["failing"])
+    else:
+        fate = "Merges when its checks pass." if pull["auto"] else "Waiting on a maintainer."
     return f"- [{short(item['repo'])}#{pull['number']}]({pull['url']}) release {pull['version']}. {fate}"
 
 

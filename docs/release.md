@@ -55,7 +55,7 @@ A version with no tag and no such pull request is not Ashigaru's to publish. It 
 **The record.** One issue in the Ashigaru repository, labeled `ashigaru-releases`, rewritten when it changes:
 
 - releases published in the last seven days in any enrolled repository, whoever cut them;
-- release pull requests that are open, and whether each merges on its own;
+- release pull requests that are open, and whether each merges on its own. One with auto-merge on whose head has a failed check says "Blocked:" and names the check: auto-merge waits on it forever, and no other release of that repository opens meanwhile;
 - repositories with unreleased entries and no release pull request, including those with releases off;
 - repositories with releases on that could not be released, and why.
 
