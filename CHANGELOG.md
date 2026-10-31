@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [2.9.0] - 2026-10-31
+
 ### Added
 
 - A repository whose default branch is red gets one issue, labeled `ashigaru-red` and titled "Default branch is red", once the red head is more than an hour old. The sweep rewrites it when the failing checks change and closes it when the branch is green. openclaw was red for four days with only a line in the inbox to show for it.
