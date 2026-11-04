@@ -1,3 +1,20 @@
+# The [project] table exists so `uv lock` can pin the gate's own tools; the
+# agents are scripts under scripts/, run by path, not an installable package,
+# which is what `package = false` says. Without a lockfile naming mypy and
+# pytest the gate exits 2 (python-sdlc, need_lock_dep) rather than reporting a
+# pass it never ran.
+[project]
+name = "ashigaru"
+version = "0"
+requires-python = ">=3.12"
+dependencies = []
+
+[tool.uv]
+package = false
+
+[dependency-groups]
+dev = ["mypy>=1.14", "pytest>=8.3", "pyyaml>=6.0.3"]
+
 # Tool configuration only. Ashigaru ships workflows and scripts, not a package;
 # the scripts use the standard library and the `gh` CLI the runner provides.
 
@@ -19,3 +36,20 @@ max-statements = 50
 [tool.pytest.ini_options]
 pythonpath = ["scripts"]
 testpaths = ["tests"]
+
+# The agent scripts and their tests, by path -- not a package. pytest already
+# puts scripts/ on sys.path via [tool.pytest.ini_options] pythonpath.
+[tool.mypy]
+files = ["scripts", "tests"]
+mypy_path = "scripts"
+ignore_missing_imports = true
+
+[tool.sdlc.push]
+# No in-repo Semgrep rules: the check exits 2 when .semgrep is absent rather
+# than scanning nothing and calling it a pass.
+skip = ["semgrep"]
+
+[tool.sdlc.ci]
+# The CodeQL Action job uploads to the Security tab and annotates new alerts on
+# the pull request, so CI does not analyse a second time. Push still gates on it.
+skip = ["codeql"]

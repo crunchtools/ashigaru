@@ -74,7 +74,7 @@ jobs:
         id: app
         uses: actions/create-github-app-token@v3
         with:
-          app-id: ${{ secrets.ASHIGARU_APP_ID }}
+          client-id: ${{ vars.ASHIGARU_CLIENT_ID }}
           private-key: ${{ secrets.ASHIGARU_APP_KEY }}
           owner: ${{ github.repository_owner }}
           permission-contents: read
@@ -120,7 +120,7 @@ jobs:
         id: reader
         uses: actions/create-github-app-token@v3
         with:
-          app-id: ${{ secrets.ASHIGARU_APP_ID }}
+          client-id: ${{ vars.ASHIGARU_CLIENT_ID }}
           private-key: ${{ secrets.ASHIGARU_APP_KEY }}
           owner: ${{ github.repository_owner }}
           permission-contents: read
@@ -146,7 +146,7 @@ jobs:
         if: steps.plan.outputs.repos != ''
         uses: actions/create-github-app-token@v3
         with:
-          app-id: ${{ secrets.ASHIGARU_APP_ID }}
+          client-id: ${{ vars.ASHIGARU_CLIENT_ID }}
           private-key: ${{ secrets.ASHIGARU_APP_KEY }}
           owner: ${{ github.repository_owner }}
           repositories: ${{ steps.plan.outputs.repos }}

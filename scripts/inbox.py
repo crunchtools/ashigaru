@@ -311,10 +311,13 @@ def row(item: dict, note: str) -> str:
 
 def verdict(review: dict | None) -> str:
     """What the list says about a pull request's review."""
-    said = RECOMMENDATIONS.get(review["verdict"]) if review else None
-    if said:
-        return f"Ashigaru: {said}{', already fixed on the base branch' if review['fixed'] else ''}."
-    return "Ashigaru could not review it." if review else "Not reviewed yet."
+    if review is None:
+        return "Not reviewed yet."
+    said = RECOMMENDATIONS.get(review["verdict"])
+    if not said:
+        return "Ashigaru could not review it."
+    fixed = ", already fixed on the base branch" if review["fixed"] else ""
+    return f"Ashigaru: {said}{fixed}."
 
 
 def kinds(item: dict) -> str:

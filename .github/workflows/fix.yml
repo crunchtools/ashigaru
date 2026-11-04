@@ -183,7 +183,7 @@ jobs:
         id: app
         uses: actions/create-github-app-token@v3
         with:
-          app-id: ${{ secrets.ASHIGARU_APP_ID }}
+          client-id: ${{ vars.ASHIGARU_CLIENT_ID }}
           private-key: ${{ secrets.ASHIGARU_APP_KEY }}
           permission-contents: write
           permission-issues: write
