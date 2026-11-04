@@ -12,7 +12,14 @@ permissions:
 jobs:
   sdlc:
     name: sdlc ci
+    # The kill switch, on the FIRST job of the workflow, as every other
+    # workflow here does it. The job this replaced carried it; dropping it
+    # would have left one workflow that ASHIGARU_ENABLED=false does not stop.
+    if: vars.ASHIGARU_ENABLED == 'true'
     runs-on: ubuntu-latest
+    # The replaced job had `timeout-minutes: 10`. Without one a hung check
+    # holds a runner until GitHub's six-hour default.
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
         with:

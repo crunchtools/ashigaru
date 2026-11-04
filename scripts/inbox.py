@@ -311,7 +311,10 @@ def row(item: dict, note: str) -> str:
 
 def verdict(review: dict | None) -> str:
     """What the list says about a pull request's review."""
-    if review is None:
+    # `not review`, not `review is None`: the original guard was `if review`,
+    # which also catches an EMPTY dict. Narrowing it to None let {} through to
+    # review["verdict"] and a KeyError.
+    if not review:
         return "Not reviewed yet."
     said = RECOMMENDATIONS.get(review["verdict"])
     if not said:
