@@ -20,7 +20,12 @@ RELEASE = re.compile(r"^v(\d+)\.(\d+)\.(\d+)$")
 def parts(tag: str) -> tuple[int, int, int] | None:
     """`v2.6.0` as (2, 6, 0); None for anything that is not a release tag."""
     found = RELEASE.match(tag)
-    return tuple(int(number) for number in found.groups()) if found else None
+    if not found:
+        return None
+    # Unpacked rather than a generator: the signature promises exactly three,
+    # and `tuple(... for ...)` is tuple[int, ...] as far as a checker knows.
+    major, minor, patch = found.groups()
+    return (int(major), int(minor), int(patch))
 
 
 def major_tag(tag: str, tags: list[str]) -> str | None:

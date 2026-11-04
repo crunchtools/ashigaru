@@ -25,7 +25,7 @@ def replies(findings: list[dict], dispositions: list[dict], sha: str | None) -> 
     out: dict[int, str] = {}
     for item in dispositions:
         finding_id = item.get("id")
-        if finding_id not in known:
+        if finding_id is None or finding_id not in known:
             continue
         reason = str(item.get("reason", "")).strip()
         if item.get("disposition") == "fixed" and sha:

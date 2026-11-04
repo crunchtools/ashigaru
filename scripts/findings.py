@@ -56,7 +56,7 @@ def rounds_used(issue_comments: list[dict]) -> int:
 
 def _own(run: dict, own_run_id: str) -> bool:
     match = JOB_URL.search(run.get("details_url") or "")
-    return bool(match) and match.group(1) == own_run_id
+    return match is not None and match.group(1) == own_run_id
 
 
 def pending(check_runs: list[dict], own_run_id: str) -> list[str]:
