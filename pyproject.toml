@@ -49,7 +49,3 @@ ignore_missing_imports = true
 # than scanning nothing and calling it a pass.
 skip = ["semgrep"]
 
-[tool.sdlc.ci]
-# The CodeQL Action job uploads to the Security tab and annotates new alerts on
-# the pull request, so CI does not analyse a second time. Push still gates on it.
-skip = ["codeql"]
