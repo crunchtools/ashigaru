@@ -18,6 +18,8 @@ The caller runs `fix.yml` when the `Gatehouse` workflow completes. It acts only 
 
 **Push and answer findings** (app token, no model): `scripts/fix_publish.py` pushes the patch and replies `fixed in <sha>` or `not a bug: <reason>`. A finding the agent did not account for gets no reply, so the required check stays red.
 
+**Second source: maintainers.** `findings.py` also collects, from accounts with write access (`can_write`), inline comments, review bodies (a `changes-requested` review is findings, not a stop) and pull-request comments nobody has answered, and passes comments added to the linked issue since the last round as context. Each finding carries its `origin` and `author`. A maintainer finding is answered `fixed in <sha>` or with one question, never `not a bug`; `fix_publish.py` refuses to post a dismissal for it, and a question sets `needs-human`. Bots, Ashigaru itself and accounts without write access are never findings, so a reply cannot start the next round and outside contributors stay on the [review](review.md) path. Pickup is at a round boundary; a running job is not interrupted.
+
 Each round leaves a marker comment on the pull request; that is how rounds are counted. Rounds 1 and 2 use `model`, later rounds `escalation_model`. After `max_rounds` (default 5), or when a round changes no code while work remains, the pull request gets `needs-human`, auto-merge is turned off, and Ashigaru stops acting on it.
 
 A `not a bug` reply is the agent judging a finding on its own pull request. Nothing independent checks the reason. The round limit and the repository's deterministic checks are the backstops.

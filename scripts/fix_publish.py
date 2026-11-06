@@ -15,24 +15,45 @@ import sys
 from pathlib import Path
 
 from common import NEEDS_HUMAN, gh, git, set_state, touches_protected
-from findings import MAX_ROUNDS, ROUND_MARKER
+from findings import ANSWER_MARKER, MAX_ROUNDS, ROUND_MARKER
 from publish import BOT_EMAIL, BOT_NAME, TRAILER
 
 
 def replies(findings: list[dict], dispositions: list[dict], sha: str | None) -> dict[int, str]:
     """The reply for each finding that was accounted for, keyed by comment id."""
-    known = {finding["id"] for finding in findings}
+    known = {finding["id"]: finding for finding in findings}
     out: dict[int, str] = {}
     for item in dispositions:
         finding_id = item.get("id")
         if finding_id is None or finding_id not in known:
             continue
+        maintainer = known[finding_id].get("origin") == "maintainer"
         reason = str(item.get("reason", "")).strip()
         if item.get("disposition") == "fixed" and sha:
             out[finding_id] = f"fixed in {sha}"
-        elif item.get("disposition") == "not_a_bug" and reason:
-            out[finding_id] = f"not a bug: {reason}"
+        elif item.get("disposition") == "not_a_bug" and reason and not maintainer:
+            out[finding_id] = f"not a bug: {reason}"  # a person's comment is never dismissed
+        elif item.get("disposition") == "question" and reason and maintainer:
+            out[finding_id] = reason
     return out
+
+
+def asked(findings: list[dict], answered: dict[int, str], dispositions: list[dict]) -> bool:
+    """True when a maintainer finding was answered with a question, which hands the PR to a person."""
+    questions = {i["id"] for i in dispositions if i.get("disposition") == "question"}
+    return any(
+        f["id"] in answered and f["id"] in questions for f in findings if f.get("origin") == "maintainer"
+    )
+
+
+def post_reply(repo: str, number: int, finding: dict, body: str) -> None:
+    """Answer in the inline thread; elsewhere a pull-request comment carrying the answer marker."""
+    if finding.get("kind", "inline") == "inline":
+        gh("api", f"repos/{repo}/pulls/{number}/comments/{finding['id']}/replies", "-f", f"body={body}")
+        return
+    marker = ANSWER_MARKER.format(kind=finding["kind"], id=finding["id"])
+    gh("pr", "comment", str(number), "--repo", repo, "--body",
+       f"{marker}\n@{finding['author']} {body}")  # fmt: skip
 
 
 def next_step(sha: str | None, left: int, failed_checks: bool) -> str | None:
@@ -96,8 +117,9 @@ def main() -> int:
         sha = git("rev-parse", "HEAD").strip()
 
     answered = replies(collected["findings"], result.get("dispositions") or [], sha)
+    by_id = {finding["id"]: finding for finding in collected["findings"]}
     for finding_id, body in answered.items():
-        gh("api", f"repos/{args.repo}/pulls/{number}/comments/{finding_id}/replies", "-f", f"body={body}")
+        post_reply(args.repo, number, by_id[finding_id], body)
 
     left = len(collected["findings"]) - len(answered)
     summary = str(result.get("summary", "")).strip() or "No summary returned."
@@ -108,7 +130,11 @@ def main() -> int:
         f"{'pushed ' + sha if sha else 'no code change'}.",
     )  # fmt: skip
     step = next_step(sha, left, bool(collected["failed_checks"]))
-    if step == "hand_off":
+    if asked(collected["findings"], answered, result.get("dispositions") or []):
+        hand_off(
+            args.repo, number, "A maintainer comment was answered with a question, so a person is needed."
+        )
+    elif step == "hand_off":
         hand_off(
             args.repo, number, "The round changed no code and work remains, so another round would not help."
         )

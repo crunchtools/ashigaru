@@ -3,7 +3,7 @@
 from unittest.mock import patch
 
 from common import touches_protected
-from fix_publish import next_step, replies
+from fix_publish import asked, next_step, post_reply, replies
 from publish import commit_message, credit, landed, refusal, stale
 
 PATCH = "diff --git a/src/app.py b/src/app.py\n--- a/src/app.py\n+++ b/src/app.py\n@@ -1 +1 @@\n-a\n+b\n"
@@ -32,6 +32,34 @@ def test_nothing_under_dot_github_is_ever_published():
     assert touches_protected(ACTION_PATCH)
     assert not touches_protected(PATCH)
     assert ".github/" in refusal({"status": "fixed"}, WORKFLOW_PATCH)
+
+
+def test_a_maintainer_comment_is_never_dismissed():
+    found = [{"id": 1, "origin": "maintainer"}, {"id": 2, "origin": "reviewer"}]
+    got = replies(found, [{"id": 1, "disposition": "not_a_bug", "reason": "r"},
+                          {"id": 2, "disposition": "question", "reason": "q?"}], "abc")  # fmt: skip
+    assert got == {}
+    asked_one = [{"id": 1, "disposition": "question", "reason": "which one?"}]
+    assert replies(found, asked_one, None) == {1: "which one?"}
+
+
+def test_a_question_on_a_maintainer_finding_hands_off_only_when_answered():
+    found = [{"id": 1, "origin": "maintainer"}, {"id": 2, "origin": "reviewer"}]
+    disp = [{"id": 1, "disposition": "question"}, {"id": 2, "disposition": "question"}]
+    assert asked(found, {1: "q?"}, disp)
+    assert not asked(found, {}, disp)
+    assert not asked(found, {2: "q?"}, disp)
+
+
+def test_inline_findings_are_answered_in_thread_and_others_by_marked_comment():
+    with patch("fix_publish.gh") as gh:
+        post_reply("o/r", 5, {"id": 9, "kind": "inline", "author": "a"}, "fixed in abc")
+        post_reply("o/r", 5, {"id": 7, "kind": "review", "author": "maint"}, "fixed in abc")
+    first, second = gh.call_args_list
+    assert first.args[1] == "repos/o/r/pulls/5/comments/9/replies"
+    assert second.args[:3] == ("pr", "comment", "5")
+    body = second.args[-1]
+    assert body.startswith("<!-- ashigaru:answered:review:7 -->") and "@maint fixed in abc" in body
 
 
 def test_commit_message_closes_the_issue_and_carries_the_trailer():
