@@ -26,6 +26,18 @@ IGNORED_CHECKS = ("Gatehouse triage",)
 FAILED = ("failure", "timed_out")
 JOB_URL = re.compile(r"/actions/runs/(\d+)/job/(\d+)")
 LOG_TAIL_LINES = 150
+LOG_LINES_BEFORE = 40
+LOG_LINES_AFTER = 10
+LOG_EXCERPT_LINES = 300
+FAILURE_MARKERS = (
+    "GATE CANNOT RUN",
+    "cannot(",
+    "##[error]",
+    "Error:",
+    "error:",
+    "FAILED",
+    "Traceback (most recent call last)",
+)
 POLL_SECONDS = 30
 WAIT_SECONDS = 900
 MAX_ROUNDS = 5
@@ -105,7 +117,9 @@ def maintainer_findings(
         if comment.get("in_reply_to_id") and trusted(comment):
             replied_by.setdefault(comment["in_reply_to_id"], set()).add(comment["user"]["login"])
     marked = "\n".join(
-        comment.get("body") or "" for comment in pr_comments if (comment.get("user") or {}).get("login") in bots
+        comment.get("body") or ""
+        for comment in pr_comments
+        if (comment.get("user") or {}).get("login") in bots
     )
 
     def open_item(kind: str, item: dict) -> bool:
@@ -129,7 +143,9 @@ def maintainer_findings(
     return found
 
 
-def issue_context(issue_comments: list[dict], pr_comments: list[dict], ok: Callable[[dict], bool]) -> list[dict]:
+def issue_context(
+    issue_comments: list[dict], pr_comments: list[dict], ok: Callable[[dict], bool]
+) -> list[dict]:
     """Comments added to the linked issue since the last round marker, from write-access accounts."""
     since = max((c["created_at"] for c in pr_comments if ROUND_MARKER in (c.get("body") or "")), default="")
     return [
@@ -185,7 +201,37 @@ def failure_log(repo: str, run: dict) -> str:
     except subprocess.CalledProcessError as error:
         print(f"::warning::no log for {run['name']}: {error.stderr.strip()}")
         return "(the log could not be retrieved)"
-    return "\n".join(log.splitlines()[-LOG_TAIL_LINES:])
+    return excerpt(log)
+
+
+def excerpt(log: str) -> str:
+    """The lines around every failure marker in the whole log, or its tail when none match.
+
+    Windows that touch are merged. Dropped lines are counted inline, never cut silently.
+    """
+    lines = log.splitlines()
+    hits = [i for i, line in enumerate(lines) if any(marker in line for marker in FAILURE_MARKERS)]
+    if not hits:
+        return "\n".join(lines[-LOG_TAIL_LINES:])
+    spans: list[list[int]] = []
+    for i in hits:
+        start, end = max(0, i - LOG_LINES_BEFORE), min(len(lines), i + LOG_LINES_AFTER + 1)
+        if spans and start <= spans[-1][1]:
+            spans[-1][1] = max(spans[-1][1], end)
+        else:
+            spans.append([start, end])
+    out: list[str] = []
+    previous = 0
+    for start, end in spans:
+        if start > previous:
+            out.append(f"[… {start - previous} lines omitted …]")
+        out.extend(lines[start:end])
+        previous = end
+    if previous < len(lines):
+        out.append(f"[… {len(lines) - previous} lines omitted …]")
+    if len(out) > LOG_EXCERPT_LINES:
+        out = [*out[:LOG_EXCERPT_LINES], f"[… {len(out) - LOG_EXCERPT_LINES} more lines omitted …]"]
+    return "\n".join(out)
 
 
 def check_runs(repo: str, sha: str) -> list[dict]:
@@ -231,7 +277,9 @@ def main() -> int:
     reviews = api_pages(f"repos/{args.repo}/pulls/{number}/reviews?per_page=100")
 
     ok = maintainer_check(args.reviewer, args.bot, lambda login: can_write(args.repo, login))
-    findings = unanswered(inline, args.reviewer) + maintainer_findings(inline, reviews, pr_comments, ok, args.bot)
+    findings = unanswered(inline, args.reviewer) + maintainer_findings(
+        inline, reviews, pr_comments, ok, args.bot
+    )
     linked = BRANCH_ISSUE.match(args.branch)
     context = []
     if linked:

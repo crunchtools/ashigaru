@@ -2,7 +2,10 @@
 
 from findings import (
     ANSWER_MARKER,
+    LOG_EXCERPT_LINES,
+    LOG_TAIL_LINES,
     ROUND_MARKER,
+    excerpt,
     failed,
     issue_context,
     maintainer_check,
@@ -121,6 +124,29 @@ def test_pending_ignores_this_run():
 
 def test_model_escalates_at_the_configured_round():
     assert [model_for(n, "sonnet", "opus", 3) for n in (1, 2, 3, 5)] == ["sonnet", "sonnet", "opus", "opus"]
+
+
+def test_excerpt_finds_a_failure_far_above_a_passing_tail():
+    log = ["sdlc: lane main: mypy"] + [f"build step {i}" for i in range(200)]
+    log += ['tests/test_x.py:86: error: Module has no attribute "PROC"  [attr-defined]']
+    log += ["sdlc: mypy FAILED after 2s"]
+    log += [f"image step {i}" for i in range(500)] + ["== image-tests passed in 1s"]
+    text = excerpt("\n".join(log))
+    assert 'Module has no attribute "PROC"' in text
+    assert "sdlc: mypy FAILED" in text
+    assert "lines omitted" in text
+
+
+def test_excerpt_without_a_marker_is_the_tail():
+    log = [f"line {i}" for i in range(400)]
+    assert excerpt("\n".join(log)).splitlines() == log[-LOG_TAIL_LINES:]
+
+
+def test_excerpt_is_capped_and_says_so():
+    log = [f"error: problem {i}" for i in range(LOG_EXCERPT_LINES * 2)]
+    lines = excerpt("\n".join(log)).splitlines()
+    assert len(lines) == LOG_EXCERPT_LINES + 1
+    assert "more lines omitted" in lines[-1]
 
 
 def test_only_pull_requests_the_app_opened_are_touched():
