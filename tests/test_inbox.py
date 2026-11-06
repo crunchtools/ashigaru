@@ -306,8 +306,31 @@ def repo_node(name, state, contexts=(), **overrides):
     }  # fmt: skip
 
 
-def check(name, conclusion, url="https://github.com/o/r/actions/runs/1/job/2"):
-    return {"name": name, "conclusion": conclusion, "detailsUrl": url}
+def check(name, conclusion, url="https://github.com/o/r/actions/runs/1/job/2", suite=None):
+    """`suite` is the check suite's own conclusion: SUCCESS means a best-effort job."""
+    run = {"name": name, "conclusion": conclusion, "detailsUrl": url}
+    if suite is not None:
+        run["checkSuite"] = {"conclusion": suite}
+    return run
+
+
+def test_a_branch_whose_only_failure_is_best_effort_is_not_red():
+    """`continue-on-error: true` fails the check run and still concludes the workflow a success."""
+    mirror = [check("build-and-push-ghcr", "FAILURE", suite="SUCCESS")]
+    assert red_branches([repo_node("developer", "FAILURE", mirror)]) == []
+
+
+def test_a_real_failure_beside_a_best_effort_one_keeps_the_branch_red():
+    contexts = [check("mirror", "FAILURE", suite="SUCCESS"), check("CI", "FAILURE", suite="FAILURE")]
+    found = red_branches([repo_node("r", "FAILURE", contexts)])
+    assert [item["name"] for item in found[0]["checks"]] == ["CI"]
+
+
+def test_a_best_effort_failure_with_checks_unread_keeps_the_branch_red():
+    """What went unread could be a real failure, so the pass is not given away."""
+    rollup = repo_node("r", "FAILURE", [check("mirror", "FAILURE", suite="SUCCESS")])
+    rollup["defaultBranchRef"]["target"]["statusCheckRollup"]["contexts"]["totalCount"] = 40
+    assert [item["repo"] for item in red_branches([rollup])] == ["o/r"]
 
 
 def test_only_failed_or_errored_rollups_are_red():

@@ -405,15 +405,41 @@ def newest(contexts: list[dict]) -> list[dict]:
     return [*latest.values(), *(context for context in contexts if "conclusion" not in context)]
 
 
+def best_effort(context: dict) -> bool:
+    """True when a check run failed but the workflow run holding it concluded success.
+
+    That is `continue-on-error: true` seen from outside, and it is the author
+    saying the job is best effort. developer's GHCR mirror push cannot create an
+    org package, so it fails on every merge; it was made non-blocking on purpose
+    and the red-branch issue went on being reopened anyway, which is how a fleet
+    learns to ignore the alert.
+    """
+    return (context.get("checkSuite") or {}).get("conclusion") == "SUCCESS"
+
+
 def failing(contexts: list[dict]) -> list[dict]:
-    """The failed checks and statuses of a rollup, newest run per check, as names and links."""
+    """The failed checks and statuses of a rollup, newest run per check, as names and links.
+
+    A best-effort failure is left out -- see `best_effort` -- so this is what is
+    wrong with the head, not everything that reported a failure on it.
+    """
     found = []
     for context in newest(contexts):
-        if context.get("conclusion") in FAILED_CHECKS:
+        if context.get("conclusion") in FAILED_CHECKS and not best_effort(context):
             found.append({"name": context["name"], "url": context.get("detailsUrl")})
         elif context.get("state") in FAILED_STATUSES:
             found.append({"name": context["context"], "url": context.get("targetUrl")})
     return found
+
+
+def only_best_effort(contexts: list[dict]) -> bool:
+    """True when the rollup failed, every failure it read is best effort, and there is at least one.
+
+    Read checks only. A rollup can say FAILURE with no contexts read at all, and
+    that is not something to wave through.
+    """
+    failures = [c for c in newest(contexts) if c.get("conclusion") in FAILED_CHECKS]
+    return bool(failures) and all(best_effort(c) for c in failures) and not failing(contexts)
 
 
 def red_branches(repos: list[dict]) -> list[dict]:
@@ -430,6 +456,12 @@ def red_branches(repos: list[dict]) -> list[dict]:
         rollup = commit.get("statusCheckRollup")
         if repo.get("isArchived") or not rollup or rollup["state"] not in RED_ROLLUP:
             continue
+        nodes = rollup["contexts"]["nodes"]
+        # Clamped: a rollup that reports no total would otherwise read as -1 unread.
+        unread = max(0, rollup["contexts"].get("totalCount", 0) - len(nodes))
+        # Every failure on the head was best effort, and none went unread.
+        if not unread and only_best_effort(nodes):
+            continue
         red.append(
             {
                 "repo": repo["nameWithOwner"],
@@ -437,8 +469,8 @@ def red_branches(repos: list[dict]) -> list[dict]:
                 "sha": commit["oid"],
                 "url": commit["url"],
                 "state": rollup["state"],
-                "checks": failing(rollup["contexts"]["nodes"]),
-                "unread": rollup["contexts"].get("totalCount", 0) - len(rollup["contexts"]["nodes"]),
+                "checks": failing(nodes),
+                "unread": unread,
                 "committed_at": commit.get("committedDate", ""),
                 "issues": repo.get("hasIssuesEnabled", True),
             }
