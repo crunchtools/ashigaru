@@ -7,6 +7,7 @@ import argparse
 import json
 import sys
 
+import inbox
 from common import (
     NEEDS_INFO,
     READY_FOR_TRIAGE,
@@ -16,6 +17,7 @@ from common import (
     api_pages,
     ensure_labels,
     gh,
+    observing,
     publishable,
     set_output,
     set_state,
@@ -138,6 +140,14 @@ def main() -> int:
         else []
     )
     add, remove = type_labels(str(result.get("category", "")), history, current)
+    if observing(args.repo):
+        labels = ", ".join(f"`{name}`" for name in (state, *add))
+        inbox.observe(args.repo, f"triage #{args.issue}", [f"Would label it {labels} and comment: "
+                      f"{result.get('category', 'unknown')}."])  # fmt: skip
+        print(f"triage: {args.repo}#{args.issue} is watched; recorded {state}, changed nothing")
+        set_output("state", state)
+        set_output("auto_code", "true" if starts_now(state, args.queue) else "false")
+        return 0
     set_state(args.repo, args.issue, state, extra=add, remove=remove)
     # Every next step names one of these labels; a repo gets them only on first use.
     ensure_labels(args.repo, [READY_FOR_TRIAGE, READY_TO_CODE])

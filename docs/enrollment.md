@@ -35,6 +35,14 @@ gh repo edit crunchtools/mcp-pcloud --add-topic ashigaru-release-auto
 
 See [Release](release.md) for what the repository's `CHANGELOG.md` must look like.
 
+**Watch-only mode.** To see Ashigaru's judgement before it acts, add the topic `ashigaru-observe` (admins only), then copy the caller file as usual. It is the only switch: no input or variable.
+
+```bash
+gh repo edit crunchtools/mcp-pcloud --add-topic ashigaru-observe
+```
+
+While the topic is there, the triage and code agents still run and every step that would write instead records what it would have done in one issue in that repository, labeled `ashigaru-observe` and titled "Ashigaru is watching". The record is rewritten as things change, and the inbox lists it under `## Watching`. Nothing else is written: no label on any other issue, no comment, no branch, no pull request, no review, no fix round, no release. The sweep queues no triage or fix there, and nothing there counts against `code_per_hour`. Removing the topic ends it: the next sweep closes the issue with a comment, and Ashigaru acts normally with no other change. Ashigaru never triages or fixes its own observe issue.
+
 **Inputs**
 
 | Workflow | Input | Default |

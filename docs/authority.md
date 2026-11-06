@@ -26,6 +26,8 @@ Agent jobs check out with `persist-credentials: false`. What leaves an agent job
 
 **Releasing.** Off unless a repository carries a release topic, which only its admins can set; the app cannot. The release job runs no model and no repository code: it edits text in a clone and pushes a branch. It tags only the merge commit of a release pull request that Ashigaru wrote and that merged into the default branch, so the required checks and, in `pr` mode, a maintainer stand between the changelog and the tag. See [Release](release.md).
 
+**Watching.** A repository with the topic `ashigaru-observe`, which only its admins can set, is watch-only. This stops every write Ashigaru makes there: labels, comments, branches, pull requests, reviews, fix rounds, auto-merge and releases. The publish steps (`triage_apply.py`, `publish.py`, `fix_publish.py`, `review_publish.py`, `release.py`) and the sweep check the topic and write only to one issue, "Ashigaru is watching", in that repository. A publish step that cannot read the topic fails rather than acts. It does not stop the agents, which run with their read-only token, and it does not change the guard's trust levels. `ASHIGARU_ENABLED` is still the off switch.
+
 **Untrusted input.** `scripts/guard.py` asks the API for the effective repository permission of the issue's author and of whoever triggered the event, and returns one of three trust levels.
 
 | Trust | When | Triage | Code |

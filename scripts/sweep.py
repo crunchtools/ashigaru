@@ -22,6 +22,7 @@ from common import (
     INBOX,
     NEEDS_HUMAN,
     NEEDS_INFO,
+    OBSERVE,
     READY_FOR_TRIAGE,
     READY_TO_CODE,
     RED,
@@ -60,7 +61,8 @@ def candidates(repo: str, issues: list[dict]) -> list[dict]:
         for issue in issues
         if "pull_request" not in issue
         and issue["user"].get("type") == "User"
-        and not {label["name"] for label in issue.get("labels", [])} & {*STATE_LABELS, INBOX, RELEASES, RED}
+        and not {label["name"] for label in issue.get("labels", [])}
+        & {*STATE_LABELS, INBOX, RELEASES, RED, OBSERVE}
     ]
 
 
@@ -274,15 +276,16 @@ def red_actions(branches: list[dict], issues: list[dict], before: str) -> list[d
     return actions
 
 
-def red_issues(org: str) -> list[dict]:
-    """The open `ashigaru-red` issues across the organization."""
-    query = f"org:{org} is:issue is:open label:{RED}"
-    # One page: an organization with a hundred red repositories has bigger problems than this list.
+def labeled_issues(org: str, label: str) -> list[dict]:
+    """The open issues carrying `label` across the organization, as {repo, number, url, body}."""
+    query = f"org:{org} is:issue is:open label:{label}"
+    # One page: an organization with a hundred such repositories has bigger problems than this list.
     found = api(f"search/issues?q={urllib.parse.quote(query)}&per_page=100")["items"]
     return [
         {
             "repo": issue["repository_url"].split("/repos/", 1)[-1],
             "number": issue["number"],
+            "url": issue.get("html_url", ""),
             "body": issue.get("body") or "",
         }
         for issue in found
@@ -295,7 +298,7 @@ def keep_red(org: str, branches: list[dict], now: datetime, dry_run: bool) -> li
     One failed write does not stop the rest or the inbox; it is listed there instead.
     """
     try:
-        held = red_issues(org)
+        held = labeled_issues(org, RED)
     except subprocess.CalledProcessError as error:
         # Without the open issues every red repository would look new and get a second one.
         print(f"::warning::could not list the red issues: {error.stderr.strip()}")
@@ -327,6 +330,44 @@ def write_red(item: dict) -> None:
     else:
         gh("issue", "close", str(item["number"]), "--repo", item["repo"], "--reason", "completed",
            "--comment", item["why"])  # fmt: skip
+
+
+def would_do(found: list[dict], stuck: list[dict], ready: list[dict]) -> list[str]:
+    """What the sweep would have done in a watched repository: queue triage, rebuild, start a fix."""
+    return [
+        *(f"Would queue #{item['number']} for triage." for item in found),
+        *(
+            f"Would rebuild #{item['number']}, whose pull request #{item['pull']} conflicts."
+            for item in stuck
+        ),
+        *(f"Would start the fix for #{item['number']}." for item in ready),
+    ]
+
+
+def keep_watch(org: str, watched: dict[str, list[str]], dry_run: bool) -> list[dict]:
+    """Record the sweep's would-be actions in each watched repository's own issue, close the issue of
+    a repository that stopped being watched, and return the open ones for the inbox.
+
+    Without the open issues nothing is recorded or closed.
+    """
+    try:
+        held = labeled_issues(org, OBSERVE)
+    except subprocess.CalledProcessError as error:
+        print(f"::warning::could not list the observe issues: {error.stderr.strip()}")
+        return []
+    print(f"sweep: {len(watched)} watched repo(s)")
+    for repo, lines in sorted(watched.items()):
+        print(f"  watch {repo}: {len(lines)} would-be action(s)")
+        if not dry_run:
+            inbox.observe(repo, "sweep", lines)
+    for issue in held:
+        if issue["repo"] in watched:
+            continue
+        print(f"  close observe issue {issue['repo']}#{issue['number']}")
+        if not dry_run:
+            gh("issue", "close", str(issue["number"]), "--repo", issue["repo"], "--reason", "completed",
+               "--comment", "The `ashigaru-observe` topic is gone, so Ashigaru acts here again.")  # fmt: skip
+    return [issue for issue in held if issue["repo"] in watched]
 
 
 def past_week(org: str, since: str) -> tuple[list[dict], list[dict]]:
@@ -427,6 +468,38 @@ def keep_inbox(args: argparse.Namespace, since: str, waiting_on_people: str, now
     print(f"sweep: inbox {inbox.publish(args.inbox_repo, body)}")
 
 
+def dispatch(
+    args: argparse.Namespace, now: datetime, stuck: list[dict], ready: list[dict], untriaged: list[dict]
+) -> None:
+    """Start the fixes the hourly budget allows and queue the oldest untriaged issues."""
+    used = opened_since(args.org, args.bot, stamp(now - WINDOW))
+    budget = remaining(args.code_per_hour, used)
+    # Rebuilds first: finishing work beats starting it. Then the oldest waiting issues.
+    fixes = [*stuck, *sorted(ready, key=lambda item: (item["created_at"], item["repo"], item["number"]))]
+    print(f"sweep: {len(stuck)} conflicted, {len(ready)} waiting, {used} opened in the past hour, "
+          f"starting {min(len(fixes), budget)}")  # fmt: skip
+    start_fixes(fixes, budget, args.dry_run)
+
+    chosen = select(untriaged, args.limit)
+    print(f"sweep: {len(untriaged)} untriaged issue(s) in enrolled repos, queueing {len(chosen)}")
+    queue_triage(chosen, args.dry_run)
+
+
+def plan_reviews(args: argparse.Namespace, visitors: list[dict], outside_issues: int) -> dict[str, dict | None]:
+    """Choose the outside pull requests due a review and hand them to the review job; return the
+    reviews found so far, keyed by URL."""
+    # The same set is looked up, reviewed and listed, so nothing is reviewed twice for want of a lookup.
+    tracked = sorted(visitors, key=inbox.by_age)[: inbox.MAX_LISTED]
+    reviews = reviews_of(tracked, args.bot)
+    to_review = inbox.due(tracked, reviews)
+    print(f"sweep: {len(visitors)} outside pull request(s), {outside_issues} outside issue(s), "
+          f"reviewing {len(to_review)}")  # fmt: skip
+    for item in to_review:
+        print(f"  review {item['repo']}#{item['number']}")
+    set_output("reviews", json.dumps([] if args.dry_run else to_review))
+    return reviews
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--org", required=True)
@@ -446,11 +519,15 @@ def main() -> int:
     args = parser.parse_args()
 
     now = datetime.now(UTC)
-    repos = [
-        repo["full_name"]
+    listed = [
+        repo
         for repo in api_pages(f"orgs/{args.org}/repos?type=public&per_page=100")
         if not repo["archived"] and repo["has_issues"]
     ]
+    repos = [repo["full_name"] for repo in listed]
+    # The org listing carries topics, so the observe switch costs no request per repository.
+    watching = {repo["full_name"] for repo in listed if OBSERVE in (repo.get("topics") or [])}
+    watched: dict[str, list[str]] = {}
     untriaged: list[dict] = []
     stuck: list[dict] = []
     ready: list[dict] = []
@@ -464,11 +541,18 @@ def main() -> int:
             continue
         issues = api(f"repos/{repo}/{OLDEST_OPEN}")
         pulls = open_pulls(repo)
-        untriaged += candidates(repo, issues)
+        found = candidates(repo, issues)
         if args.retriage_before:
-            untriaged += stale(repo, issues, args.retriage_before, events, setters(args.bot))
-        stuck += conflicted(repo, pulls, args.bot)
-        ready += waiting(repo, issues, {pull["headRefName"] for pull in pulls}, stamp(now - SETTLE))
+            found += stale(repo, issues, args.retriage_before, events, setters(args.bot))
+        rebuild = conflicted(repo, pulls, args.bot)
+        start = waiting(repo, issues, {pull["headRefName"] for pull in pulls}, stamp(now - SETTLE))
+        if repo in watching:
+            # Nothing is labeled or queued, and none of it counts against the hourly fix budget.
+            watched[repo] = would_do(select(found, MAX_LIMIT), rebuild, start)
+        else:
+            untriaged += found
+            stuck += rebuild
+            ready += start
         # can_write is cached per repo and account, so each author costs one lookup per sweep.
         visitors += inbox.outside_pulls(repo, pulls, can_write)
         reports += inbox.outside_issues(repo, issues, can_write)
@@ -480,30 +564,17 @@ def main() -> int:
         alerts += inbox.open_alerts(repo, issues, stamp(now - timedelta(days=inbox.ALERT_DAYS)))
         questions[repo] = inbox.unanswered(issues)
 
-    used = opened_since(args.org, args.bot, stamp(now - WINDOW))
-    budget = remaining(args.code_per_hour, used)
-    # Rebuilds first: finishing work beats starting it. Then the oldest waiting issues.
-    fixes = [*stuck, *sorted(ready, key=lambda item: (item["created_at"], item["repo"], item["number"]))]
-    print(f"sweep: {len(stuck)} conflicted, {len(ready)} waiting, {used} opened in the past hour, "
-          f"starting {min(len(fixes), budget)}")  # fmt: skip
-    start_fixes(fixes, budget, args.dry_run)
+    dispatch(args, now, stuck, ready, untriaged)
 
-    chosen = select(untriaged, args.limit)
-    print(f"sweep: {len(untriaged)} untriaged issue(s) in enrolled repos, queueing {len(chosen)}")
-    queue_triage(chosen, args.dry_run)
-
-    # The same set is looked up, reviewed and listed, so nothing is reviewed twice for want of a lookup.
-    tracked = sorted(visitors, key=inbox.by_age)[: inbox.MAX_LISTED]
-    reviews = reviews_of(tracked, args.bot)
-    to_review = inbox.due(tracked, reviews)
-    print(f"sweep: {len(visitors)} outside pull request(s), {len(reports)} outside issue(s), "
-          f"reviewing {len(to_review)}")  # fmt: skip
-    for item in to_review:
-        print(f"  review {item['repo']}#{item['number']}")
-    set_output("reviews", json.dumps([] if args.dry_run else to_review))
+    reviews = plan_reviews(args, visitors, len(reports))
+    observed = keep_watch(args.org, watched, args.dry_run)
     if args.inbox_repo:
         waiting_on_people = "\n".join(
-            [inbox.render(visitors, reviews, reports, stopped, questions), inbox.security(alerts)]
+            [
+                inbox.render(visitors, reviews, reports, stopped, questions),
+                inbox.security(alerts),
+                inbox.watching(observed),
+            ]
         )
         keep_inbox(args, stamp(now - timedelta(days=inbox.RECENT_DAYS)), waiting_on_people, now)
     return 0

@@ -13,7 +13,8 @@ import argparse
 import json
 import sys
 
-from common import api, api_pages, gh, publishable
+import inbox
+from common import api, api_pages, gh, observing, publishable
 from inbox import RECOMMENDATIONS, last_review, review_marker
 
 UNKNOWN = "unknown"
@@ -113,7 +114,12 @@ def main() -> int:
 
     facts = json.loads(gh("pr", "view", str(args.pull), "--repo", args.repo, "--json", FACT_FIELDS))
     done = "is not open, nothing posted"
-    if facts.get("state") == "OPEN":
+    if facts.get("state") == "OPEN" and observing(args.repo):
+        verdict = parse(args.result)
+        said = RECOMMENDATIONS[verdict["recommendation"]] if verdict else UNKNOWN
+        inbox.observe(args.repo, f"review #{args.pull}", [f"Would post a first-pass review: {said}."])
+        done = "is watched, review recorded and nothing posted"
+    elif facts.get("state") == "OPEN":
         done = post(args.repo, args.pull, comment(parse(args.result), args.sha, facts), args.bot)
     print(f"review: {args.repo}#{args.pull} {done}")
     return 0
