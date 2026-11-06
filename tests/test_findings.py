@@ -146,7 +146,27 @@ def test_excerpt_is_capped_and_says_so():
     log = [f"error: problem {i}" for i in range(LOG_EXCERPT_LINES * 2)]
     lines = excerpt("\n".join(log)).splitlines()
     assert len(lines) == LOG_EXCERPT_LINES + 1
-    assert "more lines omitted" in lines[-1]
+    assert lines[-1] == f"[… {LOG_EXCERPT_LINES} lines omitted …]"
+
+
+def test_excerpt_keeps_distant_failures_separate_and_counts_the_gaps():
+    log = [f"ok {i}" for i in range(300)]
+    log[100] = "error: first"
+    log[250] = "error: second"
+    lines = excerpt("\n".join(log)).splitlines()
+    assert "error: first" in lines and "error: second" in lines
+    assert lines[0] == "[… 60 lines omitted …]"
+    assert "[… 59 lines omitted …]" in lines
+    assert lines[-1] == "[… 39 lines omitted …]"
+
+
+def test_excerpt_cap_keeps_every_window_when_there_are_many():
+    log = []
+    for i in range(10):
+        log += [f"ok {i}-{j}" for j in range(200)] + [f"error: failure {i}"] * 40
+    text = excerpt("\n".join(log))
+    assert all(f"error: failure {i}" in text for i in range(10))
+    assert len(text.splitlines()) <= LOG_EXCERPT_LINES + 11
 
 
 def test_only_pull_requests_the_app_opened_are_touched():

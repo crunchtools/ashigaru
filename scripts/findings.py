@@ -213,24 +213,29 @@ def excerpt(log: str) -> str:
     hits = [i for i, line in enumerate(lines) if any(marker in line for marker in FAILURE_MARKERS)]
     if not hits:
         return "\n".join(lines[-LOG_TAIL_LINES:])
-    spans: list[list[int]] = []
+    spans: list[list[int]] = []  # [start, end, first hit]
     for i in hits:
         start, end = max(0, i - LOG_LINES_BEFORE), min(len(lines), i + LOG_LINES_AFTER + 1)
         if spans and start <= spans[-1][1]:
             spans[-1][1] = max(spans[-1][1], end)
         else:
-            spans.append([start, end])
+            spans.append([start, end, i])
+    # The cap is shared out per window so every failure keeps some context. A window that
+    # is cut keeps the lines around its first hit; cut lines are counted in the next gap.
+    spans = spans[:LOG_EXCERPT_LINES]
+    share = max(1, LOG_EXCERPT_LINES // len(spans))
     out: list[str] = []
     previous = 0
-    for start, end in spans:
+    for start, end, hit in spans:
+        if end - start > share:
+            start = max(start, min(hit - share // 2, end - share))
+            end = start + share
         if start > previous:
             out.append(f"[… {start - previous} lines omitted …]")
         out.extend(lines[start:end])
         previous = end
     if previous < len(lines):
         out.append(f"[… {len(lines) - previous} lines omitted …]")
-    if len(out) > LOG_EXCERPT_LINES:
-        out = [*out[:LOG_EXCERPT_LINES], f"[… {len(out) - LOG_EXCERPT_LINES} more lines omitted …]"]
     return "\n".join(out)
 
 
