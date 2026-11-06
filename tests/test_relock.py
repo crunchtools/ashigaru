@@ -33,6 +33,11 @@ def test_only_a_changed_manifest_with_a_lockfile_triggers_a_relock(tmp_path):
     assert wanted(MANIFEST, repo(bare, lock=False)) is None
 
 
+def test_a_patch_that_deletes_the_lockfile_still_gets_it_regenerated(tmp_path):
+    deleted = "diff --git a/uv.lock b/uv.lock\ndeleted file mode 100644\n"
+    assert wanted(MANIFEST + deleted, repo(tmp_path, lock=False)) == ("uv.lock", ("uv", "lock"))
+
+
 def test_no_command_runs_when_nothing_needs_a_relock(tmp_path):
     def boom(command, **kwargs):
         raise AssertionError("ran")

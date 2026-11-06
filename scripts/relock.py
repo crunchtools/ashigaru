@@ -29,11 +29,13 @@ def changed_files(patch: str) -> set[str]:
 def wanted(patch: str, root: Path) -> tuple[str, tuple[str, ...]] | None:
     """The lockfile and lock command to run, or None when the patch needs no relock.
 
-    Only a changed root manifest with its lockfile present in the repository triggers one.
+    Only a changed root manifest triggers one, and only when the repository uses its lockfile:
+    the lockfile is present, or the patch names it (so a patch that deletes it alongside a
+    manifest change gets it regenerated, not dropped).
     """
     changed = changed_files(patch)
     for manifest, lockfile, command in ECOSYSTEMS:
-        if manifest in changed and (root / lockfile).is_file():
+        if manifest in changed and ((root / lockfile).is_file() or lockfile in changed):
             return lockfile, command
     return None
 
@@ -64,8 +66,16 @@ def relock(
 ) -> str | None:
     """Regenerate the lockfile in `root` when the patch changed its manifest.
 
-    Returns None when nothing was needed or the lockfile is now fresh (the caller stages it),
-    or the reason the run must hand over instead of pushing.
+    `patch` is the already-applied diff and `root` the worktree it was applied to with
+    `--index`. The other three are seams for tests; production uses the defaults:
+    `run(command, cwd=, capture_output=, text=, timeout=, check=)` runs the lock command like
+    `subprocess.run` and returns a `CompletedProcess`, raising `FileNotFoundError` when the
+    tool is missing and `TimeoutExpired` on timeout; `strays(root)` returns the unstaged paths
+    the lock command modified or created; `stage(root, lockfile)` adds the fresh lockfile to
+    the index, and is called only when the lockfile is the sole stray.
+
+    Returns None when nothing was needed or the lockfile is fresh and staged, or the reason
+    the run must hand over instead of pushing.
     """
     target = wanted(patch, root)
     if target is None:
