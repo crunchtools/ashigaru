@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [2.11.0] - 2026-11-06
+
 ### Fixed
 
 - The relock runs `uv lock --no-build` with a scrubbed environment. Resolution is not inert: `uv lock` builds the metadata of any requirement it cannot read statically — a source distribution, or a path or VCS requirement with `dynamic` fields — by calling that package's PEP 517 backend, which runs its `setup.py`. The patch being resolved is a model's work on text a stranger may have influenced, and the publish job holds the app token. `--no-build` makes uv refuse such a requirement instead of building it, and the lock command no longer inherits the token. A dependency with no wheel now hands over to a person, which is the right way round. Gatehouse raised this CRITICAL on #138, correctly, against a claim in #132 that resolution does not run build backends.
