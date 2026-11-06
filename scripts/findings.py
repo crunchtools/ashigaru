@@ -285,7 +285,10 @@ def check_runs(repo: str, sha: str) -> list[dict]:
         gh("api", "--paginate", "--slurp", f"repos/{repo}/commits/{sha}/check-runs?per_page=100")
     )
     runs = [run for page in pages for run in page["check_runs"]]
-    return with_suites(runs, suite_conclusions(repo, sha)) if runs else runs
+    # Nothing failed, so no conclusion is consulted and the listing is not read.
+    if not any(run.get("conclusion") in FAILED for run in runs):
+        return runs
+    return with_suites(runs, suite_conclusions(repo, sha))
 
 
 def main() -> int:

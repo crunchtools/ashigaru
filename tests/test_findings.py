@@ -1,5 +1,8 @@
 """What a fix round must answer, and when the rounds are spent (profile IV)."""
 
+import json
+import subprocess
+
 import findings
 from findings import (
     ANSWER_MARKER,
@@ -131,6 +134,31 @@ def test_a_best_effort_job_does_not_make_the_branch_red():
 def test_a_suite_that_could_not_be_read_still_counts_as_a_failure():
     """Unknown is not best effort."""
     assert [run["name"] for run in failed([check("CI", conclusion="failure")], "555")] == ["CI"]
+
+
+def test_the_suites_are_read_across_pages(monkeypatch):
+    pages = [{"check_suites": [{"id": 1, "conclusion": "success"}]},
+             {"check_suites": [{"id": 2, "conclusion": None}]}]  # fmt: skip
+    monkeypatch.setattr(findings, "gh", lambda *args: json.dumps(pages))
+    assert findings.suite_conclusions("o/r", "abc") == {1: "success", 2: None}
+
+
+def test_an_unreadable_listing_leaves_every_failure_counted(monkeypatch):
+    def refuse(*args):
+        raise subprocess.CalledProcessError(1, args, stderr="gone")
+
+    monkeypatch.setattr(findings, "gh", refuse)
+    assert findings.suite_conclusions("o/r", "abc") == {}
+
+
+def test_the_listing_is_not_read_when_nothing_failed(monkeypatch):
+    monkeypatch.setattr(findings, "suite_conclusions", forbid_suites)
+    monkeypatch.setattr(findings, "gh", lambda *args: json.dumps([{"check_runs": [check("CI")]}]))
+    assert [run["name"] for run in findings.check_runs("o/r", "abc")] == ["CI"]
+
+
+def forbid_suites(repo, sha):
+    raise AssertionError("the check suites were read with nothing failing")
 
 
 def test_the_conclusions_reach_every_run_on_their_suite():
