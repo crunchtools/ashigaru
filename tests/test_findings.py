@@ -2,7 +2,10 @@
 
 from findings import (
     ANSWER_MARKER,
+    LOG_EXCERPT_LINES,
+    LOG_TAIL_LINES,
     ROUND_MARKER,
+    excerpt,
     failed,
     issue_context,
     maintainer_check,
@@ -121,6 +124,66 @@ def test_pending_ignores_this_run():
 
 def test_model_escalates_at_the_configured_round():
     assert [model_for(n, "sonnet", "opus", 3) for n in (1, 2, 3, 5)] == ["sonnet", "sonnet", "opus", "opus"]
+
+
+def test_excerpt_finds_a_failure_far_above_a_passing_tail():
+    log = ["sdlc: lane main: mypy"] + [f"build step {i}" for i in range(200)]
+    log += ['tests/test_x.py:86: error: Module has no attribute "PROC"  [attr-defined]']
+    log += ["sdlc: mypy FAILED after 2s"]
+    log += [f"image step {i}" for i in range(500)] + ["== image-tests passed in 1s"]
+    text = excerpt("\n".join(log))
+    assert 'Module has no attribute "PROC"' in text
+    assert "sdlc: mypy FAILED" in text
+    assert "lines omitted" in text
+
+
+def test_excerpt_without_a_marker_is_the_tail():
+    log = [f"line {i}" for i in range(400)]
+    assert excerpt("\n".join(log)).splitlines() == log[-LOG_TAIL_LINES:]
+
+
+def test_excerpt_is_capped_and_says_so():
+    log = [f"error: problem {i}" for i in range(LOG_EXCERPT_LINES * 2)]
+    lines = excerpt("\n".join(log)).splitlines()
+    assert len(lines) == LOG_EXCERPT_LINES + 1
+    assert lines[-1] == f"[… {LOG_EXCERPT_LINES} lines omitted …]"
+
+
+def test_excerpt_keeps_distant_failures_separate_and_counts_the_gaps():
+    log = [f"ok {i}" for i in range(300)]
+    log[100] = "error: first"
+    log[250] = "error: second"
+    lines = excerpt("\n".join(log)).splitlines()
+    assert "error: first" in lines and "error: second" in lines
+    assert lines[0] == "[… 60 lines omitted …]"
+    # The first window ends after line 110 (100 + 10), the second starts at 210 (250 - 40).
+    assert "[… 99 lines omitted …]" in lines
+    assert lines[-1] == "[… 39 lines omitted …]"
+
+
+def test_excerpt_cap_keeps_every_window_when_there_are_many():
+    log = []
+    for i in range(10):
+        log += [f"ok {i}-{j}" for j in range(200)] + [f"error: failure {i}"] * 40
+    text = excerpt("\n".join(log))
+    assert all(f"error: failure {i}" in text for i in range(10))
+    assert len(text.splitlines()) <= LOG_EXCERPT_LINES + 11
+
+
+def test_excerpt_with_more_windows_than_the_cap_keeps_the_first_ones_and_counts_the_rest():
+    count = LOG_EXCERPT_LINES + 5
+    log = []
+    for i in range(count):
+        log += [f"ok {i}-{j}" for j in range(200)] + [f"error: failure {i}"]
+    text = excerpt("\n".join(log))
+    lines = text.splitlines()
+    assert "error: failure 0" in lines
+    assert f"error: failure {LOG_EXCERPT_LINES - 1}" in lines
+    assert f"error: failure {LOG_EXCERPT_LINES}" not in lines
+    # One line per window (share 1) is kept, so everything after the last kept hit is
+    # counted: the 5 dropped windows of 201 lines each.
+    dropped = (count - LOG_EXCERPT_LINES) * 201
+    assert lines[-1] == f"[… {dropped} lines omitted …]"
 
 
 def test_only_pull_requests_the_app_opened_are_touched():
