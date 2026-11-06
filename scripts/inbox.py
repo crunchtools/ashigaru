@@ -16,6 +16,8 @@ from common import (
     INBOX,
     NEEDS_HUMAN,
     NEEDS_INFO,
+    OBSERVE,
+    OBSERVE_TITLE,
     STATE_LABELS,
     TRIAGED,
     TYPE_LABELS,
@@ -540,3 +542,52 @@ def publish(repo: str, body: str, label: str = INBOX, title: str = TITLE) -> str
         return "unchanged"
     gh("issue", "edit", str(record["number"]), "--repo", repo, "--body", body)
     return "updated"
+
+
+WATCH_MARKER = "<!-- ashigaru:observe -->"
+WATCH_INTRO = (
+    "This repository carries the `ashigaru-observe` topic, so Ashigaru only records here what it "
+    "would have done. Removing the topic ends this, and the sweep closes this issue."
+)
+MAX_RECORDED = 100
+"""Lines the observe issue keeps; the oldest go first."""
+
+
+def record_body(body: str, source: str, lines: list[str]) -> str:
+    """The observe issue's body with `source`'s lines replaced by `lines`, the others kept.
+
+    A source is one subject (`triage #12`, `sweep`), so a rerun rewrites its line instead of adding one.
+    """
+    prefix = f"- **{source}**: "
+    kept = [
+        line for line in (body or "").replace("\r\n", "\n").splitlines()
+        if line.startswith("- **") and not line.startswith(prefix)
+    ]  # fmt: skip
+    kept += [prefix + " ".join(line.split()) for line in lines]
+    return "\n".join([WATCH_MARKER, WATCH_INTRO, "", *kept[-MAX_RECORDED:], ""])
+
+
+def observe(repo: str, source: str, lines: list[str]) -> str:
+    """Write what Ashigaru would have done into the repository's own "Ashigaru is watching" issue."""
+    query = f"repos/{repo}/issues?state=open&labels={OBSERVE}&per_page=100&sort=created&direction=asc"
+    held = sorted((i for i in api(query) if "pull_request" not in i), key=lambda i: i["number"])
+    body = (held[0].get("body") or "") if held else ""
+    if not lines and not held:
+        return "nothing to record"
+    return publish(repo, record_body(body, source, lines), OBSERVE, OBSERVE_TITLE)
+
+
+def watching(issues: list[dict]) -> str:
+    """The inbox part for repositories in watch-only mode, from their open observe issues as
+    {repo, number, url, body}."""
+    rows = []
+    for item in sorted(issues, key=lambda found: (found["repo"], found["number"])):
+        name = item["repo"].split("/", 1)[-1]
+        for line in (item.get("body") or "").splitlines():
+            if not line.startswith("- **"):
+                continue
+            # A recorded line can carry an issue title or an agent's summary, and anyone can edit the
+            # issue it sits in: shown as a code span, its links, images and mentions stay inert.
+            source, _, text = line[4:].partition("**: ")
+            rows.append(f"- {name} `{plain(source)}`: `{plain(text)}` ([record]({item['url']}))")
+    return "\n".join(section("Watching", rows, "No repository is watching only."))

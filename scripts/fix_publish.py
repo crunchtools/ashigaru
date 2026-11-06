@@ -14,7 +14,8 @@ import subprocess
 import sys
 from pathlib import Path
 
-from common import NEEDS_HUMAN, gh, git, set_state, touches_protected
+import inbox
+from common import NEEDS_HUMAN, gh, git, observing, set_state, touches_protected
 from findings import ANSWER_MARKER, MAX_ROUNDS, ROUND_MARKER
 from publish import BOT_EMAIL, BOT_NAME, TRAILER
 
@@ -76,6 +77,28 @@ def hand_off(repo: str, number: int, why: str) -> None:
     gh("pr", "comment", str(number), "--repo", repo, "--body", f"**Ashigaru stopped.** {why}")
 
 
+def watch(repo: str, number: int, round_number: int, mode: str) -> None:
+    """A watched repository gets no round: what it would have got is recorded instead."""
+    what = f"push fix round {round_number} and answer its findings"
+    if mode == "cap":
+        what = "hand it to a human"
+    inbox.observe(repo, f"fix #{number}", [f"Would {what}."])
+    print(f"fix: {repo}#{number} is watched; recorded, pushed and answered nothing")
+
+
+def close_round(repo: str, collected: dict, result: dict, answered: dict[int, str], sha: str | None) -> None:
+    """Hand the pull request to a person, or re-arm auto-merge, as the round's outcome calls for."""
+    number = collected["pr"]
+    left = len(collected["findings"]) - len(answered)
+    step = next_step(sha, left, bool(collected["failed_checks"]))
+    if asked(collected["findings"], answered, result.get("dispositions") or []):
+        hand_off(repo, number, "A maintainer comment was answered with a question, so a person is needed.")
+    elif step == "hand_off":
+        hand_off(repo, number, "The round changed no code and work remains, so another round would not help.")
+    elif step == "rearm":
+        gh("pr", "merge", str(number), "--repo", repo, "--auto", "--squash")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--repo", required=True)
@@ -89,6 +112,9 @@ def main() -> int:
 
     collected = json.loads(args.findings.read_text(encoding="utf-8"))
     number, round_number = collected["pr"], collected["round"]
+    if observing(args.repo):
+        watch(args.repo, number, round_number, args.mode)
+        return 0
     if args.mode == "cap":
         hand_off(args.repo, number,
                  f"{args.max_rounds} fix rounds are spent and the PR is still not green.")  # fmt: skip
@@ -129,17 +155,7 @@ def main() -> int:
         f"{len(answered)} finding(s) answered, {left} left, "
         f"{'pushed ' + sha if sha else 'no code change'}.",
     )  # fmt: skip
-    step = next_step(sha, left, bool(collected["failed_checks"]))
-    if asked(collected["findings"], answered, result.get("dispositions") or []):
-        hand_off(
-            args.repo, number, "A maintainer comment was answered with a question, so a person is needed."
-        )
-    elif step == "hand_off":
-        hand_off(
-            args.repo, number, "The round changed no code and work remains, so another round would not help."
-        )
-    elif step == "rearm":
-        gh("pr", "merge", str(number), "--repo", args.repo, "--auto", "--squash")
+    close_round(args.repo, collected, result, answered, sha)
     return 0
 
 

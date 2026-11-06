@@ -27,7 +27,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import inbox
-from common import BRANCH_PREFIX, RELEASES, api, api_pages, gh, git, set_output
+from common import BRANCH_PREFIX, OBSERVE, RELEASES, api, api_pages, gh, git, set_output
 from publish import BOT_EMAIL, BOT_NAME, CONFLICTING, announce
 from sweep import SETTLE, enrolled, open_pulls, stamp
 
@@ -340,6 +340,7 @@ def survey(repo: dict, bot: str, before: str) -> dict:
     status = {
         "repo": repo["full_name"], "base": repo["default_branch"], "mode": mode, "limit": limit,
         "current": None, "entries": 0, "action": None, "refused": "", "pulls": [],
+        "observe": OBSERVE in (repo.get("topics") or []),
     }  # fmt: skip
     text = fetch(status["repo"], "CHANGELOG.md")
     if text is None:
@@ -396,13 +397,30 @@ def act(item: dict, day: str) -> None:
         print(f"  opened {item['pulls'][0]['url']}")
 
 
+WOULD = {
+    "publish": "publish the release v{current}",
+    "retire": "close the release pull request that no longer merges",
+    "open": "open a pull request releasing {next}",
+}
+
+
+def watch(item: dict) -> None:
+    """A watched repository gets no release: what would have happened goes in its observe issue."""
+    lines = [f"Would {WOULD[item['action']].format(**item)}."] if item["action"] else []
+    inbox.observe(item["repo"], "release", lines)
+    print(f"  watched {item['repo']}: {lines[0] if lines else 'nothing due'}")
+
+
 def carry_out(items: list[dict], day: str) -> None:
     """Act on every planned step. One repository failing does not stop the rest."""
     for item in items:
-        if not item["action"]:
+        if not item["action"] and not item.get("observe"):
             continue
         try:
-            act(item, day)
+            if item.get("observe"):
+                watch(item)
+            else:
+                act(item, day)
         except Refusal as why:
             item["refused"] = str(why)
             print(f"  refused {item['repo']}: {why}")
@@ -490,6 +508,7 @@ def surveyed(repo: dict, bot: str, before: str) -> dict:
         return {
             "repo": repo["full_name"], "base": repo["default_branch"], "mode": mode, "limit": limit,
             "current": None, "entries": 0, "action": None, "pulls": [],
+            "observe": OBSERVE in (repo.get("topics") or []),
             "refused": "GitHub did not answer when its state was read",
         }  # fmt: skip
 
@@ -511,7 +530,9 @@ def plan(args: argparse.Namespace) -> int:
         print(f"  {item['action']} {item['repo']} {item.get('next') or item['current']}")
     args.plan.write_text(json.dumps(items), encoding="utf-8")
     # The names go to the step that mints the write token, so it covers these repositories only.
-    set_output("repos", "" if args.dry_run else ",".join(short(item["repo"]) for item in due))
+    # A watched repository is named too, so its observe issue can be written; nothing else there.
+    named = [item for item in items if item["action"] or item.get("observe")]
+    set_output("repos", "" if args.dry_run else ",".join(short(item["repo"]) for item in named))
     return 0
 
 

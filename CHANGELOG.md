@@ -10,6 +10,8 @@ All notable changes to this project are documented here. The format follows
 
 - The fix agent collects a second kind of finding: unanswered inline comments, review bodies (including `changes-requested`) and pull-request comments from accounts with write access, plus comments added to the linked issue since the last round (as context). They get `fixed in <sha>` or a single question, never `not a bug`; a question sets `needs-human`. Accounts without write access, bots and Ashigaru itself are not findings.
 
+- A repository with the topic `ashigaru-observe` is watch-only. Triage, code, fix, review, the sweep and release record what they would have done in one issue in that repository ("Ashigaru is watching", labeled `ashigaru-observe`) instead of labelling, commenting, pushing, opening a pull request or releasing. The inbox lists the records under `## Watching`, and the sweep closes the issue when the topic is removed.
+
 ### Fixed
 
 - The fix agent is shown the lines around every failure marker in the whole failed-job log (`FAILED`, `error:`, `##[error]`, tracebacks and the like), with omitted lines counted inline, instead of only the last 150 lines. A log with no marker still gets its tail.

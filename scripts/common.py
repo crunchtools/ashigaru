@@ -37,10 +37,15 @@ RELEASES = "ashigaru-releases"
 """Marks the one issue the sweep keeps as the record of what was released and what was not."""
 RED = "ashigaru-red"
 """Marks the issue the sweep keeps in a repository while its default branch is red."""
+OBSERVE = "ashigaru-observe"
+"""The repository topic that puts a repository in watch-only mode, and the label of the one issue
+that records what Ashigaru would have done there. Only a repository admin can set the topic."""
+OBSERVE_TITLE = "Ashigaru is watching"
 MANAGED_LABELS = (
     STATE_LABELS
     | TYPE_LABELS
     | {
+        OBSERVE: ("ededed", "Ashigaru: watching this repository, acting on nothing"),
         INBOX: ("ededed", "Ashigaru: what is waiting on a maintainer"),
         RELEASES: ("ededed", "Ashigaru: what was released and what is waiting to be"),
         RED: ("b60205", "Ashigaru: the default branch is red"),
@@ -103,6 +108,12 @@ def can_write(repo: str, login: str) -> bool:
             print(f"::warning::permission lookup for {login} on {repo} failed: {error.stderr.strip()}")
         return False
     return found.get("permission") in WRITE_PERMISSIONS
+
+
+def observing(repo: str) -> bool:
+    """True when the repository carries the observe topic. A failed read raises: a publish step that
+    cannot tell whether it is being watched must not act."""
+    return OBSERVE in (api(f"repos/{repo}/topics").get("names") or [])
 
 
 def git(*args: str) -> str:

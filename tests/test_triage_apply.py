@@ -163,6 +163,8 @@ def test_every_category_with_a_meaning_gets_a_type_label():
 
 def run_main(monkeypatch, result, labels, history):
     calls = {"pages": [], "state": None, "comment": None, "outputs": {}, "ensured": []}
+    # Watch-only mode is read from the repository, so an unpatched main() shells out to `gh`.
+    monkeypatch.setattr(triage_apply, "observing", lambda repo: False)
     monkeypatch.setattr(triage_apply, "ensure_labels", lambda repo, names: calls["ensured"].extend(names))
     monkeypatch.setattr(triage_apply, "api", lambda path: {"labels": [{"name": n} for n in labels]})
 

@@ -13,6 +13,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+import inbox
 from common import (
     BRANCH_PREFIX,
     NEEDS_HUMAN,
@@ -20,6 +21,7 @@ from common import (
     can_write,
     gh,
     git,
+    observing,
     set_output,
     set_state,
     touches_protected,
@@ -97,6 +99,16 @@ def announce(repo: str, branch: str, base: str, title: str, body: str) -> str:
     return url
 
 
+def watch(repo: str, issue: int, branch: str, title: str, why: str | None) -> None:
+    """A watched repository gets no branch and no pull request: the outcome is recorded instead."""
+    would = f"Would push `{branch}` and open a pull request: {title}"
+    if why:
+        would = f"Would stop and hand it to a human: {why}"
+    inbox.observe(repo, f"code #{issue}", [would])
+    print(f"publish: {repo}#{issue} is watched; recorded, pushed and opened nothing")
+    set_output("pr", "")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--repo", required=True)
@@ -130,6 +142,9 @@ def main() -> int:
         return 0
 
     why = refusal(result, patch)
+    if observing(args.repo):
+        watch(args.repo, args.issue, branch, found["title"].strip(), why)
+        return 0
     if why:
         hand_off(args.repo, args.issue, why)
         set_output("pr", "")

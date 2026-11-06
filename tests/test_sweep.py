@@ -360,7 +360,7 @@ def test_a_repository_with_issues_off_gets_no_red_issue():
 
 def test_keep_red_writes_each_change_and_a_dry_run_writes_none(monkeypatch, capsys):
     calls = []
-    monkeypatch.setattr(sweep, "red_issues", lambda org: [held("o/green", 2)])
+    monkeypatch.setattr(sweep, "labeled_issues", lambda org, label: [held("o/green", 2)])
     monkeypatch.setattr(sweep, "ensure_labels", lambda repo, names: calls.append(("labels", repo, names)))
     monkeypatch.setattr(sweep, "gh", lambda *args: calls.append(args) or "")
     sweep.keep_red("o", [branch("o/r")], NOW, dry_run=True)
@@ -376,7 +376,7 @@ def test_the_red_issues_are_one_search_of_the_organization(monkeypatch):
     paths = []
     found = {"items": [{"repository_url": "https://api.github.com/repos/o/r", "number": 5, "body": None}]}
     monkeypatch.setattr(sweep, "api", lambda path: paths.append(path) or found)
-    assert sweep.red_issues("o") == [{"repo": "o/r", "number": 5, "body": ""}]
+    assert sweep.labeled_issues("o", "ashigaru-red") == [{"repo": "o/r", "number": 5, "url": "", "body": ""}]
     assert paths == ["search/issues?q=org%3Ao%20is%3Aissue%20is%3Aopen%20label%3Aashigaru-red&per_page=100"]
 
 
@@ -387,11 +387,11 @@ def test_the_red_issue_is_not_queued_for_triage():
 
 
 def test_red_issues_that_could_not_be_listed_change_nothing(monkeypatch, capsys):
-    def refuse(org):
+    def refuse(org, label):
         raise subprocess.CalledProcessError(1, "gh", stderr="HTTP 502")
 
     calls = []
-    monkeypatch.setattr(sweep, "red_issues", refuse)
+    monkeypatch.setattr(sweep, "labeled_issues", refuse)
     monkeypatch.setattr(sweep, "gh", lambda *args: calls.append(args) or "")
     assert sweep.keep_red("o", [branch("o/r")], NOW, dry_run=False) == ["the red issues"]
     assert calls == []
@@ -404,7 +404,7 @@ def test_a_red_issue_write_that_fails_is_named_in_the_inbox_and_the_rest_still_r
             raise subprocess.CalledProcessError(1, "gh", stderr="HTTP 410: Issues are disabled")
         return ""
 
-    monkeypatch.setattr(sweep, "red_issues", lambda org: [held("o/green", 2)])
+    monkeypatch.setattr(sweep, "labeled_issues", lambda org, label: [held("o/green", 2)])
     monkeypatch.setattr(sweep, "ensure_labels", lambda repo, names: set())
     monkeypatch.setattr(sweep, "gh", gh)
     assert sweep.keep_red("o", [branch("o/r")], NOW, dry_run=False) == ["the red issue in o/r (create)"]
