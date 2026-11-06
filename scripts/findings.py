@@ -168,12 +168,26 @@ def pending(check_runs: list[dict], own_run_id: str) -> list[str]:
     return [run["name"] for run in check_runs if run["status"] != "completed" and not _own(run, own_run_id)]
 
 
+def best_effort(run: dict) -> bool:
+    """True when the job failed but the workflow run holding it did not.
+
+    That is what `continue-on-error: true` looks like from outside: GitHub
+    records the job's check run as a failure and concludes its check suite a
+    success. A branch is not red because a job its own author marked best effort
+    failed. developer's GHCR mirror is the case: the push cannot create an org
+    package, so it fails on every merge, and the red-branch issue it held open
+    was teaching the fleet's alert to be ignored.
+    """
+    return (run.get("check_suite") or {}).get("conclusion") == "success"
+
+
 def failed(check_runs: list[dict], own_run_id: str) -> list[dict]:
     return [
         run
         for run in check_runs
         if run.get("conclusion") in FAILED
         and not _own(run, own_run_id)
+        and not best_effort(run)
         and not any(name in run["name"] for name in IGNORED_CHECKS)
     ]
 
@@ -239,11 +253,39 @@ def excerpt(log: str) -> str:
     return "\n".join(out)
 
 
+def suite_conclusion(repo: str, ident: int) -> str | None:
+    """None when the suite cannot be read: unknown is not best effort, so the check still counts."""
+    try:
+        return json.loads(gh("api", f"repos/{repo}/check-suites/{ident}")).get("conclusion")
+    except subprocess.CalledProcessError as error:
+        print(f"::warning::no check suite {ident}: {error.stderr.strip()}")
+        return None
+
+
+def with_suites(repo: str, runs: list[dict]) -> list[dict]:
+    """Fill in the check suite conclusion, which the per-commit listing leaves null.
+
+    It has to be read per suite -- one call per workflow -- so it is read once and
+    only for a run that failed, the only place `best_effort` consults it.
+    """
+    known: dict[int, str | None] = {}
+    filled = []
+    for run in runs:
+        suite = run.get("check_suite") or {}
+        ident = suite.get("id")
+        if run.get("conclusion") in FAILED and ident is not None and ident not in known:
+            known[ident] = suite_conclusion(repo, ident)
+        if ident in known:
+            run = run | {"check_suite": suite | {"conclusion": known[ident]}}
+        filled.append(run)
+    return filled
+
+
 def check_runs(repo: str, sha: str) -> list[dict]:
     pages = json.loads(
         gh("api", "--paginate", "--slurp", f"repos/{repo}/commits/{sha}/check-runs?per_page=100")
     )
-    return [run for page in pages for run in page["check_runs"]]
+    return with_suites(repo, [run for page in pages for run in page["check_runs"]])
 
 
 def main() -> int:

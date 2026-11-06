@@ -1,5 +1,6 @@
 """What a fix round must answer, and when the rounds are spent (profile IV)."""
 
+import findings
 from findings import (
     ANSWER_MARKER,
     LOG_EXCERPT_LINES,
@@ -26,9 +27,13 @@ def inline(comment_id, login=REVIEWER, reply_to=None):
             "path": "a.py", "line": 3, "body": "**HIGH** finding"}  # fmt: skip
 
 
-def check(name, status="completed", conclusion="success", run_id="100"):
+def check(name, status="completed", conclusion="success", run_id="100", suite=None):
+    """One workflow run is one check suite. `suite` is the suite's own conclusion, which
+    the per-commit listing leaves out."""
     return {"name": name, "status": status, "conclusion": conclusion,
-            "details_url": f"https://github.com/o/r/actions/runs/{run_id}/job/7"}  # fmt: skip
+            "details_url": f"https://github.com/o/r/actions/runs/{run_id}/job/7",
+            "check_suite": {"id": int(run_id)} | ({} if suite is None else {"conclusion": suite}),
+            }  # fmt: skip
 
 
 def test_findings_without_a_reply_from_someone_else_are_unanswered():
@@ -114,6 +119,28 @@ def test_failed_checks_exclude_triage_and_this_run():
         check("Lint", conclusion="success"),
     ]
     assert [run["name"] for run in failed(runs, own_run_id="555")] == ["CI / test"]
+
+
+def test_a_best_effort_job_does_not_make_the_branch_red():
+    """`continue-on-error: true` fails the job's check run and still concludes the suite a success."""
+    runs = [check("mirror push", conclusion="failure", suite="success"),
+            check("CI", conclusion="failure", suite="failure", run_id="200")]  # fmt: skip
+    assert [run["name"] for run in failed(runs, own_run_id="555")] == ["CI"]
+
+
+def test_a_suite_that_could_not_be_read_still_counts_as_a_failure():
+    """Unknown is not best effort."""
+    assert [run["name"] for run in failed([check("CI", conclusion="failure")], "555")] == ["CI"]
+
+
+def test_the_suite_is_read_once_and_only_for_a_failure(monkeypatch):
+    asked = []
+    monkeypatch.setattr(findings, "suite_conclusion", lambda repo, ident: asked.append(ident) or "success")
+    runs = [check("a", conclusion="failure"), check("b", conclusion="failure"), check("c")]
+    filled = findings.with_suites("o/r", runs)
+    assert asked == [100]
+    assert [run["check_suite"].get("conclusion") for run in filled] == ["success"] * 3
+    assert failed(filled, own_run_id="555") == []
 
 
 def test_pending_ignores_this_run():
