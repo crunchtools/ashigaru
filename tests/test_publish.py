@@ -34,6 +34,15 @@ def test_nothing_under_dot_github_is_ever_published():
     assert ".github/" in refusal({"status": "fixed"}, WORKFLOW_PATCH)
 
 
+def test_a_maintainer_comment_is_never_dismissed():
+    found = [{"id": 1, "origin": "maintainer"}, {"id": 2, "origin": "reviewer"}]
+    got = replies(found, [{"id": 1, "disposition": "not_a_bug", "reason": "r"},
+                          {"id": 2, "disposition": "question", "reason": "q?"}], "abc")  # fmt: skip
+    assert got == {}
+    asked_one = [{"id": 1, "disposition": "question", "reason": "which one?"}]
+    assert replies(found, asked_one, None) == {1: "which one?"}
+
+
 def test_commit_message_closes_the_issue_and_carries_the_trailer():
     message = commit_message("Digest shows the wrong date", 12, "Off by one.")
     assert message.startswith("fix: Digest shows the wrong date (#12)\n")

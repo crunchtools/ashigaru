@@ -14,11 +14,14 @@ import re
 import subprocess
 import sys
 import time
+from collections.abc import Callable
 from pathlib import Path
 
-from common import api_pages, gh, set_output
+from common import api_pages, can_write, gh, set_output
 
 ROUND_MARKER = "<!-- ashigaru:fix-round -->"
+ANSWER_MARKER = "<!-- ashigaru:answered:{kind}:{id} -->"
+BRANCH_ISSUE = re.compile(r"^ashigaru/issue-(\d+)")
 IGNORED_CHECKS = ("Gatehouse triage",)
 FAILED = ("failure", "timed_out")
 JOB_URL = re.compile(r"/actions/runs/(\d+)/job/(\d+)")
@@ -42,11 +45,87 @@ def unanswered(comments: list[dict], reviewer: str) -> list[dict]:
             "path": comment.get("path"),
             "line": comment.get("line") or comment.get("original_line"),
             "body": comment["body"],
+            "origin": "reviewer",
+            "kind": "inline",
+            "author": reviewer,
         }
         for comment in comments
         if not comment.get("in_reply_to_id")
         and comment["user"]["login"] == reviewer
         and comment["id"] not in answered
+    ]
+
+
+def maintainer_check(reviewer: str, bot: str, writer) -> Callable[[dict], bool]:
+    """A test for an item: written by a person (not a bot, the reviewer or Ashigaru) with write access."""
+
+    def check(item: dict) -> bool:
+        user = item.get("user") or {}
+        login = user.get("login", "")
+        person = (
+            bool(login)
+            and user.get("type") != "Bot"
+            and not login.endswith("[bot]")
+            and login not in (reviewer, bot, f"{bot}[bot]")
+        )
+        return person and writer(login)
+
+    return check
+
+
+def _entry(item: dict, kind: str, body: str) -> dict:
+    return {
+        "id": item["id"],
+        "path": item.get("path"),
+        "line": item.get("line") or item.get("original_line"),
+        "body": body,
+        "origin": "maintainer",
+        "kind": kind,
+        "author": item["user"]["login"],
+    }
+
+
+def maintainer_findings(inline: list[dict], reviews: list[dict], pr_comments: list[dict], ok) -> list[dict]:
+    """What accounts with write access said on the pull request that nobody has answered.
+
+    An inline comment is answered once someone else replied in its thread; a review
+    body or pull-request comment once an answer marker names it. Accounts without
+    write access are not findings, whatever they wrote.
+    """
+    replied_by: dict[int, set[str]] = {}
+    for comment in inline:
+        if comment.get("in_reply_to_id"):
+            replied_by.setdefault(comment["in_reply_to_id"], set()).add(comment["user"]["login"])
+    marked = "\n".join(comment.get("body") or "" for comment in pr_comments)
+
+    def open_item(kind: str, item: dict) -> bool:
+        return ANSWER_MARKER.format(kind=kind, id=item["id"]) not in marked and ok(item)
+
+    found = [
+        _entry(c, "inline", c["body"])
+        for c in inline
+        if not c.get("in_reply_to_id") and not replied_by.get(c["id"], set()) - {c["user"]["login"]} and ok(c)
+    ]
+    found += [
+        _entry(r, "review", r["body"].strip())
+        for r in reviews
+        if (r.get("body") or "").strip() and r.get("state") != "PENDING" and open_item("review", r)
+    ]
+    found += [
+        _entry(c, "comment", c["body"])
+        for c in pr_comments
+        if "<!-- ashigaru:" not in (c.get("body") or "") and open_item("comment", c)
+    ]
+    return found
+
+
+def issue_context(issue_comments: list[dict], pr_comments: list[dict], ok) -> list[dict]:
+    """Comments added to the linked issue since the last round marker, from write-access accounts."""
+    since = max((c["created_at"] for c in pr_comments if ROUND_MARKER in (c.get("body") or "")), default="")
+    return [
+        {"author": c["user"]["login"], "body": c["body"]}
+        for c in issue_comments
+        if c["created_at"] > since and ok(c)
     ]
 
 
@@ -137,10 +216,19 @@ def main() -> int:
         time.sleep(POLL_SECONDS)
         runs = check_runs(args.repo, sha)
 
-    findings = unanswered(api_pages(f"repos/{args.repo}/pulls/{number}/comments?per_page=100"),
-                          args.reviewer)  # fmt: skip
+    inline = api_pages(f"repos/{args.repo}/pulls/{number}/comments?per_page=100")
+    pr_comments = api_pages(f"repos/{args.repo}/issues/{number}/comments?per_page=100")
+    reviews = api_pages(f"repos/{args.repo}/pulls/{number}/reviews?per_page=100")
+
+    ok = maintainer_check(args.reviewer, args.bot, lambda login: can_write(args.repo, login))
+    findings = unanswered(inline, args.reviewer) + maintainer_findings(inline, reviews, pr_comments, ok)
+    linked = BRANCH_ISSUE.match(args.branch)
+    context = []
+    if linked:
+        issue_comments = api_pages(f"repos/{args.repo}/issues/{linked.group(1)}/comments?per_page=100")
+        context = issue_context(issue_comments, pr_comments, ok)
     failures = failed(runs, own_run_id)
-    used = rounds_used(api_pages(f"repos/{args.repo}/issues/{number}/comments?per_page=100"))
+    used = rounds_used(pr_comments)
     action = plan(findings, failures, used, args.max_rounds)
     round_number = used + 1
 
@@ -150,6 +238,7 @@ def main() -> int:
                 "pr": number,
                 "round": round_number,
                 "findings": findings,
+                "issue_comments": context,
                 "failed_checks": [
                     {"name": run["name"], "log": failure_log(args.repo, run)} for run in failures
                 ],

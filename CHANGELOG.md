@@ -6,6 +6,14 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- The fix agent collects a second kind of finding: unanswered inline comments, review bodies (including `changes-requested`) and pull-request comments from accounts with write access, plus comments added to the linked issue since the last round (as context). They get `fixed in <sha>` or a single question, never `not a bug`; a question sets `needs-human`. Accounts without write access, bots and Ashigaru itself are not findings.
+
+### Behaviour
+
+- On existing enrolled repositories, with no opt-in, a maintainer's comments on an Ashigaru pull request are now answered by the fix agent in the next round. Previously they were ignored. Rounds still count against `max_rounds`.
+
 ## [2.9.0] - 2026-10-31
 
 ### Added
