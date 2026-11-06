@@ -57,7 +57,7 @@ def test_only_write_access_humans_are_maintainer_findings():
     comments = [human({"id": 20, "body": "note"}, "maint"),
                 human({"id": 21, "body": "x"}, "app", "Bot")]  # fmt: skip
     ok = maintainer_check(REVIEWER, "ashigaru-crunchtools", lambda login: login in writers)
-    found = maintainer_findings(threads, reviews, comments, ok)
+    found = maintainer_findings(threads, reviews, comments, ok, "ashigaru-crunchtools")
     assert [(f["kind"], f["id"]) for f in found] == [("inline", 1), ("review", 10), ("comment", 20)]
     assert {f["origin"] for f in found} == {"maintainer"}
 
@@ -66,8 +66,17 @@ def test_answered_maintainer_comments_are_not_collected_again():
     threads = [human(inline(1), "maint"), human(inline(2, login="bot", reply_to=1), "bot", "Bot")]
     marker = ANSWER_MARKER.format(kind="comment", id=20)
     comments = [human({"id": 20, "body": "note"}, "maint"), human({"id": 30, "body": marker}, "bot", "Bot")]
-    ok = maintainer_check(REVIEWER, "b", lambda _: True)
-    assert maintainer_findings(threads, [], comments, ok) == []
+    ok = maintainer_check(REVIEWER, "bot", lambda _: True)
+    assert maintainer_findings(threads, [], comments, ok, "bot") == []
+
+
+def test_an_outsider_cannot_answer_for_a_maintainer_finding():
+    marker = ANSWER_MARKER.format(kind="comment", id=20)
+    threads = [human(inline(1), "maint"), human(inline(2, login="outsider", reply_to=1), "outsider")]
+    comments = [human({"id": 20, "body": "note"}, "maint"), human({"id": 30, "body": marker}, "outsider")]
+    ok = maintainer_check(REVIEWER, "bot", lambda login: login == "maint")
+    found = maintainer_findings(threads, [], comments, ok, "bot")
+    assert [(f["kind"], f["id"]) for f in found] == [("inline", 1), ("comment", 20)]
 
 
 def test_issue_comments_since_the_last_round_are_context():

@@ -56,7 +56,7 @@ def unanswered(comments: list[dict], reviewer: str) -> list[dict]:
     ]
 
 
-def maintainer_check(reviewer: str, bot: str, writer) -> Callable[[dict], bool]:
+def maintainer_check(reviewer: str, bot: str, writer: Callable[[str], bool]) -> Callable[[dict], bool]:
     """A test for an item: written by a person (not a bot, the reviewer or Ashigaru) with write access."""
 
     def check(item: dict) -> bool:
@@ -85,18 +85,28 @@ def _entry(item: dict, kind: str, body: str) -> dict:
     }
 
 
-def maintainer_findings(inline: list[dict], reviews: list[dict], pr_comments: list[dict], ok) -> list[dict]:
+def maintainer_findings(
+    inline: list[dict], reviews: list[dict], pr_comments: list[dict], ok: Callable[[dict], bool], bot: str
+) -> list[dict]:
     """What accounts with write access said on the pull request that nobody has answered.
 
     An inline comment is answered once someone else replied in its thread; a review
     body or pull-request comment once an answer marker names it. Accounts without
-    write access are not findings, whatever they wrote.
+    write access are not findings, whatever they wrote. Only Ashigaru's own comments
+    carry an answer marker, and only Ashigaru or a write-access account answers a thread.
     """
+    bots = (bot, f"{bot}[bot]", f"app/{bot}")
+
+    def trusted(comment: dict) -> bool:
+        return (comment.get("user") or {}).get("login") in bots or ok(comment)
+
     replied_by: dict[int, set[str]] = {}
     for comment in inline:
-        if comment.get("in_reply_to_id"):
+        if comment.get("in_reply_to_id") and trusted(comment):
             replied_by.setdefault(comment["in_reply_to_id"], set()).add(comment["user"]["login"])
-    marked = "\n".join(comment.get("body") or "" for comment in pr_comments)
+    marked = "\n".join(
+        comment.get("body") or "" for comment in pr_comments if (comment.get("user") or {}).get("login") in bots
+    )
 
     def open_item(kind: str, item: dict) -> bool:
         return ANSWER_MARKER.format(kind=kind, id=item["id"]) not in marked and ok(item)
@@ -119,7 +129,7 @@ def maintainer_findings(inline: list[dict], reviews: list[dict], pr_comments: li
     return found
 
 
-def issue_context(issue_comments: list[dict], pr_comments: list[dict], ok) -> list[dict]:
+def issue_context(issue_comments: list[dict], pr_comments: list[dict], ok: Callable[[dict], bool]) -> list[dict]:
     """Comments added to the linked issue since the last round marker, from write-access accounts."""
     since = max((c["created_at"] for c in pr_comments if ROUND_MARKER in (c.get("body") or "")), default="")
     return [
@@ -221,7 +231,7 @@ def main() -> int:
     reviews = api_pages(f"repos/{args.repo}/pulls/{number}/reviews?per_page=100")
 
     ok = maintainer_check(args.reviewer, args.bot, lambda login: can_write(args.repo, login))
-    findings = unanswered(inline, args.reviewer) + maintainer_findings(inline, reviews, pr_comments, ok)
+    findings = unanswered(inline, args.reviewer) + maintainer_findings(inline, reviews, pr_comments, ok, args.bot)
     linked = BRANCH_ISSUE.match(args.branch)
     context = []
     if linked:
