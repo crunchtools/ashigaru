@@ -1,5 +1,9 @@
 """What a fix round must answer, and when the rounds are spent (profile IV)."""
 
+import json
+import subprocess
+
+import findings
 from findings import (
     ANSWER_MARKER,
     LOG_EXCERPT_LINES,
@@ -26,9 +30,13 @@ def inline(comment_id, login=REVIEWER, reply_to=None):
             "path": "a.py", "line": 3, "body": "**HIGH** finding"}  # fmt: skip
 
 
-def check(name, status="completed", conclusion="success", run_id="100"):
+def check(name, status="completed", conclusion="success", run_id="100", suite=None):
+    """One workflow run is one check suite. `suite` is the suite's own conclusion, which
+    the per-commit listing leaves out."""
     return {"name": name, "status": status, "conclusion": conclusion,
-            "details_url": f"https://github.com/o/r/actions/runs/{run_id}/job/7"}  # fmt: skip
+            "details_url": f"https://github.com/o/r/actions/runs/{run_id}/job/7",
+            "check_suite": {"id": int(run_id)} | ({} if suite is None else {"conclusion": suite}),
+            }  # fmt: skip
 
 
 def test_findings_without_a_reply_from_someone_else_are_unanswered():
@@ -114,6 +122,50 @@ def test_failed_checks_exclude_triage_and_this_run():
         check("Lint", conclusion="success"),
     ]
     assert [run["name"] for run in failed(runs, own_run_id="555")] == ["CI / test"]
+
+
+def test_a_best_effort_job_does_not_make_the_branch_red():
+    """`continue-on-error: true` fails the job's check run and still concludes the suite a success."""
+    runs = [check("mirror push", conclusion="failure", suite="success"),
+            check("CI", conclusion="failure", suite="failure", run_id="200")]  # fmt: skip
+    assert [run["name"] for run in failed(runs, own_run_id="555")] == ["CI"]
+
+
+def test_a_suite_that_could_not_be_read_still_counts_as_a_failure():
+    """Unknown is not best effort."""
+    assert [run["name"] for run in failed([check("CI", conclusion="failure")], "555")] == ["CI"]
+
+
+def test_the_suites_are_read_across_pages(monkeypatch):
+    pages = [{"check_suites": [{"id": 1, "conclusion": "success"}]},
+             {"check_suites": [{"id": 2, "conclusion": None}]}]  # fmt: skip
+    monkeypatch.setattr(findings, "gh", lambda *args: json.dumps(pages))
+    assert findings.suite_conclusions("o/r", "abc") == {1: "success", 2: None}
+
+
+def test_an_unreadable_listing_leaves_every_failure_counted(monkeypatch):
+    def refuse(*args):
+        raise subprocess.CalledProcessError(1, args, stderr="gone")
+
+    monkeypatch.setattr(findings, "gh", refuse)
+    assert findings.suite_conclusions("o/r", "abc") == {}
+
+
+def test_the_listing_is_not_read_when_nothing_failed(monkeypatch):
+    monkeypatch.setattr(findings, "suite_conclusions", forbid_suites)
+    monkeypatch.setattr(findings, "gh", lambda *args: json.dumps([{"check_runs": [check("CI")]}]))
+    assert [run["name"] for run in findings.check_runs("o/r", "abc")] == ["CI"]
+
+
+def forbid_suites(repo, sha):
+    raise AssertionError("the check suites were read with nothing failing")
+
+
+def test_the_conclusions_reach_every_run_on_their_suite():
+    runs = [check("a", conclusion="failure"), check("b", conclusion="failure"), check("c")]
+    filled = findings.with_suites(runs, {100: "success"})
+    assert [run["check_suite"]["conclusion"] for run in filled] == ["success"] * 3
+    assert failed(filled, own_run_id="555") == []
 
 
 def test_pending_ignores_this_run():
