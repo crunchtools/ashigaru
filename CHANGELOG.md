@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [2.10.0] - 2026-11-06
+
 ### Added
 
 - The fix agent collects a second kind of finding: unanswered inline comments, review bodies (including `changes-requested`) and pull-request comments from accounts with write access, plus comments added to the linked issue since the last round (as context). They get `fixed in <sha>` or a single question, never `not a bug`; a question sets `needs-human`. Accounts without write access, bots and Ashigaru itself are not findings.
@@ -15,6 +17,10 @@ All notable changes to this project are documented here. The format follows
 ### Fixed
 
 - The fix agent is shown the lines around every failure marker in the whole failed-job log (`FAILED`, `error:`, `##[error]`, tracebacks and the like), with omitted lines counted inline, instead of only the last 150 lines. A log with no marker still gets its tail.
+
+- A job the workflow author marked best effort no longer counts as a failure. `continue-on-error: true` still records the job's check run as `failure`; only the check suite concludes `success`, and the listings return that field as null. Both places that read it now ask for it: the fix agent's failed checks, and the red-branch sweep over the GraphQL rollup. A suite that cannot be read, a rollup with checks past the first page, and a `FAILURE` rollup with no contexts read all still count. `developer#7` was held open for a GHCR mirror push that cannot create an org package and had been made non-blocking on purpose, which is how a fleet learns to ignore its own alert.
+
+- `uv` is on the publish runner of `code.yml` and `fix.yml`, pinned to the version inside the python-sdlc image so a regenerated lockfile and `uv sync --locked` use one resolver. The code agent still has no `Bash`: a relock belongs to the job that runs no model and already holds the write credential. Nothing relocks yet — this is the part of #132 that cannot be written from `scripts/`.
 
 ### Behaviour
 
