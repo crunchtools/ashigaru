@@ -6,6 +6,10 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- A patch that changes `pyproject.toml` in a repository with a `uv.lock` gets the lockfile regenerated on the publish side (`uv lock` only, no agent shell) before the commit, in both the code and fix publish steps. A failed resolution, a missing `uv`, or a relock that changes any other file hands over instead of pushing. The code prompt tells the agent not to hand-edit the lockfile.
+
 ## [2.10.1] - 2026-11-06
 
 ### Fixed

@@ -35,6 +35,7 @@ If the behaviour described is already fixed, or the issue turns out to need a de
 - Add or update a test that fails without your change and passes with it, wherever the repository has tests for that area.
 - Update `CHANGELOG.md` under `[Unreleased]` if the repository keeps one and the change is user-visible.
 - Do not edit anything under `.github/`.
+- To bump a dependency, edit the manifest (`pyproject.toml`) only. Do not hand-edit a lockfile such as `uv.lock`: the publish step regenerates it, and a lockfile you write by hand is a fiction.
 - Do not add credentials, real e-mail addresses, or names of real people.
 
 ## Result

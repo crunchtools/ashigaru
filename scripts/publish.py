@@ -26,6 +26,7 @@ from common import (
     set_state,
     touches_protected,
 )
+from relock import relock
 
 BOT_NAME = "ashigaru-crunchtools[bot]"
 BOT_EMAIL = "ashigaru-crunchtools[bot]@users.noreply.github.com"
@@ -64,6 +65,15 @@ def commit_message(title: str, issue: int, summary: str, thanks: str = "") -> st
 def hand_off(repo: str, issue: int, why: str) -> None:
     set_state(repo, issue, NEEDS_HUMAN)
     gh("issue", "comment", str(issue), "--repo", repo, "--body", f"**Ashigaru stopped.** {why}")
+
+
+def apply_patch(path: Path, patch: str) -> str | None:
+    """Apply the patch and refresh its lockfile; the reason it cannot be published, or None."""
+    try:
+        git("apply", "--index", "--3way", str(path))
+    except subprocess.CalledProcessError:
+        return "The fix no longer applies to the default branch."
+    return relock(patch, Path.cwd())
 
 
 def stale(open_prs: list[dict]) -> bool:
@@ -156,10 +166,9 @@ def main() -> int:
     git("config", "user.name", BOT_NAME)
     git("config", "user.email", BOT_EMAIL)
     git("checkout", "-B", branch)
-    try:
-        git("apply", "--index", "--3way", str(args.patch))
-    except subprocess.CalledProcessError:
-        hand_off(args.repo, args.issue, "The fix no longer applies to the default branch.")
+    unusable = apply_patch(args.patch, patch)
+    if unusable:
+        hand_off(args.repo, args.issue, unusable)
         set_output("pr", "")
         return 0
     git("commit", "-m", commit_message(title, args.issue, summary, thanks))
