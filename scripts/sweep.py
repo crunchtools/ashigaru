@@ -173,7 +173,7 @@ query($org: String!, $endCursor: String) {
         nameWithOwner isArchived hasIssuesEnabled
         defaultBranchRef { name target { ... on Commit { oid url committedDate statusCheckRollup { state
           contexts(first: 100) { totalCount nodes {
-            ... on CheckRun { name conclusion detailsUrl startedAt }
+            ... on CheckRun { name conclusion detailsUrl startedAt checkSuite { conclusion } }
             ... on StatusContext { context state targetUrl }
           } }
         } } } }
