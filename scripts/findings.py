@@ -286,7 +286,7 @@ def main() -> int:
         inline, reviews, pr_comments, ok, args.bot
     )
     linked = BRANCH_ISSUE.match(args.branch)
-    context = []
+    context: list[dict] = []
     if linked:
         issue_comments = api_pages(f"repos/{args.repo}/issues/{linked.group(1)}/comments?per_page=100")
         context = issue_context(issue_comments, pr_comments, ok)

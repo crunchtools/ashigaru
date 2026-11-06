@@ -156,7 +156,8 @@ def test_excerpt_keeps_distant_failures_separate_and_counts_the_gaps():
     lines = excerpt("\n".join(log)).splitlines()
     assert "error: first" in lines and "error: second" in lines
     assert lines[0] == "[… 60 lines omitted …]"
-    assert "[… 59 lines omitted …]" in lines
+    # The first window ends after line 110 (100 + 10), the second starts at 210 (250 - 40).
+    assert "[… 99 lines omitted …]" in lines
     assert lines[-1] == "[… 39 lines omitted …]"
 
 
