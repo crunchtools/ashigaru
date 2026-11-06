@@ -214,5 +214,102 @@ def test_the_watching_part_lists_each_recorded_line_with_its_issue():
     body = inbox.record_body("", "triage #7", ["Would label it `triaged`."])
     part = inbox.watching([{"repo": "o/r", "number": 5, "url": "https://x/5", "body": body}])
     assert part.startswith("## Watching (1)\n")
-    assert "- r **triage #7**: Would label it `triaged`. ([record](https://x/5))" in part
+    assert "- r `triage #7`: `Would label it 'triaged'.` ([record](https://x/5))" in part
     assert "## Watching (0)" in inbox.watching([])
+
+
+def test_a_recorded_title_cannot_link_or_embed_in_the_inbox():
+    title = "`[x](https://e.vil)` ![t](https://e.vil/p.png)"
+    body = inbox.record_body("", "code #7", [f"Would open a pull request: {title}"])
+    part = inbox.watching([{"repo": "o/r", "number": 5, "url": "https://x/5", "body": body}])
+    row = next(line for line in part.splitlines() if line.startswith("- r "))
+    shown = "'[x](https://e.vil)' ![t](https://e.vil/p.png)"
+    assert row == f"- r `code #7`: `Would open a pull request: {shown}` ([record](https://x/5))"
+
+
+def test_the_topic_lookup_fails_closed(monkeypatch):
+    import common
+
+    def refuse(path):
+        raise subprocess.CalledProcessError(1, "gh", stderr="HTTP 502")
+
+    monkeypatch.setattr(common, "api", refuse)
+    with pytest.raises(subprocess.CalledProcessError):
+        common.observing("o/r")
+
+
+def test_an_unreadable_topic_stops_triage_before_any_write(monkeypatch):
+    def refuse(repo):
+        raise subprocess.CalledProcessError(1, "gh", stderr="HTTP 502")
+
+    monkeypatch.setattr(triage_apply, "observing", refuse)
+    monkeypatch.setattr(triage_apply, "api", lambda path: {"labels": []})
+    monkeypatch.setattr(inbox, "observe", forbid)
+    for name in ("gh", "set_state", "ensure_labels"):
+        if name in vars(triage_apply):
+            monkeypatch.setattr(triage_apply, name, forbid)
+    monkeypatch.setattr(
+        "sys.argv",
+        ["triage_apply", "--repo", "o/r", "--issue", "7", "--result",
+         json.dumps({"category": "bug", "confidence": 0.9, "summary": "s"})],
+    )  # fmt: skip
+    with pytest.raises(subprocess.CalledProcessError):
+        triage_apply.main()
+
+
+def test_a_first_record_opens_the_observe_issue(monkeypatch):
+    paths, published = [], []
+    monkeypatch.setattr(inbox, "api", lambda path: paths.append(path) or [])
+    monkeypatch.setattr(inbox, "publish", lambda *args: published.append(args) or "opened")
+    assert inbox.observe("o/r", "sweep", ["Would queue #1 for triage."]) == "opened"
+    assert paths == [f"repos/o/r/issues?state=open&labels={OBSERVE}&per_page=100&sort=created&direction=asc"]
+    expected = inbox.record_body("", "sweep", ["Would queue #1 for triage."])
+    assert published == [("o/r", expected, OBSERVE, inbox.OBSERVE_TITLE)]
+
+
+def test_a_record_updates_the_oldest_observe_issue_and_skips_pull_requests(monkeypatch):
+    older = inbox.record_body("", "triage #2", ["Would label it `triaged`."])
+    found = [
+        {"number": 9, "body": inbox.record_body("", "triage #3", ["newer"])},
+        {"number": 1, "body": "pull request", "pull_request": {}},
+        {"number": 4, "body": older},
+    ]
+    published = []
+    monkeypatch.setattr(inbox, "api", lambda path: found)
+    monkeypatch.setattr(inbox, "publish", lambda *args: published.append(args) or "updated")
+    assert inbox.observe("o/r", "sweep", ["Would start the fix for #5."]) == "updated"
+    expected = inbox.record_body(older, "sweep", ["Would start the fix for #5."])
+    assert published == [("o/r", expected, OBSERVE, inbox.OBSERVE_TITLE)]
+    assert "**triage #2**" in expected and "newer" not in expected
+
+
+def test_the_sweep_records_a_watched_repository_and_dispatches_only_the_others(monkeypatch):
+    listed = [
+        {"full_name": "o/watched", "archived": False, "has_issues": True, "topics": [OBSERVE]},
+        {"full_name": "o/plain", "archived": False, "has_issues": True, "topics": []},
+    ]
+
+    def work(number):
+        def found(repo, *rest):
+            return [{"repo": repo, "number": number, "pull": 8, "created_at": "2026-10-01T00:00:00Z"}]
+
+        return found
+
+    dispatched, watched = [], []
+    monkeypatch.setattr(sweep, "api_pages", lambda path: listed)
+    monkeypatch.setattr(sweep, "enrolled", lambda repo: True)
+    monkeypatch.setattr(sweep, "api", lambda path: [])
+    monkeypatch.setattr(sweep, "open_pulls", lambda repo: [])
+    monkeypatch.setattr(sweep, "candidates", work(1))
+    monkeypatch.setattr(sweep, "conflicted", work(2))
+    monkeypatch.setattr(sweep, "waiting", work(3))
+    monkeypatch.setattr(sweep, "dispatch", lambda args, now, *queues: dispatched.append(queues))
+    monkeypatch.setattr(sweep, "plan_reviews", lambda *args: {})
+    monkeypatch.setattr(sweep, "keep_watch", lambda org, lines, dry_run: watched.append(lines) or [])
+    monkeypatch.setattr("sys.argv", ["sweep.py", "--org", "o"])
+    assert sweep.main() == 0
+    [(stuck, ready, untriaged)] = dispatched
+    assert {item["repo"] for item in [*stuck, *ready, *untriaged]} == {"o/plain"}
+    assert [len(stuck), len(ready), len(untriaged)] == [1, 1, 1]
+    lines = sweep.would_do([{"number": 1}], [{"number": 2, "pull": 8}], [{"number": 3}])
+    assert watched == [{"o/watched": lines}]

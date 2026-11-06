@@ -583,9 +583,11 @@ def watching(issues: list[dict]) -> str:
     rows = []
     for item in sorted(issues, key=lambda found: (found["repo"], found["number"])):
         name = item["repo"].split("/", 1)[-1]
-        rows += [
-            f"- {name} {line[2:]} ([record]({item['url']}))"
-            for line in (item.get("body") or "").splitlines()
-            if line.startswith("- **")
-        ]
+        for line in (item.get("body") or "").splitlines():
+            if not line.startswith("- **"):
+                continue
+            # A recorded line can carry an issue title or an agent's summary, and anyone can edit the
+            # issue it sits in: shown as a code span, its links, images and mentions stay inert.
+            source, _, text = line[4:].partition("**: ")
+            rows.append(f"- {name} `{plain(source)}`: `{plain(text)}` ([record]({item['url']}))")
     return "\n".join(section("Watching", rows, "No repository is watching only."))
