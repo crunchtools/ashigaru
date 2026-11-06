@@ -133,13 +133,10 @@ def test_a_suite_that_could_not_be_read_still_counts_as_a_failure():
     assert [run["name"] for run in failed([check("CI", conclusion="failure")], "555")] == ["CI"]
 
 
-def test_the_suite_is_read_once_and_only_for_a_failure(monkeypatch):
-    asked = []
-    monkeypatch.setattr(findings, "suite_conclusion", lambda repo, ident: asked.append(ident) or "success")
+def test_the_conclusions_reach_every_run_on_their_suite():
     runs = [check("a", conclusion="failure"), check("b", conclusion="failure"), check("c")]
-    filled = findings.with_suites("o/r", runs)
-    assert asked == [100]
-    assert [run["check_suite"].get("conclusion") for run in filled] == ["success"] * 3
+    filled = findings.with_suites(runs, {100: "success"})
+    assert [run["check_suite"]["conclusion"] for run in filled] == ["success"] * 3
     assert failed(filled, own_run_id="555") == []
 
 

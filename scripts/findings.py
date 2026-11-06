@@ -253,30 +253,29 @@ def excerpt(log: str) -> str:
     return "\n".join(out)
 
 
-def suite_conclusion(repo: str, ident: int) -> str | None:
-    """None when the suite cannot be read: unknown is not best effort, so the check still counts."""
-    try:
-        return json.loads(gh("api", f"repos/{repo}/check-suites/{ident}")).get("conclusion")
-    except subprocess.CalledProcessError as error:
-        print(f"::warning::no check suite {ident}: {error.stderr.strip()}")
-        return None
+def suite_conclusions(repo: str, sha: str) -> dict[int, str | None]:
+    """Every check suite on the commit, by id. One call, not one per suite.
 
-
-def with_suites(repo: str, runs: list[dict]) -> list[dict]:
-    """Fill in the check suite conclusion, which the per-commit listing leaves null.
-
-    It has to be read per suite -- one call per workflow -- so it is read once and
-    only for a run that failed, the only place `best_effort` consults it.
+    Empty when the listing cannot be read: unknown is not best effort, so each
+    check still counts.
     """
-    known: dict[int, str | None] = {}
+    try:
+        pages = json.loads(
+            gh("api", "--paginate", "--slurp", f"repos/{repo}/commits/{sha}/check-suites?per_page=100")
+        )
+    except subprocess.CalledProcessError as error:
+        print(f"::warning::no check suites for {sha}: {error.stderr.strip()}")
+        return {}
+    return {suite["id"]: suite.get("conclusion") for page in pages for suite in page["check_suites"]}
+
+
+def with_suites(runs: list[dict], conclusions: dict[int, str | None]) -> list[dict]:
+    """Fill in each run's check suite conclusion, which the check-runs listing returns as null."""
     filled = []
     for run in runs:
         suite = run.get("check_suite") or {}
-        ident = suite.get("id")
-        if run.get("conclusion") in FAILED and ident is not None and ident not in known:
-            known[ident] = suite_conclusion(repo, ident)
-        if ident in known:
-            run = run | {"check_suite": suite | {"conclusion": known[ident]}}
+        if suite.get("id") in conclusions:
+            run = run | {"check_suite": suite | {"conclusion": conclusions[suite["id"]]}}
         filled.append(run)
     return filled
 
@@ -285,7 +284,8 @@ def check_runs(repo: str, sha: str) -> list[dict]:
     pages = json.loads(
         gh("api", "--paginate", "--slurp", f"repos/{repo}/commits/{sha}/check-runs?per_page=100")
     )
-    return with_suites(repo, [run for page in pages for run in page["check_runs"]])
+    runs = [run for page in pages for run in page["check_runs"]]
+    return with_suites(runs, suite_conclusions(repo, sha)) if runs else runs
 
 
 def main() -> int:
