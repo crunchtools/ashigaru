@@ -416,7 +416,11 @@ def best_effort(context: dict) -> bool:
 
 
 def failing(contexts: list[dict]) -> list[dict]:
-    """The failed checks and statuses of a rollup, newest run per check, as names and links."""
+    """The failed checks and statuses of a rollup, newest run per check, as names and links.
+
+    A best-effort failure is left out -- see `best_effort` -- so this is what is
+    wrong with the head, not everything that reported a failure on it.
+    """
     found = []
     for context in newest(contexts):
         if context.get("conclusion") in FAILED_CHECKS and not best_effort(context):
