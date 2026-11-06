@@ -116,6 +116,8 @@ def test_only_an_open_pull_request_gets_a_comment(monkeypatch, state, posted):
     ]
     monkeypatch.setattr(review_publish.sys, "argv", argv)
     monkeypatch.setattr(review_publish, "gh", lambda *args: json.dumps({"state": state, **FACTS}))
+    # Watch-only mode is read from the repository, so an unpatched main() shells out to `gh`.
+    monkeypatch.setattr(review_publish, "observing", lambda repo: False)
     monkeypatch.setattr(review_publish, "post", lambda repo, pull, body, bot: seen.append("body") or "posted")
     assert review_publish.main() == 0
     assert seen == posted

@@ -485,7 +485,9 @@ def dispatch(
     queue_triage(chosen, args.dry_run)
 
 
-def plan_reviews(args: argparse.Namespace, visitors: list[dict], outside_issues: int) -> dict[str, dict | None]:
+def plan_reviews(
+    args: argparse.Namespace, visitors: list[dict], outside_issues: int
+) -> dict[str, dict | None]:
     """Choose the outside pull requests due a review and hand them to the review job; return the
     reviews found so far, keyed by URL."""
     # The same set is looked up, reviewed and listed, so nothing is reviewed twice for want of a lookup.
