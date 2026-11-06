@@ -6,6 +6,10 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- The relock runs `uv lock --no-build` with a scrubbed environment. Resolution is not inert: `uv lock` builds the metadata of any requirement it cannot read statically — a source distribution, or a path or VCS requirement with `dynamic` fields — by calling that package's PEP 517 backend, which runs its `setup.py`. The patch being resolved is a model's work on text a stranger may have influenced, and the publish job holds the app token. `--no-build` makes uv refuse such a requirement instead of building it, and the lock command no longer inherits the token. A dependency with no wheel now hands over to a person, which is the right way round. Gatehouse raised this CRITICAL on #138, correctly, against a claim in #132 that resolution does not run build backends.
+
 ### Added
 
 - A patch that changes `pyproject.toml` in a repository with a `uv.lock` gets the lockfile regenerated on the publish side (`uv lock` only, no agent shell) before the commit, in both the code and fix publish steps. A failed resolution, a missing `uv`, or a relock that changes any other file hands over instead of pushing. The code prompt tells the agent not to hand-edit the lockfile.
