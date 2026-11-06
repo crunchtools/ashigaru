@@ -179,7 +179,10 @@ def test_excerpt_with_more_windows_than_the_cap_keeps_the_first_ones_and_counts_
     assert "error: failure 0" in lines
     assert f"error: failure {LOG_EXCERPT_LINES - 1}" in lines
     assert f"error: failure {LOG_EXCERPT_LINES}" not in lines
-    assert lines[-1].startswith("[… ") and lines[-1].endswith("lines omitted …]")
+    # One line per window (share 1) is kept, so everything after the last kept hit is
+    # counted: the 5 dropped windows of 201 lines each.
+    dropped = (count - LOG_EXCERPT_LINES) * 201
+    assert lines[-1] == f"[… {dropped} lines omitted …]"
 
 
 def test_only_pull_requests_the_app_opened_are_touched():
