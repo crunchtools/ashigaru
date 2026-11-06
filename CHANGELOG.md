@@ -6,6 +6,12 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [2.10.1] - 2026-11-06
+
+### Fixed
+
+- The publish job resolves its `uv` action again. 2.10.0 called `astral-sh/setup-uv@v10`, and that action publishes major alias tags only up to `v7` — `v10.3.3` exists, `v10` does not — so every `Code / Open pull request` job failed at "Unable to resolve action", which is the job that pushes the branch and opens the pull request. Now `@v7`, which is resolvable and is what the organization already calls elsewhere.
+
 ## [2.10.0] - 2026-11-06
 
 ### Added

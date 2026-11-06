@@ -198,7 +198,7 @@ jobs:
       # So publish.py can regenerate a lockfile after applying the patch (#132).
       # The agent has no shell and never will; this runner runs no model.
       - name: Install uv
-        uses: astral-sh/setup-uv@v10
+        uses: astral-sh/setup-uv@v7
         with:
           version: "0.13.7"   # the uv inside the python-sdlc image, so a relock and `--locked` agree
 
