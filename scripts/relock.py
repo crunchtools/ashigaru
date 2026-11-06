@@ -4,21 +4,49 @@ The code agent has no shell, so it can edit `pyproject.toml` but not run `uv loc
 publish job holds the write credential and runs no model; it relocks here, between applying
 the patch and committing. Only the lock command runs: never `uv sync`, tests or a build.
 
+NOTHING FROM A DEPENDENCY MAY EXECUTE HERE. Resolution is not inert: `uv lock` builds the
+metadata of any requirement it cannot read statically -- a source distribution, or a path or
+VCS requirement with `dynamic` fields -- by calling that package's PEP 517 backend, which
+runs its `setup.py`. The patch being resolved is a model's work on text a stranger may have
+influenced, and this job holds the app token in its environment and the checkout credential
+in `.git/config`. That is the inversion the authority model exists to prevent, and it would
+be reached without anyone choosing it, unlike the `Bash` the agent is refused.
+
+So `--no-build`, which makes uv refuse such a requirement instead of building it, and a
+scrubbed environment. Measured, not assumed: with the flag off, a path dependency declaring
+`dynamic = ["version"]` ran its `setup.py` during `uv lock`; with it on, uv exited with
+"can't be installed because it is marked as `--no-build` but has no binary distribution" and
+the backend did not run. The cost is that a dependency with no wheel cannot be relocked
+without a person, which is the right way round.
+
 `relock` returns a refusal, or None when the lockfile is fresh. Anything but the lockfile
 changing, a failed resolution or a missing `uv` is a refusal, and the caller hands over.
 """
 
 from __future__ import annotations
 
+import os
 import subprocess
 from pathlib import Path
 
 from common import DIFF_HEADER
 
-# One entry per ecosystem: manifest, lockfile, and the lock command (never a sync or a build).
-ECOSYSTEMS = (("pyproject.toml", "uv.lock", ("uv", "lock")),)
+# One entry per ecosystem: manifest, lockfile, and the lock command. Never a sync, never a
+# build -- see the module docstring for why `--no-build` is load-bearing and not a tidy-up.
+ECOSYSTEMS = (("pyproject.toml", "uv.lock", ("uv", "lock", "--no-build")),)
 TIMEOUT = 600
 TAIL = 2000
+KEEP_ENV = ("PATH", "HOME", "LANG", "LC_ALL", "TMPDIR", "XDG_CACHE_HOME", "SSL_CERT_FILE")
+"""What the lock command inherits. Everything else, the app token above all, is dropped:
+`--no-build` means nothing of the dependency's should run, and this is what that is worth if
+one day something does."""
+
+
+def environment() -> dict[str, str]:
+    """The lock command's environment: what `KEEP_ENV` names, and a marker uv reads itself."""
+    kept = {name: os.environ[name] for name in KEEP_ENV if name in os.environ}
+    # Belt and braces: uv honours this even if the flag is ever dropped from the command.
+    return kept | {"UV_NO_BUILD": "1"}
 
 
 def changed_files(patch: str) -> set[str]:
@@ -82,7 +110,8 @@ def relock(
         return None
     lockfile, command = target
     try:
-        done = run(command, cwd=root, capture_output=True, text=True, timeout=TIMEOUT, check=False)
+        done = run(command, cwd=root, capture_output=True, text=True, timeout=TIMEOUT,
+                   check=False, env=environment())  # fmt: skip
     except FileNotFoundError:
         return f"`{command[0]}` is not available on the publish runner, so `{lockfile}` is stale."
     except subprocess.TimeoutExpired:

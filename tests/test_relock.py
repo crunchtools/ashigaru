@@ -1,8 +1,12 @@
 """A manifest bump gets a fresh lockfile on the publish side; anything odd hands over."""
 
+import shutil
 import subprocess
 from pathlib import Path
 
+import pytest
+
+import relock as relock_module
 from common import touches_protected
 from relock import relock, wanted
 
@@ -26,7 +30,7 @@ def done(code=0, err=""):
 
 
 def test_only_a_changed_manifest_with_a_lockfile_triggers_a_relock(tmp_path):
-    assert wanted(MANIFEST, repo(tmp_path)) == ("uv.lock", ("uv", "lock"))
+    assert wanted(MANIFEST, repo(tmp_path)) == ("uv.lock", ("uv", "lock", "--no-build"))
     assert wanted(OTHER, repo(tmp_path)) is None
     bare = tmp_path / "bare"
     bare.mkdir()
@@ -35,7 +39,7 @@ def test_only_a_changed_manifest_with_a_lockfile_triggers_a_relock(tmp_path):
 
 def test_a_patch_that_deletes_the_lockfile_still_gets_it_regenerated(tmp_path):
     deleted = "diff --git a/uv.lock b/uv.lock\ndeleted file mode 100644\n"
-    assert wanted(MANIFEST + deleted, repo(tmp_path, lock=False)) == ("uv.lock", ("uv", "lock"))
+    assert wanted(MANIFEST + deleted, repo(tmp_path, lock=False)) == ("uv.lock", ("uv", "lock", "--no-build"))
 
 
 def test_no_command_runs_when_nothing_needs_a_relock(tmp_path):
@@ -75,6 +79,73 @@ def test_a_relock_is_no_route_to_the_workflows(tmp_path):
     assert touches_protected(WORKFLOW)  # a patch naming .github/ is refused before any relock runs
     got = relock(MANIFEST, repo(tmp_path), run=done(), strays=lambda root: {".github/workflows/ci.yml"})
     assert ".github/workflows/ci.yml" in got
+
+
+def test_the_lock_command_refuses_to_build_a_dependency():
+    """Resolution is not inert: uv calls a requirement's PEP 517 backend to read metadata it
+    cannot read statically, and this job holds the app token. Measured: without the flag a path
+    dependency declaring `dynamic = ["version"]` ran its setup.py during `uv lock`."""
+    for _manifest, _lockfile, command in relock_module.ECOSYSTEMS:
+        assert "--no-build" in command
+
+
+def test_the_lock_command_does_not_inherit_the_token(monkeypatch, tmp_path):
+    monkeypatch.setenv("GH_TOKEN", "ghs_the-app-token")
+    monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "sk-ant-oat01-secret")
+    monkeypatch.setenv("PATH", "/usr/bin")
+    passed = {}
+
+    def record(command, **kwargs):
+        passed.update(kwargs)
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    relock(MANIFEST, repo(tmp_path), run=record, strays=lambda root: {"uv.lock"}, stage=lambda *a: None)
+    env = passed["env"]
+    assert "GH_TOKEN" not in env
+    assert "CLAUDE_CODE_OAUTH_TOKEN" not in env
+    assert env["PATH"] == "/usr/bin"
+    assert env["UV_NO_BUILD"] == "1"
+
+
+@pytest.mark.skipif(shutil.which("uv") is None, reason="needs uv to resolve for real")
+def test_a_dependency_that_would_build_is_refused_and_its_backend_never_runs(tmp_path):
+    """The whole point, end to end, with a real `uv lock`.
+
+    The guards read like tidy-up to whoever deletes them, so this is the test that fails
+    when they do: a path dependency declaring `dynamic = ["version"]`, which uv cannot
+    read statically, whose `setup.py` writes a marker if it is ever executed here.
+
+    Measured with both guards removed: `relock` returned None and the marker existed.
+    With either one in place uv stops at "Building source distributions for `dep` is
+    disabled" and the marker does not appear, which is why one assertion is the marker
+    and the other is that reason.
+    """
+    marker = tmp_path / "backend-ran"
+    dep = tmp_path / "dep"
+    dep.mkdir()
+    (dep / "pyproject.toml").write_text(
+        '[build-system]\nrequires = ["setuptools"]\nbuild-backend = "setuptools.build_meta"\n'
+        '\n[project]\nname = "dep"\ndynamic = ["version"]\n'
+    )
+    (dep / "setup.py").write_text(
+        f"import pathlib\npathlib.Path({str(marker)!r}).write_text('ran')\n"
+        'from setuptools import setup\n\nsetup(version="0.1.0")\n'
+    )
+    app = tmp_path / "app"
+    app.mkdir()
+    (app / "pyproject.toml").write_text(
+        '[project]\nname = "app"\nversion = "0.1.0"\nrequires-python = ">=3.11"\n'
+        'dependencies = ["dep"]\n\n[tool.uv.sources]\ndep = { path = "../dep" }\n'
+    )
+    # A valid lock, or uv fails parsing it and never reaches resolution -- which is how the
+    # first version of this test passed while proving nothing.
+    (app / "uv.lock").write_text('version = 1\nrequires-python = ">=3.11"\n')
+
+    refusal = relock(MANIFEST, app)
+
+    assert not marker.exists(), "the dependency's build backend executed in the publish job"
+    # Named so the test cannot pass on some unrelated failure before resolution.
+    assert refusal is not None and "disabled" in refusal
 
 
 def test_the_agent_still_has_no_shell():
