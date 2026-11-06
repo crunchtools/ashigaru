@@ -1,7 +1,10 @@
 """A manifest bump gets a fresh lockfile on the publish side; anything odd hands over."""
 
+import shutil
 import subprocess
 from pathlib import Path
+
+import pytest
 
 import relock as relock_module
 from common import touches_protected
@@ -102,6 +105,47 @@ def test_the_lock_command_does_not_inherit_the_token(monkeypatch, tmp_path):
     assert "CLAUDE_CODE_OAUTH_TOKEN" not in env
     assert env["PATH"] == "/usr/bin"
     assert env["UV_NO_BUILD"] == "1"
+
+
+@pytest.mark.skipif(shutil.which("uv") is None, reason="needs uv to resolve for real")
+def test_a_dependency_that_would_build_is_refused_and_its_backend_never_runs(tmp_path):
+    """The whole point, end to end, with a real `uv lock`.
+
+    The guards read like tidy-up to whoever deletes them, so this is the test that fails
+    when they do: a path dependency declaring `dynamic = ["version"]`, which uv cannot
+    read statically, whose `setup.py` writes a marker if it is ever executed here.
+
+    Measured with both guards removed: `relock` returned None and the marker existed.
+    With either one in place uv stops at "Building source distributions for `dep` is
+    disabled" and the marker does not appear, which is why one assertion is the marker
+    and the other is that reason.
+    """
+    marker = tmp_path / "backend-ran"
+    dep = tmp_path / "dep"
+    dep.mkdir()
+    (dep / "pyproject.toml").write_text(
+        '[build-system]\nrequires = ["setuptools"]\nbuild-backend = "setuptools.build_meta"\n'
+        '\n[project]\nname = "dep"\ndynamic = ["version"]\n'
+    )
+    (dep / "setup.py").write_text(
+        f"import pathlib\npathlib.Path({str(marker)!r}).write_text('ran')\n"
+        'from setuptools import setup\n\nsetup(version="0.1.0")\n'
+    )
+    app = tmp_path / "app"
+    app.mkdir()
+    (app / "pyproject.toml").write_text(
+        '[project]\nname = "app"\nversion = "0.1.0"\nrequires-python = ">=3.11"\n'
+        'dependencies = ["dep"]\n\n[tool.uv.sources]\ndep = { path = "../dep" }\n'
+    )
+    # A valid lock, or uv fails parsing it and never reaches resolution -- which is how the
+    # first version of this test passed while proving nothing.
+    (app / "uv.lock").write_text('version = 1\nrequires-python = ">=3.11"\n')
+
+    refusal = relock(MANIFEST, app)
+
+    assert not marker.exists(), "the dependency's build backend executed in the publish job"
+    # Named so the test cannot pass on some unrelated failure before resolution.
+    assert refusal is not None and "disabled" in refusal
 
 
 def test_the_agent_still_has_no_shell():
