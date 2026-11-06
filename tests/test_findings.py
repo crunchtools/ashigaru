@@ -169,6 +169,19 @@ def test_excerpt_cap_keeps_every_window_when_there_are_many():
     assert len(text.splitlines()) <= LOG_EXCERPT_LINES + 11
 
 
+def test_excerpt_with_more_windows_than_the_cap_keeps_the_first_ones_and_counts_the_rest():
+    count = LOG_EXCERPT_LINES + 5
+    log = []
+    for i in range(count):
+        log += [f"ok {i}-{j}" for j in range(200)] + [f"error: failure {i}"]
+    text = excerpt("\n".join(log))
+    lines = text.splitlines()
+    assert "error: failure 0" in lines
+    assert f"error: failure {LOG_EXCERPT_LINES - 1}" in lines
+    assert f"error: failure {LOG_EXCERPT_LINES}" not in lines
+    assert lines[-1].startswith("[… ") and lines[-1].endswith("lines omitted …]")
+
+
 def test_only_pull_requests_the_app_opened_are_touched():
     assert opened_by({"author": {"login": "app/ashigaru-crunchtools"}}, "ashigaru-crunchtools")
     assert not opened_by({"author": {"login": "somebody"}}, "ashigaru-crunchtools")
