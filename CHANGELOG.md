@@ -6,6 +6,10 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- The code agent's hook run skips python-sdlc's `hooks-installed` check (`SDLC_SKIP=hooks-installed`). It asks whether a developer's clone has its git hooks, which a runner checkout never does, so it failed on every repository using python-sdlc ≥ 0.5. Both hook-failure passes went to the agent with nothing it could fix, and every pull request body ended with a note about a missing pre-push hook (acquacotta#221, #227).
+
 ## [2.11.0] - 2026-11-06
 
 ### Fixed
