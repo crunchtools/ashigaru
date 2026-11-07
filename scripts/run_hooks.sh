@@ -24,7 +24,9 @@ if [ ! -f "$config" ] || [ -z "$(git diff --cached --name-only)" ]; then
   exit 0
 fi
 
-SKIP=gatehouse timeout 900 pre-commit run --config "$config" >> "$log" 2>&1
+# hooks-installed asks whether a developer's clone has its git hooks; this
+# runner's checkout never does, and no edit can change that.
+SKIP=gatehouse SDLC_SKIP=hooks-installed timeout 900 pre-commit run --config "$config" >> "$log" 2>&1
 status=$?
 git add -A   # formatters rewrite files in place
 
