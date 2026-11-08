@@ -6,6 +6,10 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- A conflicted pull request keeps its fix rounds. The publish job rebuilt `ashigaru/issue-N` from the first patch alone, dropping every fix-round commit while keeping the description and round count, so the pull request described code it no longer held and arrived at needs-human with its rounds spent (acquacotta#222, #226; #147). It now rebases the branch's own commits onto the default branch first, and rebuilds from the fresh patch only when that conflicts. A rebuild rewrites the title and description to match and resets the round count.
+
 ## [2.11.1] - 2026-11-08
 
 ### Fixed

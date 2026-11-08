@@ -8,6 +8,7 @@ from findings import (
     ANSWER_MARKER,
     LOG_EXCERPT_LINES,
     LOG_TAIL_LINES,
+    REBUILD_MARKER,
     ROUND_MARKER,
     excerpt,
     failed,
@@ -102,6 +103,19 @@ def test_issue_comments_since_the_last_round_are_context():
 def test_rounds_are_counted_from_marker_comments():
     rounds = [{"body": f"{ROUND_MARKER}\nround"}, {"body": ROUND_MARKER}]
     assert rounds_used([*rounds, {"body": "chatter"}]) == len(rounds)
+
+
+def test_a_fresh_rebuild_starts_the_round_count_again():
+    comments = [{"body": ROUND_MARKER}] * 5 + [{"body": f"{REBUILD_MARKER}\nrebuilt"}, {"body": ROUND_MARKER}]
+    assert rounds_used(comments) == 1
+    prs = [
+        {"body": ROUND_MARKER, "created_at": "2026-01-01"},
+        {"body": REBUILD_MARKER, "created_at": "2026-01-02"},
+    ]
+    issue = [human({"body": "before", "created_at": "2026-01-01T12"}, "m"),
+             human({"body": "after", "created_at": "2026-01-03"}, "m")]  # fmt: skip
+    got = issue_context(issue, prs, maintainer_check(REVIEWER, "b", lambda login: True))
+    assert [c["body"] for c in got] == ["after"]
 
 
 def test_round_cap_hands_off_instead_of_fixing():
