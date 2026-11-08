@@ -419,14 +419,15 @@ def failed(item: dict, stderr: str) -> str:
 
     Creating a tag at a commit whose workflow files differ from the default branch's
     needs the `workflows` permission, which the app does not hold, so a release whose
-    pull request merged before a workflow change lands is refused with a 403. The tag
-    has to be made by a person.
+    pull request merged before a workflow change lands is refused with a 403. GitHub
+    gives the same error for other missing permissions, so the message names the usual
+    cause without claiming it. Either way the tag has to be made by a person.
     """
     if item["action"] == "publish" and FORBIDDEN in stderr:
         return (
-            f"GitHub refused the app tag v{item['current']} at {item['sha'][:7]} (HTTP 403), "
-            "which it does when the default branch's workflows changed after the release merged; "
-            "tag and publish it by hand"
+            f"GitHub refused the app tag v{item['current']} at {item['sha'][:7]} (HTTP 403); "
+            "the usual cause is a workflow change on the default branch after the release merged, "
+            "and either way the tag has to be made by hand"
         )
     return "the release step failed; the sweep log has the error"
 
