@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [2.11.1] - 2026-11-08
+
 ### Fixed
 
 - A release GitHub refuses to tag says why in the record. The app cannot create a tag at a commit whose workflow files differ from the default branch's (that needs the `workflows` permission, which it does not hold, on purpose), so a release pull request that merged before a workflow change landed was listed as "the release step failed; the sweep log has the error" every hour (openclaw 1.1.3). It now names the tag and commit and says to publish it by hand.
