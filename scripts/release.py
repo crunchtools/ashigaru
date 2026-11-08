@@ -411,6 +411,27 @@ def watch(item: dict) -> None:
     print(f"  watched {item['repo']}: {lines[0] if lines else 'nothing due'}")
 
 
+FORBIDDEN = "Resource not accessible by integration"
+
+
+def failed(item: dict, stderr: str) -> str:
+    """Why a release step that GitHub refused did not happen, as the record states it.
+
+    Creating a tag at a commit whose workflow files differ from the default branch's
+    needs the `workflows` permission, which the app does not hold, so a release whose
+    pull request merged before a workflow change lands is refused with a 403. GitHub
+    gives the same error for other missing permissions, so the message names the usual
+    cause without claiming it. Either way the tag has to be made by a person.
+    """
+    if item["action"] == "publish" and FORBIDDEN in stderr:
+        return (
+            f"GitHub refused the app tag v{item['current']} at {item['sha'][:7]} (HTTP 403); "
+            "the usual cause is a workflow change on the default branch after the release merged, "
+            "and either way the tag has to be made by hand"
+        )
+    return "the release step failed; the sweep log has the error"
+
+
 def carry_out(items: list[dict], day: str) -> None:
     """Act on every planned step. One repository failing does not stop the rest."""
     for item in items:
@@ -425,7 +446,7 @@ def carry_out(items: list[dict], day: str) -> None:
             item["refused"] = str(why)
             print(f"  refused {item['repo']}: {why}")
         except subprocess.CalledProcessError as error:
-            item["refused"] = "the release step failed; the sweep log has the error"
+            item["refused"] = failed(item, error.stderr)
             print(f"::warning::release step failed for {item['repo']}: {error.stderr.strip()}")
 
 

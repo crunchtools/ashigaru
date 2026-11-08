@@ -8,6 +8,9 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- A release GitHub refuses to tag says why in the record. The app cannot create a tag at a commit whose workflow files differ from the default branch's (that needs the `workflows` permission, which it does not hold, on purpose), so a release pull request that merged before a workflow change landed was listed as "the release step failed; the sweep log has the error" every hour (openclaw 1.1.3). It now names the tag and commit and says to publish it by hand.
+- `VERSION` says 2.11.0. 2.10.0 through 2.11.0 were cut by hand without moving it, so the sweep's own release of this repository was refused: version 2.11.0 was stated in no tracked file.
+
 - The code agent's hook run skips python-sdlc's `hooks-installed` check (`SDLC_SKIP=hooks-installed`). It asks whether a developer's clone has its git hooks, which a runner checkout never does, so it failed on every repository using python-sdlc ≥ 0.5. Both hook-failure passes went to the agent with nothing it could fix, and every pull request body ended with a note about a missing pre-push hook (acquacotta#221, #227).
 
 ## [2.11.0] - 2026-11-06
