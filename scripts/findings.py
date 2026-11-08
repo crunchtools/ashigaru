@@ -341,6 +341,15 @@ def main() -> int:
         time.sleep(POLL_SECONDS)
         runs = check_runs(args.repo, sha)
 
+    # The wait above can outlast the pull request: auto-merge lands and deletes the branch, and the
+    # checkout that follows a `fix` would fail on work that succeeded.
+    state = json.loads(gh("pr", "view", str(number), "--repo", args.repo, "--json", "state,mergeCommit"))
+    if state.get("state") != "OPEN":
+        merge = (state.get("mergeCommit") or {}).get("oid", "none")
+        print(f"findings: PR #{number} is {state.get('state')} (merge commit {merge}); nothing to do")
+        set_output("action", "none")
+        return 0
+
     inline = api_pages(f"repos/{args.repo}/pulls/{number}/comments?per_page=100")
     pr_comments = api_pages(f"repos/{args.repo}/issues/{number}/comments?per_page=100")
     reviews = api_pages(f"repos/{args.repo}/pulls/{number}/reviews?per_page=100")
