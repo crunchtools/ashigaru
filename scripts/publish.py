@@ -106,7 +106,8 @@ def carry_over(branch: str, start: str) -> bool:
     git("checkout", "-B", branch, f"origin/{branch}")
     try:
         git("rebase", start)
-    except subprocess.CalledProcessError:
+    except subprocess.CalledProcessError as error:
+        print(f"publish: {branch} does not rebase, rebuilding it:\n{error.stderr.strip()}")
         git("rebase", "--abort")
         git("checkout", "-B", branch, start)
         return False
