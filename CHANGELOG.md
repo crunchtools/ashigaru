@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [2.11.3] - 2026-11-08
+
 ### Fixed
 
 - A fix run no longer goes red when its pull request merged while the findings step was waiting for checks. The step looks at the pull request again after the wait and, if it is merged or closed, reports `none` instead of letting the checkout fail on the deleted branch (#152).
