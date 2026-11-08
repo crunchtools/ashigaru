@@ -1,10 +1,14 @@
 """What may become a pull request, and what may be pushed in a fix round."""
 
+import subprocess
 from unittest.mock import patch
 
+import pytest
+
 from common import touches_protected
+from findings import REBUILD_MARKER
 from fix_publish import asked, next_step, post_reply, replies
-from publish import commit_message, credit, landed, refusal, stale
+from publish import REBASED, REBUILT, carry_over, commit_message, credit, landed, refusal, stale
 
 PATCH = "diff --git a/src/app.py b/src/app.py\n--- a/src/app.py\n+++ b/src/app.py\n@@ -1 +1 @@\n-a\n+b\n"
 WORKFLOW_PATCH = PATCH.replace("src/app.py", ".github/workflows/ci.yml")
@@ -145,3 +149,56 @@ def test_an_issue_closed_by_our_merged_pull_request_is_not_handed_to_a_human():
 def test_an_open_issue_or_one_without_a_merged_pull_request_is_still_worked():
     assert not landed({"state": "open"}, [{"number": 46}])
     assert not landed({"state": "closed"}, [])
+
+
+def run(cwd, *args):
+    return subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True, text=True).stdout.strip()
+
+
+@pytest.fixture
+def conflicted_pr(tmp_path, monkeypatch):
+    """An origin whose default branch moved on after `ashigaru/issue-1` took a fix and a fix round."""
+    origin, work = tmp_path / "origin", tmp_path / "work"
+    run(tmp_path, "init", "-q", "-b", "main", str(origin))
+    for key, value in (("user.name", "t"), ("user.email", "t@t")):
+        run(origin, "config", key, value)
+    (origin / "app.py").write_text("a\n")
+    (origin / "other.py").write_text("x\n")
+    run(origin, "add", ".")
+    run(origin, "commit", "-qm", "base")
+    run(origin, "checkout", "-qb", "ashigaru/issue-1")
+    for line in ("fix", "round 1"):
+        (origin / "app.py").write_text((origin / "app.py").read_text() + f"{line}\n")
+        run(origin, "commit", "-qam", line)
+    run(origin, "checkout", "-q", "main")
+    (origin / "other.py").write_text("y\n")
+    run(origin, "commit", "-qam", "moved on")
+    run(tmp_path, "clone", "-q", "--depth", "1", f"file://{origin}", str(work))
+    for key, value in (("user.name", "t"), ("user.email", "t@t")):
+        run(work, "config", key, value)
+    monkeypatch.chdir(work)
+    return origin, work
+
+
+def test_a_conflicted_pr_keeps_its_fix_rounds_when_it_rebases(conflicted_pr):
+    _, work = conflicted_pr
+    start = run(work, "rev-parse", "HEAD")
+    assert carry_over("ashigaru/issue-1", start)
+    assert run(work, "log", "--format=%s", "-3").splitlines() == ["round 1", "fix", "moved on"]
+    assert (work / "other.py").read_text() == "y\n"
+
+
+def test_a_pr_that_will_not_rebase_falls_back_to_the_base(conflicted_pr):
+    origin, work = conflicted_pr
+    (origin / "app.py").write_text("changed under it\n")
+    run(origin, "commit", "-qam", "conflict")
+    run(work, "fetch", "-q", "--depth", "1", "origin", "main")
+    run(work, "checkout", "-q", "-B", "main", "FETCH_HEAD")
+    start = run(work, "rev-parse", "HEAD")
+    assert not carry_over("ashigaru/issue-1", start)
+    assert run(work, "rev-parse", "HEAD") == start
+    assert run(work, "status", "--porcelain") == ""
+
+
+def test_only_a_fresh_rebuild_resets_the_round_count():
+    assert REBUILD_MARKER in REBUILT and REBUILD_MARKER not in REBASED

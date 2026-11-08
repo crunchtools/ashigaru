@@ -8,6 +8,8 @@ from findings import (
     ANSWER_MARKER,
     LOG_EXCERPT_LINES,
     LOG_TAIL_LINES,
+    MAX_ROUNDS,
+    REBUILD_MARKER,
     ROUND_MARKER,
     excerpt,
     failed,
@@ -23,6 +25,7 @@ from findings import (
 )
 
 REVIEWER = "github-actions[bot]"
+BOT = "ashigaru-crunchtools"
 
 
 def inline(comment_id, login=REVIEWER, reply_to=None):
@@ -95,13 +98,31 @@ def test_issue_comments_since_the_last_round_are_context():
     issue = [human({"body": "old", "created_at": "2026-01-01"}, "maint"),
              human({"body": "new", "created_at": "2026-01-03"}, "maint"),
              human({"body": "spam", "created_at": "2026-01-03"}, "outsider")]  # fmt: skip
-    got = issue_context(issue, prs, maintainer_check(REVIEWER, "b", lambda login: login == "maint"))
+    got = issue_context(issue, prs, maintainer_check(REVIEWER, "b", lambda login: login == "maint"), BOT)
     assert [c["body"] for c in got] == ["new"]
 
 
 def test_rounds_are_counted_from_marker_comments():
     rounds = [{"body": f"{ROUND_MARKER}\nround"}, {"body": ROUND_MARKER}]
-    assert rounds_used([*rounds, {"body": "chatter"}]) == len(rounds)
+    assert rounds_used([*rounds, {"body": "chatter"}], BOT) == len(rounds)
+
+
+def test_a_fresh_rebuild_starts_the_round_count_again():
+    ours = {"login": f"{BOT}[bot]"}
+    rebuild = {"body": f"{REBUILD_MARKER}\nrebuilt", "user": ours}
+    spent = [{"body": ROUND_MARKER}] * MAX_ROUNDS
+    comments = [*spent, rebuild, {"body": ROUND_MARKER}]
+    assert rounds_used(comments, BOT) == 1
+    forged = [*spent, {**rebuild, "user": {"login": "outsider"}}]
+    assert rounds_used(forged, BOT) == MAX_ROUNDS
+    prs = [
+        {"body": ROUND_MARKER, "created_at": "2026-01-01"},
+        {"body": REBUILD_MARKER, "created_at": "2026-01-02", "user": ours},
+    ]
+    issue = [human({"body": "before", "created_at": "2026-01-01T12"}, "m"),
+             human({"body": "after", "created_at": "2026-01-03"}, "m")]  # fmt: skip
+    got = issue_context(issue, prs, maintainer_check(REVIEWER, "b", lambda login: True), BOT)
+    assert [c["body"] for c in got] == ["after"]
 
 
 def test_round_cap_hands_off_instead_of_fixing():

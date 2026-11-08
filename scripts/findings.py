@@ -20,6 +20,8 @@ from pathlib import Path
 from common import api_pages, can_write, gh, set_output
 
 ROUND_MARKER = "<!-- ashigaru:fix-round -->"
+REBUILD_MARKER = "<!-- ashigaru:rebuilt -->"
+"""A fresh rebuild after a conflict: rounds before it fixed code the branch no longer holds."""
 ANSWER_MARKER = "<!-- ashigaru:answered:{kind}:{id} -->"
 BRANCH_ISSUE = re.compile(r"^ashigaru/issue-(\d+)")
 IGNORED_CHECKS = ("Gatehouse triage",)
@@ -144,10 +146,13 @@ def maintainer_findings(
 
 
 def issue_context(
-    issue_comments: list[dict], pr_comments: list[dict], ok: Callable[[dict], bool]
+    issue_comments: list[dict], pr_comments: list[dict], ok: Callable[[dict], bool], bot: str
 ) -> list[dict]:
-    """Comments added to the linked issue since the last round marker, from write-access accounts."""
-    since = max((c["created_at"] for c in pr_comments if ROUND_MARKER in (c.get("body") or "")), default="")
+    """Comments added to the linked issue since the last round or rebuild, from write-access accounts."""
+    since = max(
+        (c["created_at"] for c in pr_comments if ROUND_MARKER in (c.get("body") or "") or rebuilt(c, bot)),
+        default="",
+    )
     return [
         {"author": c["user"]["login"], "body": c["body"]}
         for c in issue_comments
@@ -155,8 +160,22 @@ def issue_context(
     ]
 
 
-def rounds_used(issue_comments: list[dict]) -> int:
-    return sum(ROUND_MARKER in comment.get("body", "") for comment in issue_comments)
+def rebuilt(comment: dict, bot: str) -> bool:
+    """A rebuild marker Ashigaru posted; anyone else's would reset the round cap."""
+    return REBUILD_MARKER in (comment.get("body") or "") and opened_by(
+        {"author": comment.get("user") or {}}, bot
+    )
+
+
+def rounds_used(issue_comments: list[dict], bot: str) -> int:
+    """Fix rounds since Ashigaru's last fresh rebuild; comments come oldest first."""
+    used = 0
+    for comment in issue_comments:
+        if rebuilt(comment, bot):
+            used = 0
+        elif ROUND_MARKER in (comment.get("body") or ""):
+            used += 1
+    return used
 
 
 def _own(run: dict, own_run_id: str) -> bool:
@@ -334,9 +353,9 @@ def main() -> int:
     context: list[dict] = []
     if linked:
         issue_comments = api_pages(f"repos/{args.repo}/issues/{linked.group(1)}/comments?per_page=100")
-        context = issue_context(issue_comments, pr_comments, ok)
+        context = issue_context(issue_comments, pr_comments, ok, args.bot)
     failures = failed(runs, own_run_id)
-    used = rounds_used(pr_comments)
+    used = rounds_used(pr_comments, args.bot)
     action = plan(findings, failures, used, args.max_rounds)
     round_number = used + 1
 

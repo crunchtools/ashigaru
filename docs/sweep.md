@@ -18,7 +18,7 @@ Triage runs when an issue is opened, so issues that predate enrollment would nev
 
 **Starting fixes.** A newly opened issue that triage marks `ready-to-code` goes to the code agent in the same run. An issue triaged any other way (queued by the sweep, or re-triaged after a question was answered) is labeled `ready-to-code` and waits. Each hour the sweep counts the pull requests Ashigaru opened across the organization in the past hour, subtracts that from `code_per_hour` (default 5), and starts that many fixes by removing and re-adding `ready-to-code` with the app token. It starts, in order:
 
-1. Ashigaru's own open pull requests that conflict with the default branch (the publish job rebuilds the branch; one labeled `needs-human` is never rebuilt);
+1. Ashigaru's own open pull requests that conflict with the default branch (the publish job rebases the branch, or rebuilds it when the rebase conflicts; one labeled `needs-human` is never rebuilt);
 2. waiting issues, oldest first: open, labeled `ready-to-code`, no `ashigaru/issue-N` pull request, and not touched in the last 20 minutes, so a fix already in flight is not started twice.
 
 A maintainer who adds `ready-to-code` by hand starts the fix at once; it counts against the next hour's budget once its pull request opens.
