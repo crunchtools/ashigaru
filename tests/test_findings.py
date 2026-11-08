@@ -262,3 +262,24 @@ def test_excerpt_with_more_windows_than_the_cap_keeps_the_first_ones_and_counts_
 def test_only_pull_requests_the_app_opened_are_touched():
     assert opened_by({"author": {"login": "app/ashigaru-crunchtools"}}, "ashigaru-crunchtools")
     assert not opened_by({"author": {"login": "somebody"}}, "ashigaru-crunchtools")
+
+
+def test_a_pull_request_merged_during_the_wait_is_nothing_to_do(monkeypatch, tmp_path):
+    outputs = {}
+
+    def fake_gh(*args, **_):
+        if args[:2] == ("pr", "list"):
+            return json.dumps([{"number": 7, "headRefOid": "abc", "author": {"login": BOT}}])
+        assert args[:2] == ("pr", "view")
+        return json.dumps({"state": "MERGED", "mergeCommit": {"oid": "deadbeef"}})
+
+    out = tmp_path / "f.json"
+    monkeypatch.setattr(findings, "gh", fake_gh)
+    monkeypatch.setattr(findings, "check_runs", lambda *_: [])
+    monkeypatch.setattr(findings, "set_output", outputs.__setitem__)
+    monkeypatch.setattr(
+        "sys.argv", ["findings", "--repo", "o/r", "--branch", "ashigaru/issue-1", "--out", str(out)]
+    )
+    assert findings.main() == 0
+    assert outputs == {"action": "none"}
+    assert not out.exists()
