@@ -499,3 +499,15 @@ def test_the_record_lists_what_shipped_what_waits_and_what_was_refused():
     assert "## Could not release (1)\n\n- broken: no CHANGELOG.md." in body
     assert "quiet" not in body
     assert render(list(reversed(items)), shipped) == body
+
+
+def test_a_tag_github_refuses_the_app_says_to_tag_it_by_hand(monkeypatch):
+    def refused(item, day):
+        raise subprocess.CalledProcessError(
+            1, "gh", stderr="HTTP 403: Resource not accessible by integration (https://api.github.com/x)"
+        )
+
+    monkeypatch.setattr(release, "act", refused)
+    item = status() | {"action": "publish", "current": "1.1.3", "sha": "c230ed2f820d"}
+    release.carry_out([item], "2026-11-08")
+    assert "v1.1.3 at c230ed2" in item["refused"] and "by hand" in item["refused"]

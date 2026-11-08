@@ -50,6 +50,8 @@ In `auto` mode, with the bump at or under the limit, auto-merge is turned on. Ot
 
 **Publishing.** When the changelog's current version has no tag, and a release pull request for that version, written by Ashigaru, has merged into the default branch, the sweep creates the tag `vX.Y.Z` at the merge commit and publishes the GitHub Release with the changelog entry as its notes. This holds in both modes: merging the release pull request is the approval. The release is created with the app token, so workflows that run on `release: published` start.
 
+GitHub will not let the app create a tag at a commit whose workflow files differ from the default branch's, so a release whose pull request merged before a workflow change landed is refused, and the record says to tag it by hand.
+
 A version with no tag and no such pull request is not Ashigaru's to publish. It is listed as refused until someone tags it.
 
 **The record.** One issue in the Ashigaru repository, labeled `ashigaru-releases`, rewritten when it changes:
