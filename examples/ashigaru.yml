@@ -2,7 +2,9 @@
 #
 # Drop this in at .github/workflows/ashigaru.yml. The organization supplies the
 # secrets (CLAUDE_CODE_OAUTH_TOKEN, ASHIGARU_APP_KEY,
-# OPENROUTER_API_KEY) and the switch (variable ASHIGARU_ENABLED = true).
+# OPENROUTER_API_KEY), the variable ASHIGARU_CLIENT_ID (the app's client ID,
+# used with ASHIGARU_APP_KEY to mint tokens) and the switch
+# (variable ASHIGARU_ENABLED = true).
 #
 # What happens:
 #   • a new issue is triaged: bug, documentation and performance issues are
