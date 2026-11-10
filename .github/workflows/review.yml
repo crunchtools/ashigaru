@@ -40,8 +40,6 @@ on:
     secrets:
       CLAUDE_CODE_OAUTH_TOKEN:
         required: true
-      ASHIGARU_APP_ID:
-        required: true
       ASHIGARU_APP_KEY:
         required: true
 

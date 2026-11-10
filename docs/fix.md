@@ -34,7 +34,6 @@ fix:
     escalate_at: 2
   secrets:
     CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-    ASHIGARU_APP_ID: ${{ secrets.ASHIGARU_APP_ID }}
     ASHIGARU_APP_KEY: ${{ secrets.ASHIGARU_APP_KEY }}
 ```
 
