@@ -6,6 +6,12 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [2.12.0] - 2026-11-10
+
+### Changed
+
+- The reusable workflows no longer declare or pass the `ASHIGARU_APP_ID` secret. It was dead plumbing: every token is minted from the `ASHIGARU_CLIENT_ID` variable and the `ASHIGARU_APP_KEY` secret, and nothing read the App ID. `code.yml`, `review.yml` and `fix.yml` drop its `required: true` declaration, so a caller may stop passing it; passing it stays a harmless warning until the fleet is swept. `ASHIGARU_APP_KEY` is unchanged (RT#1555).
+
 ## [2.11.3] - 2026-11-08
 
 ### Fixed

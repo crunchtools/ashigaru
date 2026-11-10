@@ -33,7 +33,6 @@ code:
     max_turns: 80
   secrets:
     CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-    ASHIGARU_APP_ID: ${{ secrets.ASHIGARU_APP_ID }}
     ASHIGARU_APP_KEY: ${{ secrets.ASHIGARU_APP_KEY }}
     OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}   # for the Gatehouse hook; optional
 ```

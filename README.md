@@ -18,7 +18,7 @@ Named for the *ashigaru* (足軽), the foot soldiers a daimyo sent into the fiel
 
 Organization, once:
 
-- Create a GitHub App with repository permissions Contents, Issues and Pull requests set to read and write, install it on the organization, and store its id and private key as the secrets `ASHIGARU_APP_ID` and `ASHIGARU_APP_KEY`.
+- Create a GitHub App with repository permissions Contents, Issues and Pull requests set to read and write, install it on the organization, and store its private key as the secret `ASHIGARU_APP_KEY`.
 - Run `claude setup-token` and store the result as the secret `CLAUDE_CODE_OAUTH_TOKEN`.
 - Set the variable `ASHIGARU_ENABLED` to `true`.
 - Require your CI and review checks in a branch ruleset the app cannot bypass, and allow auto-merge.
