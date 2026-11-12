@@ -39,8 +39,20 @@ def configured(root: Path) -> bool:
 
 
 def python_files(patch: str, root: Path) -> list[str]:
-    """The `.py` files the patch names that still exist after it."""
-    return sorted(path for path in changed_files(patch) if path.endswith(".py") and (root / path).is_file())
+    """The regular `.py` files the patch names that exist after it, inside `root`.
+
+    A symlink is skipped, and so is anything resolving outside the worktree: a patch can
+    add a link, and ruff writes through it.
+    """
+    top = root.resolve()
+    return sorted(
+        path
+        for path in changed_files(patch)
+        if path.endswith(".py")
+        and not (root / path).is_symlink()
+        and (root / path).is_file()
+        and (root / path).resolve().is_relative_to(top)
+    )
 
 
 def tidy(patch: str, root: Path, run=subprocess.run) -> str:

@@ -12,6 +12,7 @@ PATCH = (
 
 
 def repo(tmp_path: Path, ruff: bool = True) -> Path:
+    tmp_path.mkdir(parents=True, exist_ok=True)
     (tmp_path / "src").mkdir()
     (tmp_path / "src" / "app.py").write_text("x=1\n")
     (tmp_path / "README.md").write_text("hi\n")
@@ -66,3 +67,12 @@ def test_a_missing_ruff_is_reported_not_raised(tmp_path):
         raise FileNotFoundError(command[0])
 
     assert "did not run" in tidy(PATCH, repo(tmp_path), run=missing)
+
+
+def test_a_symlinked_python_file_is_not_formatted(tmp_path):
+    root = repo(tmp_path / "repo")
+    outside = tmp_path / "outside.py"
+    outside.write_text("x=1\n")
+    (root / "src" / "app.py").unlink()
+    (root / "src" / "app.py").symlink_to(outside)
+    assert python_files(PATCH, root) == []
