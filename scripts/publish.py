@@ -74,8 +74,8 @@ def link_line(issue: int, thanks: str = "", partial: bool = False) -> str:
 
 def commit_message(title: str, issue: int, summary: str, thanks: str = "", partial: bool = False) -> str:
     """The fix commit's message; a non-empty `thanks` line goes just before the issue link."""
-    closes = link_line(issue, thanks, partial)
-    return f"fix: {title} (#{issue})\n\n{summary}\n\n{closes}\n\n{TRAILER}\n"
+    issue_link = link_line(issue, thanks, partial)
+    return f"fix: {title} (#{issue})\n\n{summary}\n\n{issue_link}\n\n{TRAILER}\n"
 
 
 def hand_off(repo: str, issue: int, why: str) -> None:
@@ -135,8 +135,8 @@ def landed(issue: dict, merged_prs: list[dict]) -> bool:
 
 def pr_body(summary: str, issue: int, thanks: str = "", partial: bool = False) -> str:
     """The pull request description: the summary, then `Closes #N`, or `Refs #N` when `partial`."""
-    closes = link_line(issue, thanks, partial)
-    return f"{summary}\n\n{closes}\n\n{FOOTER}\n"
+    issue_link = link_line(issue, thanks, partial)
+    return f"{summary}\n\n{issue_link}\n\n{FOOTER}\n"
 
 
 def rearm(url: str) -> None:
@@ -199,7 +199,7 @@ def rebuild(args: argparse.Namespace, found: dict, result: dict, open_prs: list[
 def hand_off_rest(repo: str, issue: int, url: str, result: dict) -> None:
     """After a partial fix, give the still-open issue to a human with what is left."""
     if result.get("partial") is True:
-        summary = str(result.get("summary", "")).strip()
+        summary = str(result.get("summary", "")).strip() or "The agent did not say; read the pull request."
         hand_off(
             repo, issue, f"{url} fixes part of this and leaves the issue open. What is left:\n\n{summary}"
         )

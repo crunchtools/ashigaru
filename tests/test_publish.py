@@ -235,3 +235,5 @@ def test_a_partial_fix_hands_the_issue_to_a_human():
         handed.reset_mock()
         hand_off_rest("o/r", 12, "https://pr/2", {"summary": "Done."})
         handed.assert_not_called()
+        hand_off_rest("o/r", 59, "https://pr/1", {"summary": " ", "partial": True})
+        assert handed.call_args.args[2].rstrip().endswith("read the pull request.")
