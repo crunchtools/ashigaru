@@ -6,6 +6,10 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- Ashigaru formats the Python files a patch touched with the repository's ruff (pinned to python-sdlc's 0.17.1) before it commits, in both the first publish and fix rounds. It commits on a runner where no hook runs, and CI's `sdlc ci` has no ruff step, so constitution#130 merged unformatted.
+
 ## [2.12.0] - 2026-11-10
 
 ### Changed

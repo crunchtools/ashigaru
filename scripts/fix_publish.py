@@ -19,6 +19,7 @@ from common import NEEDS_HUMAN, gh, git, observing, set_state, touches_protected
 from findings import ANSWER_MARKER, MAX_ROUNDS, ROUND_MARKER
 from publish import BOT_EMAIL, BOT_NAME, TRAILER
 from relock import relock
+from tidy import tidy
 
 
 def replies(findings: list[dict], dispositions: list[dict], sha: str | None) -> dict[int, str]:
@@ -143,6 +144,7 @@ def main() -> int:
         if stale_lock:
             hand_off(args.repo, number, stale_lock)
             return 0
+        print(tidy(patch, Path.cwd()))
         git("commit", "-m", f"fix: address review findings (round {round_number})\n\n{TRAILER}\n")
         git("push", "origin", f"HEAD:{args.branch}")
         sha = git("rev-parse", "HEAD").strip()
