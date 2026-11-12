@@ -8,7 +8,18 @@ import pytest
 from common import touches_protected
 from findings import REBUILD_MARKER
 from fix_publish import asked, next_step, post_reply, replies
-from publish import REBASED, REBUILT, carry_over, commit_message, credit, landed, refusal, stale
+from publish import (
+    REBASED,
+    REBUILT,
+    carry_over,
+    commit_message,
+    credit,
+    hand_off_rest,
+    landed,
+    pr_body,
+    refusal,
+    stale,
+)
 
 PATCH = "diff --git a/src/app.py b/src/app.py\n--- a/src/app.py\n+++ b/src/app.py\n@@ -1 +1 @@\n-a\n+b\n"
 WORKFLOW_PATCH = PATCH.replace("src/app.py", ".github/workflows/ci.yml")
@@ -76,6 +87,18 @@ def test_commit_message_closes_the_issue_and_carries_the_trailer():
 def test_commit_message_thanks_the_reporter_before_closing():
     message = commit_message("Digest shows the wrong date", 12, "Off by one.", "Reported by @someone.")
     assert "Off by one.\n\nReported by @someone.\n\nCloses #12" in message
+
+
+def test_a_partial_fix_refers_to_the_issue_instead_of_closing_it():
+    message = commit_message("Memory grows", 59, "Capped lines.", partial=True)
+    body = pr_body("Capped lines.", 59, "Reported by @someone.", partial=True)
+    for text in (message, body):
+        assert "Refs #59" in text and "Closes #59" not in text
+    assert "Reported by @someone.\n\nRefs #59" in body
+
+
+def test_a_full_fix_still_closes_the_issue():
+    assert "Closes #12" in pr_body("Off by one.", 12) and "Refs #" not in pr_body("Off by one.", 12)
 
 
 def test_an_outside_reporter_is_credited():
@@ -202,3 +225,15 @@ def test_a_pr_that_will_not_rebase_falls_back_to_the_base(conflicted_pr):
 
 def test_only_a_fresh_rebuild_resets_the_round_count():
     assert REBUILD_MARKER in REBUILT and REBUILD_MARKER not in REBASED
+
+
+def test_a_partial_fix_hands_the_issue_to_a_human():
+    with patch("publish.hand_off") as handed:
+        hand_off_rest("o/r", 59, "https://pr/1", {"summary": "Measure it.", "partial": True})
+        handed.assert_called_once()
+        assert "https://pr/1" in handed.call_args.args[2] and "Measure it." in handed.call_args.args[2]
+        handed.reset_mock()
+        hand_off_rest("o/r", 12, "https://pr/2", {"summary": "Done."})
+        handed.assert_not_called()
+        hand_off_rest("o/r", 59, "https://pr/1", {"summary": " ", "partial": True})
+        assert handed.call_args.args[2].rstrip().endswith("read the pull request.")

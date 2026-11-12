@@ -14,6 +14,9 @@
     },
     "reason": {
       "type": "string"
+    },
+    "partial": {
+      "type": "boolean"
     }
   },
   "required": [

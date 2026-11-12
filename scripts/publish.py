@@ -66,10 +66,16 @@ def credit(repo: str, author: dict) -> str:
     return f"Reported by @{login}."
 
 
-def commit_message(title: str, issue: int, summary: str, thanks: str = "") -> str:
-    """The fix commit's message; a non-empty `thanks` line goes just before `Closes #N`."""
-    closes = f"{thanks}\n\nCloses #{issue}" if thanks else f"Closes #{issue}"
-    return f"fix: {title} (#{issue})\n\n{summary}\n\n{closes}\n\n{TRAILER}\n"
+def link_line(issue: int, thanks: str = "", partial: bool = False) -> str:
+    """`Closes #N`, or `Refs #N` for a partial fix, so a merge closes only an issue it resolves."""
+    link = f"Refs #{issue}" if partial else f"Closes #{issue}"
+    return f"{thanks}\n\n{link}" if thanks else link
+
+
+def commit_message(title: str, issue: int, summary: str, thanks: str = "", partial: bool = False) -> str:
+    """The fix commit's message; a non-empty `thanks` line goes just before the issue link."""
+    issue_link = link_line(issue, thanks, partial)
+    return f"fix: {title} (#{issue})\n\n{summary}\n\n{issue_link}\n\n{TRAILER}\n"
 
 
 def hand_off(repo: str, issue: int, why: str) -> None:
@@ -127,9 +133,10 @@ def landed(issue: dict, merged_prs: list[dict]) -> bool:
     return issue.get("state") == "closed" and bool(merged_prs)
 
 
-def pr_body(summary: str, issue: int, thanks: str = "") -> str:
-    closes = f"{thanks}\n\nCloses #{issue}" if thanks else f"Closes #{issue}"
-    return f"{summary}\n\n{closes}\n\n{FOOTER}\n"
+def pr_body(summary: str, issue: int, thanks: str = "", partial: bool = False) -> str:
+    """The pull request description: the summary, then `Closes #N`, or `Refs #N` when `partial`."""
+    issue_link = link_line(issue, thanks, partial)
+    return f"{summary}\n\n{issue_link}\n\n{FOOTER}\n"
 
 
 def rearm(url: str) -> None:
@@ -174,18 +181,28 @@ def rebuild(args: argparse.Namespace, found: dict, result: dict, open_prs: list[
     title = found["title"].strip()
     thanks = credit(repo, found.get("user") or {})
     summary = str(result.get("summary", "")).strip() or "Automated fix."
+    partial = result.get("partial") is True
     branch = f"{BRANCH_PREFIX}issue-{issue}"
-    git("commit", "-m", commit_message(title, issue, summary, thanks))
+    git("commit", "-m", commit_message(title, issue, summary, thanks, partial))
     git("push", "--force", "origin", branch)
 
     pr_title = f"fix: {title} (#{issue})"
-    body = pr_body(summary, issue, thanks)
+    body = pr_body(summary, issue, thanks, partial)
     if not open_prs:
         return announce(repo, branch, args.base, pr_title, body)
     url = open_prs[0]["url"]
     gh("pr", "edit", url, "--title", pr_title, "--body", body)
     resume(url, REBUILT)
     return url
+
+
+def hand_off_rest(repo: str, issue: int, url: str, result: dict) -> None:
+    """After a partial fix, give the still-open issue to a human with what is left."""
+    if result.get("partial") is True:
+        summary = str(result.get("summary", "")).strip() or "The agent did not say; read the pull request."
+        hand_off(
+            repo, issue, f"{url} fixes part of this and leaves the issue open. What is left:\n\n{summary}"
+        )
 
 
 def main() -> int:
@@ -242,6 +259,7 @@ def main() -> int:
         set_output("pr", "")
         return 0
     url = rebuild(args, found, result, open_prs)
+    hand_off_rest(args.repo, args.issue, url, result)
     print(f"publish: published {url}")
     set_output("pr", url)
     return 0

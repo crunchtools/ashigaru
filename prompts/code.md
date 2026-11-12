@@ -44,3 +44,4 @@ Return:
 - `status`: `fixed` if you changed files to resolve the issue, `no_change` if nothing needed changing, `blocked` if you could not do it.
 - `summary`: what was wrong, what you changed and why, in a few sentences. This becomes the commit message and the pull request description.
 - `reason`: for `no_change` or `blocked`, the reason a maintainer needs to hear.
+- `partial`: `true` when you fixed only part of the issue and a maintainer still owes the rest (something you cannot do here, such as running the service and measuring it). Say in `summary` exactly what is left. The pull request then refers to the issue instead of closing it. Omit it or send `false` when the issue is fully resolved.

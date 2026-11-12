@@ -6,6 +6,10 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- The code agent can report a fix as `partial`. Its commit and pull request then say `Refs #N` instead of `Closes #N`, and the issue is labeled needs-human with what is left, so a merge no longer closes an issue the fix itself says is unresolved (mcp-systemd#59).
+
 ### Fixed
 
 - Ashigaru formats the Python files a patch touched with the repository's ruff (pinned to python-sdlc's 0.17.1) before it commits, in both the first publish and fix rounds. It commits on a runner where no hook runs, and CI's `sdlc ci` has no ruff step, so constitution#130 merged unformatted.
