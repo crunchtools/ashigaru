@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [2.13.0] - 2026-11-12
+
 ### Changed
 
 - The code agent can report a fix as `partial`. Its commit and pull request then say `Refs #N` instead of `Closes #N`, and the issue is labeled needs-human with what is left, so a merge no longer closes an issue the fix itself says is unresolved (mcp-systemd#59).
