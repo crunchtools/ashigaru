@@ -1,6 +1,5 @@
 """What may become a pull request, and what may be pushed in a fix round."""
 
-import argparse
 import subprocess
 from unittest.mock import patch
 
@@ -15,9 +14,9 @@ from publish import (
     carry_over,
     commit_message,
     credit,
+    hand_off_rest,
     landed,
     pr_body,
-    rebuild,
     refusal,
     stale,
 )
@@ -228,17 +227,11 @@ def test_only_a_fresh_rebuild_resets_the_round_count():
     assert REBUILD_MARKER in REBUILT and REBUILD_MARKER not in REBASED
 
 
-def test_a_partial_fix_hands_the_issue_to_a_human_after_opening_the_pull_request():
-    args = argparse.Namespace(repo="o/r", issue=59, base="main")
-    found = {"title": "Memory grows", "user": {"login": "bot", "type": "Bot"}}
-    with (
-        patch("publish.git"),
-        patch("publish.announce", return_value="https://pr/1"),
-        patch("publish.hand_off") as handed,
-    ):
-        assert rebuild(args, found, {"summary": "Measure it.", "partial": True}, []) == "https://pr/1"
+def test_a_partial_fix_hands_the_issue_to_a_human():
+    with patch("publish.hand_off") as handed:
+        hand_off_rest("o/r", 59, "https://pr/1", {"summary": "Measure it.", "partial": True})
         handed.assert_called_once()
-        assert "Measure it." in handed.call_args.args[2]
+        assert "https://pr/1" in handed.call_args.args[2] and "Measure it." in handed.call_args.args[2]
         handed.reset_mock()
-        rebuild(args, found, {"summary": "Done."}, [])
+        hand_off_rest("o/r", 12, "https://pr/2", {"summary": "Done."})
         handed.assert_not_called()

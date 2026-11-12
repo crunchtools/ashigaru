@@ -134,6 +134,7 @@ def landed(issue: dict, merged_prs: list[dict]) -> bool:
 
 
 def pr_body(summary: str, issue: int, thanks: str = "", partial: bool = False) -> str:
+    """The pull request description: the summary, then `Closes #N`, or `Refs #N` when `partial`."""
     closes = link_line(issue, thanks, partial)
     return f"{summary}\n\n{closes}\n\n{FOOTER}\n"
 
@@ -188,15 +189,20 @@ def rebuild(args: argparse.Namespace, found: dict, result: dict, open_prs: list[
     pr_title = f"fix: {title} (#{issue})"
     body = pr_body(summary, issue, thanks, partial)
     if not open_prs:
-        url = announce(repo, branch, args.base, pr_title, body)
-    else:
-        url = open_prs[0]["url"]
-        gh("pr", "edit", url, "--title", pr_title, "--body", body)
-        resume(url, REBUILT)
-    if partial:
-        left = f"{url} fixes part of this and leaves the issue open. What is left:\n\n{summary}"
-        hand_off(repo, issue, left)
+        return announce(repo, branch, args.base, pr_title, body)
+    url = open_prs[0]["url"]
+    gh("pr", "edit", url, "--title", pr_title, "--body", body)
+    resume(url, REBUILT)
     return url
+
+
+def hand_off_rest(repo: str, issue: int, url: str, result: dict) -> None:
+    """After a partial fix, give the still-open issue to a human with what is left."""
+    if result.get("partial") is True:
+        summary = str(result.get("summary", "")).strip()
+        hand_off(
+            repo, issue, f"{url} fixes part of this and leaves the issue open. What is left:\n\n{summary}"
+        )
 
 
 def main() -> int:
@@ -253,6 +259,7 @@ def main() -> int:
         set_output("pr", "")
         return 0
     url = rebuild(args, found, result, open_prs)
+    hand_off_rest(args.repo, args.issue, url, result)
     print(f"publish: published {url}")
     set_output("pr", url)
     return 0
