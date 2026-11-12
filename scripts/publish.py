@@ -28,6 +28,7 @@ from common import (
 )
 from findings import REBUILD_MARKER
 from relock import relock
+from tidy import tidy
 
 BOT_NAME = "ashigaru-crunchtools[bot]"
 BOT_EMAIL = "ashigaru-crunchtools[bot]@users.noreply.github.com"
@@ -82,7 +83,10 @@ def apply_patch(path: Path, patch: str) -> str | None:
         git("apply", "--index", "--3way", str(path))
     except subprocess.CalledProcessError:
         return "The fix no longer applies to the default branch."
-    return relock(patch, Path.cwd())
+    why = relock(patch, Path.cwd())
+    if why is None:
+        print(tidy(patch, Path.cwd()))
+    return why
 
 
 def stale(open_prs: list[dict]) -> bool:
