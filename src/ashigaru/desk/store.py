@@ -57,9 +57,10 @@ MIGRATIONS: tuple[str, ...] = (
         extra TEXT NOT NULL DEFAULT '{}'
     );
     CREATE UNIQUE INDEX items_subject_key ON items(subject_key) WHERE subject_key IS NOT NULL;
-    CREATE INDEX items_state ON items(state);
+    CREATE INDEX items_state ON items(state, expires_at);
     CREATE INDEX items_seat ON items(seat);
     CREATE INDEX items_filed_under ON items(filed_under);
+    CREATE INDEX items_number ON items(CAST(substr(id, 2) AS INTEGER)) WHERE id GLOB 'a[0-9]*';
 
     CREATE TABLE events (
         seq INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -151,6 +152,7 @@ LIST_ITEMS = """
       AND (:lane IS NULL OR lane = :lane) AND (:kind IS NULL OR kind = :kind)
       AND (:mode IS NULL OR mode = :mode) AND (:parent IS NULL OR parent = :parent)
     ORDER BY updated_at DESC, id DESC
+    LIMIT :limit OFFSET :offset
 """
 
 CHECK_ACTIVE = """
@@ -259,16 +261,23 @@ def get_item(conn: sqlite3.Connection, item_id: str) -> dict[str, Any] | None:
     return decode(row) if row else None
 
 
-def list_items(conn: sqlite3.Connection, **filters: str | None) -> list[dict[str, Any]]:
-    """Items equal to every filter given (state, seat, lane, kind, mode, parent); newest first."""
-    rows = conn.execute(LIST_ITEMS, {key: filters.get(key) for key in ITEM_FILTERS})
+def list_items(
+    conn: sqlite3.Connection, limit: int = -1, offset: int = 0, **filters: str | None
+) -> list[dict[str, Any]]:
+    """Items equal to every filter given (state, seat, lane, kind, mode, parent); newest first.
+    A limit of -1 is SQLite's no limit."""
+    params = {key: filters.get(key) for key in ITEM_FILTERS}
+    rows = conn.execute(LIST_ITEMS, {**params, "limit": limit, "offset": offset})
     return [decode(row) for row in rows]
 
 
-def next_id(conn: sqlite3.Connection, prefix: str = "a") -> str:
-    rows = conn.execute("SELECT id FROM items WHERE id LIKE ?", (f"{prefix}%",))
-    numbers = [int(row[0][len(prefix) :]) for row in rows if row[0][len(prefix) :].isdigit()]
-    return f"{prefix}{max(numbers, default=0) + 1}"
+def next_id(conn: sqlite3.Connection) -> str:
+    """a<N+1> over the highest a<N>, read from the items_number index."""
+    highest = conn.execute(
+        "SELECT max(CAST(substr(id, 2) AS INTEGER)) FROM items INDEXED BY items_number"
+        " WHERE id GLOB 'a[0-9]*'"
+    ).fetchone()[0]
+    return f"a{(highest or 0) + 1}"
 
 
 def _stamp(fields: dict[str, Any], at: str) -> dict[str, Any]:
@@ -350,8 +359,15 @@ def file_child(conn: sqlite3.Connection, story: dict[str, Any], fields: dict[str
 
 
 def expire_proposed(conn: sqlite3.Connection) -> list[str]:
-    """Abandon proposed children past expires_at that Josui never promoted."""
+    """Abandon proposed children past expires_at that Josui never promoted.
+
+    Reads call this, so it writes only when something is due: the check is one
+    lookup on the items_state index, outside any transaction.
+    """
     at = now()
+    due = "SELECT 1 FROM items WHERE state = 'proposed' AND expires_at < ? LIMIT 1"
+    if conn.execute(due, (at,)).fetchone() is None:
+        return []
     with transaction(conn):
         rows = conn.execute(
             "SELECT id FROM items WHERE state = ? AND expires_at IS NOT NULL AND expires_at < ?",
@@ -461,7 +477,8 @@ def revoke_key(conn: sqlite3.Connection, key_id: str) -> None:
 def key_owner(conn: sqlite3.Connection, key_id: str) -> sqlite3.Row | None:
     """The live key's digest and its identity, or None for an unknown, revoked or disabled one."""
     return conn.execute(
-        "SELECT k.secret_sha256, i.name, i.role FROM api_keys k JOIN identities i ON i.name = k.identity"
+        "SELECT k.secret_sha256, k.last_used_at, i.name, i.role"
+        " FROM api_keys k JOIN identities i ON i.name = k.identity"
         " WHERE k.key_id = ? AND k.revoked_at IS NULL AND i.disabled_at IS NULL",
         (key_id,),
     ).fetchone()

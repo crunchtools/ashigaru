@@ -56,6 +56,9 @@ def test_filters_and_state_timestamps(client: TestClient, keys: Keys) -> None:
     assigned = client.post("/v1/items", headers=keys[JOSUI], json={"task": "a", "state": "assigned"}).json()
     assert assigned["assigned_at"] and not assigned["queued_at"]
     assert [i["task"] for i in client.get("/v1/items?lane=vertex", headers=keys["ci"]).json()] == ["q"]
+    paged = client.get("/v1/items?limit=1&offset=1", headers=keys["ci"]).json()
+    assert [i["task"] for i in paged] == ["q"]
+    assert client.get("/v1/items?limit=0", headers=keys["ci"]).status_code == UNPROCESSABLE_ENTITY
     assert client.get("/v1/items?state=nonsense", headers=keys["ci"]).status_code == UNPROCESSABLE_ENTITY
     assert client.get("/v1/items/zzz", headers=keys["ci"]).status_code == NOT_FOUND
 

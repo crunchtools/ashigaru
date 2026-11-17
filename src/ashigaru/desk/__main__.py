@@ -79,7 +79,7 @@ def main(argv: list[str] | None = None) -> int:
     load.add_argument("--db", required=True, help="the SQLite file; created and migrated if new")
     load.set_defaults(func=import_ledger)
 
-    key = commands.add_parser("mint-key", help="create the identity if missing and print a new key")
+    key = commands.add_parser("mint-key", help="create the identity if missing and write a new key to --out")
     key.add_argument("identity")
     key.add_argument("--role", choices=[role.value for role in Role], required=True)
     key.add_argument("--label")

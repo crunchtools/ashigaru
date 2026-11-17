@@ -11,11 +11,14 @@ import hmac
 import secrets
 import sqlite3
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 
 from . import store
 from .model import Role
 
 PREFIX = "ash"
+TOUCH_EVERY = timedelta(minutes=5)
+"""last_used_at is this coarse, so a read writes at most once per key per interval."""
 
 
 @dataclass(frozen=True)
@@ -27,6 +30,10 @@ class Caller:
     @property
     def admin(self) -> bool:
         return self.role == Role.ADMIN
+
+
+def stale_before() -> str:
+    return (datetime.now(UTC) - TOUCH_EVERY).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def digest(secret: str) -> str:
@@ -50,5 +57,6 @@ def authenticate(conn: sqlite3.Connection, token: str) -> Caller | None:
     row = store.key_owner(conn, key_id)
     if row is None or not hmac.compare_digest(row["secret_sha256"], digest(secret)):
         return None
-    store.touch_key(conn, key_id)
+    if row["last_used_at"] is None or row["last_used_at"] < stale_before():
+        store.touch_key(conn, key_id)
     return Caller(name=row["name"], role=Role(row["role"]), key_id=key_id)

@@ -34,6 +34,20 @@ def test_key_is_header_only_and_stored_as_a_digest(
     assert all(secret not in str(tuple(row)) for row in rows)
 
 
+def test_key_use_is_recorded_at_most_once_per_interval(
+    client: TestClient, keys: Keys, conn: sqlite3.Connection
+) -> None:
+    client.get("/v1/me", headers=keys[MINE])
+    conn.execute("UPDATE api_keys SET last_used_at = '2999-01-01T00:00:00Z' WHERE identity = ?", (MINE,))
+    client.get("/v1/me", headers=keys[MINE])
+    used = conn.execute("SELECT last_used_at FROM api_keys WHERE identity = ?", (MINE,)).fetchone()[0]
+    assert used == "2999-01-01T00:00:00Z"
+    conn.execute("UPDATE api_keys SET last_used_at = '2000-01-01T00:00:00Z' WHERE identity = ?", (MINE,))
+    client.get("/v1/me", headers=keys[MINE])
+    used = conn.execute("SELECT last_used_at FROM api_keys WHERE identity = ?", (MINE,)).fetchone()[0]
+    assert used > "2000-01-01T00:00:00Z"
+
+
 def test_seat_writes_its_own_item_only(client: TestClient, keys: Keys) -> None:
     mine, theirs = make(client, keys), make(client, keys, seat=OTHER)
     ok = client.patch(f"/v1/items/{mine}", headers=keys[MINE], json={"state": "working", "result": "r"})

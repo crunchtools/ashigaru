@@ -170,6 +170,8 @@ class ItemFilter(BaseModel):
     kind: Kind | None = None
     mode: Mode | None = None
     parent: str | None = None
+    limit: int = Field(200, ge=1, le=1000)
+    offset: int = Field(0, ge=0)
 
 
 class Report(BaseModel):

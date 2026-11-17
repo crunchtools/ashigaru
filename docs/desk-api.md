@@ -39,7 +39,7 @@ can return.
 |---|---|
 | `GET /healthz` | 200 with the schema version; no key |
 | `GET /me` | the caller's identity and role |
-| `GET /items` | list, newest first; filters `state`, `seat`, `lane`, `kind`, `mode`, `parent` |
+| `GET /items` | list, newest first; filters `state`, `seat`, `lane`, `kind`, `mode`, `parent`; pages of `limit` (200, at most 1000) from `offset` |
 | `POST /items` | admin: create; `id` defaults to the next `a<N>`, `state` to `queued`; 409 on a taken id or `subject_key` |
 | `GET /items/{id}` | one item |
 | `PATCH /items/{id}` | the fields sent change; `null` clears |
