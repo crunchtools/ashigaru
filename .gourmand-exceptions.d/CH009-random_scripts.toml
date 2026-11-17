@@ -14,3 +14,8 @@ classification = "by_design"
 path = "packaging/smoke.sh"
 justification = "Run by .github/workflows/rpm.yml after each build to install the RPMs in a fresh container and run every command with --help."
 classification = "by_design"
+
+[[locations]]
+path = "packaging/container-test.sh"
+justification = "The image's contract test: .github/workflows/container.yml passes it to the constitution's container-release.yml as contract-test, which runs it against the pushed digest."
+classification = "by_design"

@@ -1,0 +1,35 @@
+# Container release: build once, gate the digest, promote what was tested
+# (constitution container-image VII), from examples/container.yml.
+#
+# quay.io/crunchtools/ashigaru is the Desk service. :main follows the default
+# branch, :latest and :X.Y.Z the release tags. The boot gate is the image's
+# HEALTHCHECK (`ashigaru-desk health`); packaging/container-test.sh is the
+# contract: read-only root, /healthz, and a key minted against /data
+# authenticates. Not stopped by ASHIGARU_ENABLED: it runs no model.
+
+name: Container
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+    tags: ["v*", "!v1.*", "!v2.*"]   # 2.x releases ship workflows, not the Desk
+  schedule:
+    - cron: "17 4 * * 1"   # weekly: base-image errata, gated like any build
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  container:
+    uses: crunchtools/constitution/.github/workflows/container-release.yml@v1
+    permissions:
+      contents: read
+      pull-requests: read
+    with:
+      image: quay.io/crunchtools/ashigaru
+      boot: healthcheck
+      contract-test: packaging/container-test.sh
+    secrets:
+      QUAY_USERNAME: ${{ secrets.QUAY_USERNAME }}
+      QUAY_PASSWORD: ${{ secrets.QUAY_PASSWORD }}

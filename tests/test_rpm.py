@@ -1,6 +1,7 @@
 """The RPM workflow's authority split and the spec's package split."""
 
 import re
+import subprocess
 from pathlib import Path
 
 import yaml
@@ -44,3 +45,15 @@ def test_the_cli_package_does_not_carry_the_service() -> None:
     assert "%files desk\n%{_bindir}/ashigaru-desk\n" in SPEC
     assert "ashigaru-desk ] ||" in SPEC
     assert "%pyproject_extras_subpkg -n %{name} desk" in SPEC
+
+
+def test_the_build_refuses_a_tag_that_does_not_name_version(tmp_path: Path) -> None:
+    result = subprocess.run(
+        [ROOT / "packaging" / "build.sh", "unused-image", tmp_path / "out", "v0.0.0-not-this"],
+        capture_output=True,
+        text=True,
+        check=False,
+        cwd=ROOT,
+    )
+    assert result.returncode == 1 and "does not match VERSION" in result.stderr
+    assert not (tmp_path / "out").exists()
