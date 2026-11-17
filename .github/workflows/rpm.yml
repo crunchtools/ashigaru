@@ -1,0 +1,103 @@
+# RPM — build the ashigaru RPMs, smoke-test them, attach them to the release.
+#
+# Scott's requirement (ashigaru-3.md, "The Desk"): shipped as an RPM built on
+# GitHub, so it bakes into the developer seat image, bootc images and any other
+# container, and installs on a plain host with dnf. `ashigaru` is the CLI and
+# the package; `ashigaru-desk` adds the service and its web stack.
+#
+# Each target builds in a fresh container on the runner (packaging/build.sh),
+# then a second fresh container installs the RPMs and runs every command they
+# ship with --help (packaging/smoke.sh); on a release `ashigaru` must be one.
+# Pull requests that touch the package build and smoke-test without publishing.
+# 2.x release tags are skipped: 2.x ships workflows, not a package.
+#
+# Not stopped by ASHIGARU_ENABLED: it runs no model. Only the publish job can
+# write, and only to this release; it runs no code from the checkout. Actions
+# are pinned by commit. Event values reach the scripts through env:.
+
+name: RPM
+
+on:
+  release:
+    types: [published]
+  pull_request:
+    branches: [main]
+    paths:
+      - packaging/**
+      - pyproject.toml
+      - uv.lock
+      - VERSION
+      - src/**
+      - .github/workflows/rpm.yml
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to rebuild and attach, e.g. v3.0.0"
+        required: true
+        type: string
+
+permissions: {}
+
+jobs:
+  build:
+    name: Build and smoke-test (${{ matrix.dist }})
+    if: >-
+      github.event_name == 'pull_request' ||
+      !startsWith(github.event.release.tag_name || inputs.tag, 'v2.')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - dist: fc43
+            image: registry.fedoraproject.org/fedora:43
+          - dist: el10
+            image: quay.io/centos/centos:stream10
+    env:
+      TAG: ${{ github.event.release.tag_name || inputs.tag }}
+      IMAGE: ${{ matrix.image }}
+    steps:
+      - name: Check out the release, or the pull request
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.release.tag_name || inputs.tag || github.ref }}
+          persist-credentials: false
+
+      - name: Build
+        run: packaging/build.sh "$IMAGE" rpms "$TAG"
+
+      - name: Smoke-test in a fresh container
+        run: packaging/smoke.sh "$IMAGE" rpms "${TAG:+require-cli}"
+
+      - name: Keep the RPMs for the publish job
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: rpms-${{ matrix.dist }}
+          path: rpms/*.rpm
+          if-no-files-found: error
+          retention-days: 14
+
+  publish:
+    name: Attach the RPMs to the release
+    needs: build
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: Fetch the RPMs every target built
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: rpms-*
+          merge-multiple: true
+          path: rpms
+
+      - name: Upload to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.release.tag_name || inputs.tag }}
+        run: gh release upload "$TAG" rpms/*.rpm --clobber --repo "$GITHUB_REPOSITORY"

@@ -12,6 +12,9 @@ Everything runs from containers; the host needs only git, podman, pre-commit and
 - `.github/workflows/ashigaru.yml`: this repo's own caller; must equal `examples/ashigaru.yml`.
 - `scripts/`: every decision and every write. Standard library and `gh` only. Pure functions are tested in `tests/`; `main()` does the I/O.
 - `prompts/`, `schemas/`: what each agent is told and what it must return.
+- `src/ashigaru/`: 3.x, the Desk and its clients; `docs/desk-api.md` is the contract.
+- `Containerfile`, `.github/workflows/container.yml`: the Desk image; GitHub builds it, never a seat.
+- `packaging/`: the RPM spec and the scripts `rpm.yml` runs; `packaging/build.sh registry.fedoraproject.org/fedora:43 out` builds locally with podman.
 
 # Rules that are easy to break
 

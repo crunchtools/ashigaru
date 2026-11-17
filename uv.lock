@@ -52,17 +52,21 @@ wheels = [
 
 [[package]]
 name = "ashigaru"
-version = "0"
 source = { editable = "." }
 dependencies = [
+    { name = "pydantic" },
+]
+
+[package.optional-dependencies]
+desk = [
     { name = "fastapi" },
     { name = "fastmcp" },
-    { name = "pydantic" },
     { name = "uvicorn" },
 ]
 
 [package.dev-dependencies]
 dev = [
+    { name = "ashigaru", extra = ["desk"] },
     { name = "httpx" },
     { name = "mypy" },
     { name = "pytest" },
@@ -71,14 +75,16 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "fastapi", specifier = ">=0.115" },
-    { name = "fastmcp", specifier = ">=4.2" },
+    { name = "fastapi", marker = "extra == 'desk'", specifier = ">=0.115" },
+    { name = "fastmcp", marker = "extra == 'desk'", specifier = ">=4.2" },
     { name = "pydantic", specifier = ">=2.9" },
-    { name = "uvicorn", specifier = ">=0.32" },
+    { name = "uvicorn", marker = "extra == 'desk'", specifier = ">=0.32" },
 ]
+provides-extras = ["desk"]
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "ashigaru", extras = ["desk"] },
     { name = "httpx", specifier = ">=0.28" },
     { name = "mypy", specifier = ">=1.14" },
     { name = "pytest", specifier = ">=8.3" },

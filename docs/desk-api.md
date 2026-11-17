@@ -104,3 +104,32 @@ same hash) is skipped, so a re-run changes nothing and a grown ledger applies
 only its new lines. `assigned`, `queued`, `blocker`, `wrapped`, `cleared`,
 `closed` and the old `wrapping` state map onto columns; anything else, and any
 value outside the Desk's enums, is kept in `extra`.
+
+## Deploy
+
+The service ships two ways, both built on GitHub:
+
+- **Image:** `quay.io/crunchtools/ashigaru` (`Containerfile`, `.github/workflows/container.yml`).
+  `:main` follows the default branch; `:latest` and `:X.Y.Z` the 3.x release tags.
+  It runs as uid 65532 with a read-only root; the SQLite file is on the `/data`
+  volume. Its HEALTHCHECK is `ashigaru-desk health`.
+- **RPMs:** `ashigaru` (the CLI) and `ashigaru-desk` (the service), for Fedora
+  and EL10, attached to each 3.x GitHub release (`.github/workflows/rpm.yml`).
+
+Settings are flags on `ashigaru-desk serve`, else these environment variables:
+
+| Variable | Means | Default (image) |
+|---|---|---|
+| `ASHIGARU_DESK_DB` | the SQLite file | none (`/data/desk.db`) |
+| `ASHIGARU_BIND` | the address to listen on | `127.0.0.1` (`0.0.0.0`) |
+| `ASHIGARU_PORT` | the port | `8080` |
+| `ASHIGARU_TRUSTED_PROXIES` | comma-separated addresses or CIDRs of the reverse proxies in front | none |
+
+Behind Cloudflare and Gloval's proxy, set `ASHIGARU_TRUSTED_PROXIES` to the
+address the proxy connects from. The client address and scheme then come from
+`X-Forwarded-For` and `X-Forwarded-Proto`, but only on requests from those
+addresses; a client that connects directly cannot forge either.
+
+First key, on the host:
+`podman exec ashigaru ashigaru-desk mint-key "Josui Prime" --role admin --db /data/desk.db --out /data/josui.key`,
+then move the key file off the volume into the client's secret store.
