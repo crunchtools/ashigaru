@@ -6,6 +6,10 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- A caller is now a thin router: `examples/ashigaru.yml` has one job that calls the new reusable `router.yml@v2`, passing Ashigaru's three secrets by name (not `inherit`, which would hand a moved `v2` every secret in the repository), subscribed to a superset of the events Ashigaru acts on (issues opened, labeled, reopened; issue comments; Gatehouse `workflow_run`; `pull_request_target` opened, synchronize, closed; `workflow_dispatch`). The router picks triage, code, fix or release with the same gates the caller carried, and anything else ends in a `Nothing to do` job with no permissions and no secrets. Ashigaru gaining a job no longer reaches nobody until every repository re-copies its caller, which is how 2.13.1's `release` job missed the fleet (a167). Re-copy `examples/ashigaru.yml` once, after 2.14.0 is out: before `v2` carries `router.yml` a re-copied caller fails to start. An old caller keeps working as before. Each ignored event (a comment, a push) costs one short runner job. The concurrency group now carries the event name, so a burst of ignored comments or pushes cannot replace a routed run that is waiting its turn.
+
 ## [2.13.1] - 2026-11-17
 
 ### Fixed

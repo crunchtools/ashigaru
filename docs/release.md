@@ -48,9 +48,9 @@ Files under a dot directory (`.github/`, `.specify/`) are never edited. If the o
 
 In `auto` mode, with the bump at or under the limit, auto-merge is turned on. Otherwise the pull request waits, says why in its body, and is listed in the [inbox](review.md). The [fix agent](fix.md) does not work on release pull requests. One that conflicts with the default branch is closed and a fresh one opens on a later sweep.
 
-**Publishing.** When a release pull request written by Ashigaru merges into the default branch, the `release` job in the repository's own `ashigaru.yml` (which calls `release.yml`) creates the tag `vX.Y.Z` at the merge commit and publishes the GitHub Release with the changelog entry as its notes, within a minute of the merge. This holds in both modes: merging the release pull request is the approval. The release is created with the app token, not `GITHUB_TOKEN`, so the tag push and `release: published` start the repository's own workflows (a container build, a package upload).
+**Publishing.** When a release pull request written by Ashigaru merges into the default branch, the `release` job of `router.yml`, which the repository's `ashigaru.yml` calls, creates the tag `vX.Y.Z` at the merge commit and publishes the GitHub Release with the changelog entry as its notes, within a minute of the merge. This holds in both modes: merging the release pull request is the approval. The release is created with the app token, not `GITHUB_TOKEN`, so the tag push and `release: published` start the repository's own workflows (a container build, a package upload).
 
-The sweep is the fallback: when the changelog's current version has no tag and Ashigaru's release pull request for it has merged, it publishes the release at the merge commit. A caller copied before the `release` job existed has none and waits for the sweep, up to an hour.
+The sweep is the fallback: when the changelog's current version has no tag and Ashigaru's release pull request for it has merged, it publishes the release at the merge commit. A caller copied before 2.13.1 has no `pull_request_target` trigger and waits for the sweep, up to an hour.
 
 GitHub will not let the app create a tag at a commit whose workflow files differ from the default branch's, so a release whose pull request merged before a workflow change landed is refused, and the record says to tag it by hand.
 

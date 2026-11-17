@@ -8,7 +8,7 @@ A required check that says "every review finding has an answer" stops a pull req
 
 ## How it works
 
-The caller runs `fix.yml` when the `Gatehouse` workflow completes. It acts only when all of these hold: the completed run was a `pull_request_target` run, the branch starts with `ashigaru/`, the branch is in this repository, and the open pull request for it was opened by the Ashigaru app. A reply to a finding re-runs Gatehouse under a different event, which is ignored, so a round cannot start the next one by replying.
+The router runs `fix.yml` when the `Gatehouse` workflow completes. It acts only when all of these hold: the completed run was a `pull_request_target` run, the branch starts with `ashigaru/`, the branch is in this repository, and the open pull request for it was opened by the Ashigaru app. A reply to a finding re-runs Gatehouse under a different event, which is ignored, so a round cannot start the next one by replying.
 
 **Fix agent** (read-only token):
 
