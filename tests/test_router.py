@@ -194,8 +194,10 @@ def test_each_event_reaches_its_job(event_name, event, auto_code, expected):
 
 @pytest.mark.parametrize(("event_name", "event", "auto_code"),
                          [case[1:4] for case in CASES], ids=[case[0] for case in CASES])  # fmt: skip
-def test_the_switch_stops_every_route(event_name, event, auto_code):
-    assert route(event_name, event, auto_code, enabled="false") == set()
+def test_the_switch_stops_every_route_but_release(event_name, event, auto_code):
+    """Release runs no model; a merged release pull request is tagged with Ashigaru off."""
+    expected = route(event_name, event, auto_code) & {"release"}
+    assert route(event_name, event, auto_code, enabled="false") == expected
 
 
 @pytest.mark.parametrize(("event_name", "event", "auto_code"),

@@ -8,11 +8,12 @@
 #   issues opened, or labeled ready-for-triage  -> triage (then code, if it says so)
 #   issues labeled ready-to-code                -> code
 #   Gatehouse completed on an ashigaru/ branch  -> fix
-#   Ashigaru's release pull request merged      -> release
+#   Ashigaru's release pull request merged      -> release (even when switched off)
 #   anything else                               -> ignore
 #
 # Each gate is the one the caller carried before, and each called workflow
-# checks it again. `ignore` is the fallback: no permissions, no secrets, one
+# checks it again. Release alone ignores ASHIGARU_ENABLED: it runs no model, and
+# a release pull request that merged must still be tagged once Ashigaru is off. `ignore` is the fallback: no permissions, no secrets, one
 # step. Nothing here checks out anything, so no pull request's code runs under
 # pull_request_target. Each call gets only the secrets it needs.
 
@@ -84,14 +85,13 @@ jobs:
   release:
     name: Release
     if: >-
-      vars.ASHIGARU_ENABLED == 'true' &&
       github.event_name == 'pull_request_target' &&
       github.event.pull_request.merged == true &&
       github.event.pull_request.head.repo.full_name == github.repository &&
       startsWith(github.event.pull_request.head.ref, 'ashigaru/release-')
     permissions:
       contents: read
-    uses: crunchtools/ashigaru/.github/workflows/release.yml@v2
+    uses: crunchtools/ashigaru/.github/workflows/release-tag.yml@v2
     secrets:
       ASHIGARU_APP_KEY: ${{ secrets.ASHIGARU_APP_KEY }}
 

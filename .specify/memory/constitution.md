@@ -1,6 +1,6 @@
 # ashigaru Constitution
 
-> **Version:** 2.9.0
+> **Version:** 2.10.0
 > **Ratified:** 2026-10-10
 > **Status:** Active
 > **Inherits:** [crunchtools/constitution](https://github.com/crunchtools/constitution) v1.41.0
@@ -41,7 +41,7 @@ required checks. Feature work is labeled and left for a maintainer.
 
 | Limit | Value | Test |
 |-------|-------|------|
-| Switch `ASHIGARU_ENABLED` on the first job of every workflow | must be `true` | `test_the_switch_gates_the_first_job_and_every_job_has_a_timeout` |
+| Switch `ASHIGARU_ENABLED` on the first job of every workflow, except release tagging (`release-tag.yml`, the `release.yml` that calls it, `major-tag.yml`, the router's release route), which runs no model and must still tag a merged release while Ashigaru is off | must be `true` | `test_the_switch_gates_the_first_job_and_every_job_has_a_timeout`, `test_release_tagging_ignores_the_switch_and_runs_no_model` |
 | Turn limit and tool list on every agent step | 40 or 80 turns | `test_every_agent_step_has_a_turn_limit_and_a_tool_list` |
 | Job timeouts | 5 to 75 minutes | same as the switch |
 | Fix rounds per pull request | 5, then `needs-human` | `test_round_cap_hands_off_instead_of_fixing` |
