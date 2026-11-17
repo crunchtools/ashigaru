@@ -63,6 +63,23 @@ can return.
 | `GET /identities/{name}/keys` | admin or the owner; metadata only |
 | `POST /identities/{name}/keys` | admin: mint; the token is in this response only |
 | `DELETE /identities/{name}/keys/{key_id}` | admin or the owner: revoke, effective on the next request |
+| `GET /identities/{name}/mcp` | admin or the owner: the identity's MCP codes, metadata only |
+| `POST /identities/{name}/mcp` | admin: a new hosted MCP URL, `https://<host>/mcp/<code>`, in this response only |
+| `DELETE /identities/{name}/mcp/{code_id}` | admin or the owner: revoke, effective on the next MCP request |
+
+## Hosted MCP
+
+The service serves MCP (Streamable HTTP, stateless) at `/mcp/<code>`. The code
+is `<code_id>_<secret>`, minted like a key and stored the same way, as a
+digest compared timing-safe; it names the one identity calling, and nothing
+in a tool's arguments does. An unknown, revoked or disabled code is a 404.
+
+The tools are the shared command set: `usage`, `agents`, `work`, `queue`,
+`outcomes`, `assign`, `auto`, `manual`, `wrap`, plus `desk_list`, `desk_get`,
+`desk_claim`, `desk_update`, `desk_report` and `desk_file`. Each calls the
+REST route's own function with the code's identity, so authority is the
+API's: a refusal comes back as a tool error carrying the same status and
+detail. `wait` follows the CI-callback route it would mirror.
 
 ## Item
 

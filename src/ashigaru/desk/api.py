@@ -385,14 +385,21 @@ def revoke_key(conn: Conn, who: Who, name: str, key_id: str) -> ApiKey:
 
 def create_app(db_path: str | Path) -> FastAPI:
     """The service over one SQLite file, migrated before the first request."""
+    from .mcp import routes as mcp_routes
+    from .mcp import server as mcp_server  # imported here: its tools call this module's routes
+
     conn = store.connect(db_path)
     store.migrate(conn)
     conn.close()
+    mcp_lifespan, mcp_route = mcp_server.install(db_path)
     app = FastAPI(
         title="Ashigaru Desk",
         version=VERSION,
         description="One queue for every source of change, one owner per item (docs/design/ashigaru-3.md).",
+        lifespan=mcp_lifespan,
     )
     app.state.db_path = str(db_path)
     app.include_router(router)
+    app.include_router(mcp_routes.router)
+    app.router.routes.append(mcp_route)
     return app

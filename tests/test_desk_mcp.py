@@ -1,0 +1,209 @@
+"""The hosted MCP: codes as credentials, and the same authority as the REST API, identity by identity."""
+
+import sqlite3
+from http.client import CREATED, FORBIDDEN, NOT_FOUND, OK
+from typing import Any
+
+import pytest
+from conftest import Keys
+from fastapi.testclient import TestClient
+
+from ashigaru.desk import store
+from ashigaru.desk.mcp import codes
+
+JOSUI = "Josui Prime"
+SEAT = "Exedore 1 - Max"
+OTHER = "Exedore 2 - Max"
+IDENTITIES = (JOSUI, SEAT, OTHER, "ci")
+MCP_HEADERS = {"Accept": "application/json, text/event-stream", "Content-Type": "application/json"}
+
+
+def mint_url(client: TestClient, keys: Keys, name: str) -> str:
+    response = client.post(f"/v1/identities/{name}/mcp", headers=keys[JOSUI], json={"label": "test"})
+    assert response.status_code == CREATED
+    url: str = response.json()["url"]
+    return url.removeprefix("http://testserver")
+
+
+def call(client: TestClient, path: str, tool: str, arguments: dict[str, Any] | None = None) -> dict[str, Any]:
+    """One tools/call, as an MCP client sends it; returns the JSON-RPC result."""
+    body = {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "tools/call",
+        "params": {"name": tool, "arguments": arguments or {}},
+    }
+    response = client.post(path, headers=MCP_HEADERS, json=body)
+    assert response.status_code == OK, response.text
+    result: dict[str, Any] = response.json()["result"]
+    return result
+
+
+def mcp_status(result: dict[str, Any]) -> int:
+    """The REST status a tool result stands for: the API's code from a refusal, else 200."""
+    if not result["isError"]:
+        return OK
+    return int(result["content"][0]["text"].split(":", 1)[0])
+
+
+@pytest.fixture
+def urls(client: TestClient, keys: Keys) -> dict[str, str]:
+    return {name: mint_url(client, keys, name) for name in IDENTITIES}
+
+
+@pytest.fixture
+def access(keys: Keys, urls: dict[str, str]) -> tuple[Keys, dict[str, str]]:
+    return keys, urls
+
+
+def test_initialize_and_list_tools(client: TestClient, urls: dict[str, str]) -> None:
+    init = {
+        "jsonrpc": "2.0", "id": 1, "method": "initialize",
+        "params": {
+            "protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "t", "version": "1"}
+        },
+    }  # fmt: skip
+    assert client.post(urls[SEAT], headers=MCP_HEADERS, json=init).status_code == OK
+    listed = client.post(
+        urls[SEAT], headers=MCP_HEADERS, json={"jsonrpc": "2.0", "id": 2, "method": "tools/list"}
+    )
+    names = {tool["name"] for tool in listed.json()["result"]["tools"]}
+    assert names == {
+        "usage", "agents", "work", "queue", "outcomes", "assign", "auto", "manual", "wrap",
+        "desk_list", "desk_get", "desk_claim", "desk_update", "desk_report", "desk_file",
+    }  # fmt: skip
+    for tool in listed.json()["result"]["tools"]:
+        assert not {"who", "identity", "caller"} & set(tool["inputSchema"].get("properties", {}))
+
+
+def test_codes_are_stored_hashed(client: TestClient, keys: Keys, conn: sqlite3.Connection) -> None:
+    url = mint_url(client, keys, SEAT)
+    code_id, _, secret = url.removeprefix("/mcp/").partition("_")
+    row = conn.execute("SELECT * FROM mcp_codes WHERE code_id = ?", (code_id,)).fetchone()
+    assert secret not in "".join(str(value) for value in row)
+    assert codes.authenticate(conn, f"{code_id}_{secret}x") is None
+    who = codes.authenticate(conn, f"{code_id}_{secret}")
+    assert who is not None and who.name == SEAT
+
+
+@pytest.mark.parametrize("path", ["/mcp/nope", "/mcp/abc_def", "/mcp/_", "/mcp/"])
+def test_an_unknown_code_is_not_found(client: TestClient, urls: dict[str, str], path: str) -> None:
+    assert client.post(path, headers=MCP_HEADERS, json={}).status_code == NOT_FOUND
+
+
+def test_only_an_admin_mints(client: TestClient, keys: Keys) -> None:
+    for name in (SEAT, "ci"):
+        assert client.post(f"/v1/identities/{name}/mcp", headers=keys[name], json={}).status_code == FORBIDDEN
+    assert client.post("/v1/identities/nobody/mcp", headers=keys[JOSUI], json={}).status_code == NOT_FOUND
+
+
+def test_list_and_revoke_are_admin_or_owner(client: TestClient, keys: Keys) -> None:
+    url = mint_url(client, keys, SEAT)
+    code_id = url.removeprefix("/mcp/").partition("_")[0]
+    assert client.get(f"/v1/identities/{SEAT}/mcp", headers=keys[OTHER]).status_code == FORBIDDEN
+    listed = client.get(f"/v1/identities/{SEAT}/mcp", headers=keys[SEAT]).json()
+    assert [row["code_id"] for row in listed] == [code_id] and "url" not in listed[0]
+    assert client.delete(f"/v1/identities/{SEAT}/mcp/{code_id}", headers=keys[OTHER]).status_code == FORBIDDEN
+    assert (
+        client.delete(f"/v1/identities/{OTHER}/mcp/{code_id}", headers=keys[OTHER]).status_code == NOT_FOUND
+    )
+    assert call(client, url, "agents")["isError"] is False
+    revoked = client.delete(f"/v1/identities/{SEAT}/mcp/{code_id}", headers=keys[SEAT])
+    assert revoked.status_code == OK and revoked.json()["revoked_at"]
+    assert client.post(url, headers=MCP_HEADERS, json={}).status_code == NOT_FOUND
+
+
+def test_a_disabled_identity_loses_its_url(
+    client: TestClient, urls: dict[str, str], conn: sqlite3.Connection
+) -> None:
+    conn.execute("UPDATE identities SET disabled_at = 'now' WHERE name = ?", (SEAT,))
+    assert client.post(urls[SEAT], headers=MCP_HEADERS, json={}).status_code == NOT_FOUND
+
+
+def test_the_code_names_the_actor(client: TestClient, urls: dict[str, str], conn: sqlite3.Connection) -> None:
+    store.insert_item(conn, {"id": "a1", "task": "t", "seat": SEAT, "state": "working"}, JOSUI)
+    assert (
+        call(client, urls[SEAT], "desk_update", {"item_id": "a1", "fields": {"result": "r"}})["isError"]
+        is False
+    )
+    assert store.events(conn, "a1")[-1]["actor"] == SEAT
+
+
+# Parity: each action, by each identity, gets the same answer through MCP as through REST.
+
+ADMIN, OWNER, OWNER_OR_ADMIN, SEATS, ANYONE = (
+    {JOSUI}, {SEAT}, {JOSUI, SEAT}, {SEAT, OTHER}, set(IDENTITIES)
+)  # fmt: skip
+CASES: list[tuple[str, dict[str, Any], str, str, dict[str, Any] | None, set[str]]] = [
+    # tool, arguments, REST method, REST path ({id} is the item), REST body, who succeeds
+    ("desk_get", {}, "GET", "/v1/items/{id}", None, ANYONE),
+    ("desk_update", {"fields": {"result": "r"}}, "PATCH", "/v1/items/{id}", {"result": "r"}, OWNER_OR_ADMIN),
+    ("desk_update", {"fields": {"state": "done"}}, "PATCH", "/v1/items/{id}", {"state": "done"}, ADMIN),
+    ("desk_update", {"fields": {"seat": OTHER}}, "PATCH", "/v1/items/{id}", {"seat": OTHER}, ADMIN),
+    ("desk_report", {"verb": "DONE", "text": "ok"}, "POST", "/v1/items/{id}/report",
+     {"verb": "DONE", "text": "ok"}, OWNER_OR_ADMIN),
+    ("desk_file", {"task": "child"}, "POST", "/v1/items/{id}/file", {"task": "child"}, OWNER_OR_ADMIN),
+    ("auto", {}, "PATCH", "/v1/items/{id}", {"mode": "auto"}, ADMIN),
+    ("manual", {}, "PATCH", "/v1/items/{id}", {"mode": "manual"}, ADMIN),
+    ("wrap", {"stage": "wrapping"}, "PATCH", "/v1/items/{id}", {"wrap": "wrapping"}, ADMIN),
+    ("assign", {"seat": OTHER}, "POST", "/v1/items/{id}/assign", {"seat": OTHER}, ADMIN),
+    ("desk_claim", {}, "POST", "/v1/items/{id}/claim", None, SEATS),
+]  # fmt: skip
+Case = tuple[str, dict[str, Any], str, str, dict[str, Any] | None, set[str]]
+
+
+def arrange(conn: sqlite3.Connection, tool: str, item_id: str) -> None:
+    """An item the action can succeed on for someone: SEAT's working story, or a claimable one."""
+    if tool in ("desk_claim", "assign"):
+        store.insert_item(conn, {"id": item_id, "task": "t", "lane": "exedore-max", "state": "queued"}, JOSUI)
+    else:
+        store.insert_item(conn, {"id": item_id, "task": "t", "seat": SEAT, "state": "working"}, JOSUI)
+    for seat in (SEAT, OTHER):
+        store.upsert_seat(conn, seat, {"lane": "exedore-max", "status": "free", "item": None})
+
+
+@pytest.mark.parametrize(
+    ("name", "case"),
+    [(name, case) for case in CASES for name in IDENTITIES],
+    ids=[f"{case[0]}{index}-{name}" for index, case in enumerate(CASES) for name in IDENTITIES],
+)
+def test_mcp_authority_matches_rest(
+    client: TestClient, conn: sqlite3.Connection, access: tuple[Keys, dict[str, str]], name: str, case: Case
+) -> None:
+    """Twin items, one acted on through REST and one through MCP, by the same identity."""
+    keys, urls = access
+    tool, arguments, method, path, body, allowed = case
+    arrange(conn, tool, "rest")
+    rest = client.request(method, path.format(id="rest"), headers=keys[name], json=body)
+    arrange(conn, tool, "mcp")
+    result = call(client, urls[name], tool, {"item_id": "mcp", **arguments})
+    rest_status = OK if rest.status_code == CREATED else rest.status_code
+    assert mcp_status(result) == rest_status, (rest.json(), result)
+    assert (rest_status == OK) == (name in allowed), rest.json()
+    if not result["isError"]:
+        for field in ("state", "seat", "mode", "wrap", "result", "task"):
+            assert result["structuredContent"][field] == rest.json()[field]
+
+
+def test_views_answer_every_identity(client: TestClient, keys: Keys, urls: dict[str, str]) -> None:
+    for name in IDENTITIES:
+        for tool, path in (
+            ("usage", "/v1/usage"),
+            ("agents", "/v1/seats"),
+            ("work", "/v1/check"),
+            ("outcomes", "/v1/outcomes"),
+        ):
+            result = call(client, urls[name], tool)
+            rest = client.get(path, headers=keys[name]).json()
+            content = result["structuredContent"]
+            assert content.get("result", content) == rest
+
+
+def test_queue_lists_queued_then_proposed(
+    client: TestClient, urls: dict[str, str], conn: sqlite3.Connection
+) -> None:
+    store.insert_item(conn, {"id": "a1", "task": "q", "state": "queued", "after": ["a2"]}, JOSUI)
+    store.insert_item(conn, {"id": "a2", "task": "p", "state": "proposed"}, JOSUI)
+    store.insert_item(conn, {"id": "a3", "task": "w", "state": "working"}, JOSUI)
+    rows = call(client, urls[SEAT], "queue")["structuredContent"]["result"]
+    assert [(row["id"], row["after"]) for row in rows] == [("a1", ["a2"]), ("a2", [])]
