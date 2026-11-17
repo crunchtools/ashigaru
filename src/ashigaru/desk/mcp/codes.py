@@ -46,7 +46,7 @@ def get(conn: sqlite3.Connection, code_id: str) -> dict[str, Any] | None:
     return dict(row) if row else None
 
 
-def listing(conn: sqlite3.Connection, identity: str) -> list[dict[str, Any]]:
+def list_codes(conn: sqlite3.Connection, identity: str) -> list[dict[str, Any]]:
     return [dict(row) for row in conn.execute(LIST, (identity,))]
 
 

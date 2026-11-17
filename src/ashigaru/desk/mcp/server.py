@@ -9,9 +9,11 @@ the API's, line for line, and the MCP is never a side door: a 403 there is a 403
 here. Stateless, so a revoked code fails on its very next request.
 """
 
+import logging
+import re
 import sqlite3
-from collections.abc import Iterator
-from contextlib import contextmanager
+from collections.abc import AsyncIterator, Iterator
+from contextlib import asynccontextmanager, contextmanager
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -20,6 +22,7 @@ from fastmcp import FastMCP
 from fastmcp.exceptions import ToolError
 from fastmcp.server.dependencies import get_http_request
 from pydantic import Field, ValidationError
+from starlette.concurrency import run_in_threadpool
 from starlette.responses import JSONResponse
 from starlette.routing import Route
 from starlette.types import ASGIApp, Lifespan, Receive, Scope, Send
@@ -45,6 +48,7 @@ from ..model import (
 from . import codes
 
 CALLER = "desk_caller"
+SECRET_PATH = re.compile(r"/mcp/[^/?\s]+")
 DB = "desk_db"
 ItemId = Annotated[str, Field(description="An item id, e.g. a204.")]
 
@@ -217,12 +221,15 @@ class Endpoint:
         self.db_path = str(db_path)
         self.app = app
 
-    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+    def authenticate(self, code: str) -> auth.Caller | None:
         conn = store.connect(self.db_path)
         try:
-            who = codes.authenticate(conn, scope["path_params"]["code"])
+            return codes.authenticate(conn, code)
         finally:
             conn.close()
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        who = await run_in_threadpool(self.authenticate, scope["path_params"]["code"])
         if who is None:
             await JSONResponse({"detail": "Not Found"}, status_code=404)(scope, receive, send)
             return
@@ -232,8 +239,30 @@ class Endpoint:
         )
 
 
+class RedactCodes(logging.Filter):
+    """The code is the credential, so the access log gets /mcp/<code> instead of it."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if isinstance(record.args, tuple):
+            record.args = tuple(
+                SECRET_PATH.sub("/mcp/<code>", arg) if isinstance(arg, str) else arg for arg in record.args
+            )
+        return True
+
+
+ACCESS_LOG = logging.getLogger("uvicorn.access")
+
+
 def install(db_path: str | Path) -> tuple[Lifespan[Any], Route]:
-    """A fresh MCP app for one Desk app: the lifespan the Desk must run (it starts the session
-    manager, which runs once per app) and the /mcp/{code} route in front of it."""
+    """A fresh MCP app for one Desk app: the lifespan the Desk must run, which starts the session
+    manager (once per app) and redacts codes from the access log, and the /mcp/{code} route."""
     hosted = mcp.http_app(path="/", stateless_http=True, json_response=True)
-    return hosted.lifespan, Route("/mcp/{code}", Endpoint(db_path, hosted), include_in_schema=False)
+
+    @asynccontextmanager
+    async def lifespan(app: Any) -> AsyncIterator[None]:
+        if not any(isinstance(existing, RedactCodes) for existing in ACCESS_LOG.filters):
+            ACCESS_LOG.addFilter(RedactCodes())  # after uvicorn has configured its loggers
+        async with hosted.lifespan(app):
+            yield
+
+    return lifespan, Route("/mcp/{code}", Endpoint(db_path, hosted), include_in_schema=False)

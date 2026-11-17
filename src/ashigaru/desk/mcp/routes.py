@@ -46,7 +46,7 @@ router = APIRouter(tags=["mcp"])
 def list_codes(conn: Conn, who: Who, name: str) -> list[McpCode]:
     """Code metadata only; codes are never stored."""
     self_or_admin(who, name)
-    return [McpCode.model_validate(row) for row in codes.listing(conn, name)]
+    return [McpCode.model_validate(row) for row in codes.list_codes(conn, name)]
 
 
 @router.post(

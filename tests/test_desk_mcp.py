@@ -1,5 +1,6 @@
 """The hosted MCP: codes as credentials, and the same authority as the REST API, identity by identity."""
 
+import logging
 import sqlite3
 from http.client import CREATED, FORBIDDEN, NOT_FOUND, OK
 from typing import Any
@@ -207,3 +208,12 @@ def test_queue_lists_queued_then_proposed(
     store.insert_item(conn, {"id": "a3", "task": "w", "state": "working"}, JOSUI)
     rows = call(client, urls[SEAT], "queue")["structuredContent"]["result"]
     assert [(row["id"], row["after"]) for row in rows] == [("a1", ["a2"]), ("a2", [])]
+
+
+def test_the_access_log_never_carries_a_code(client: TestClient, urls: dict[str, str]) -> None:
+    record = logging.LogRecord(
+        "uvicorn.access", logging.INFO, __file__, 0, '%s - "%s %s HTTP/%s" %d',
+        ("127.0.0.1:1", "POST", f"{urls[SEAT]}?x=1", "1.1", 200), None,
+    )  # fmt: skip
+    assert logging.getLogger("uvicorn.access").filter(record)
+    assert urls[SEAT] not in record.getMessage() and "/mcp/<code>?x=1" in record.getMessage()
