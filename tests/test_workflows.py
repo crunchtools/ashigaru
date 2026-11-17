@@ -11,7 +11,7 @@ WORKFLOWS = ROOT / ".github" / "workflows"
 VERSION = (ROOT / "VERSION").read_text().strip()
 # The tag callers use. Each release moves it, so no caller is edited to get a release.
 MAJOR = f"v{VERSION.split('.')[0]}"
-PRODUCT = ("triage.yml", "code.yml", "fix.yml", "sweep.yml", "review.yml", "major-tag.yml")
+PRODUCT = ("triage.yml", "code.yml", "fix.yml", "sweep.yml", "review.yml", "major-tag.yml", "release.yml")
 REUSABLE = PRODUCT[:3]
 AGENTS = (*REUSABLE, "review.yml")
 """Workflows that run a model. Each fetches its scripts at the major tag."""
@@ -88,7 +88,7 @@ def test_an_agent_that_reads_outside_text_cannot_edit(name):
     assert args and all('--allowedTools "Read,Glob,Grep"' in value for value in args)
 
 
-@pytest.mark.parametrize("name", AGENTS)
+@pytest.mark.parametrize("name", (*AGENTS, "release.yml"))
 def test_reusable_workflows_fetch_their_scripts_at_the_major_tag(name):
     """A called workflow cannot name its own ref, so the tag is a literal: the one callers use."""
     fetches = [
@@ -106,8 +106,37 @@ def test_the_caller_uses_the_major_tag_and_matches_the_example():
     calls = {name: job["uses"] for name, job in yaml.safe_load(example)["jobs"].items()}
     assert calls == {
         name: f"crunchtools/ashigaru/.github/workflows/{name}.yml@{MAJOR}"
-        for name in ("triage", "code", "fix")
+        for name in ("triage", "code", "fix", "release")
     }
+
+
+def test_a_merged_release_pull_request_is_published_then_not_at_the_next_sweep():
+    """#166: in auto mode the release pull request merged and nothing tagged it for up to an hour."""
+    caller = yaml.safe_load((ROOT / "examples" / "ashigaru.yml").read_text())
+    assert caller[True]["pull_request_target"] == {"types": ["closed"]}
+    job = caller["jobs"]["release"]
+    for clause in (
+        "github.event_name == 'pull_request_target'",
+        "github.event.pull_request.merged == true",
+        "github.event.pull_request.head.repo.full_name == github.repository",
+        "startsWith(github.event.pull_request.head.ref, 'ashigaru/release-')",
+    ):
+        assert clause in job["if"]
+        assert clause in load("release.yml")["jobs"]["publish"]["if"]
+    assert job["secrets"] == {"ASHIGARU_APP_KEY": "${{ secrets.ASHIGARU_APP_KEY }}"}
+    assert "github.event.pull_request.head.ref" in caller["concurrency"]["group"]
+
+
+def test_the_release_on_merge_tags_with_the_app_token_for_this_repository_only():
+    """A tag made with GITHUB_TOKEN starts no workflow, so container.yml would never run."""
+    job = load("release.yml")["jobs"]["publish"]
+    mint = tokens(job)["app"]
+    assert grants(mint) == {"permission-contents": "write", "permission-pull-requests": "read"}
+    assert mint["with"]["repositories"] == "${{ github.event.repository.name }}"
+    run = [step for step in steps_of(job) if "release_publish.py" in str(step.get("run"))]
+    assert len(run) == 1 and run[0]["env"]["GH_TOKEN"] == "${{ steps.app.outputs.token }}"
+    assert "github.token" not in str(job)
+    assert job["permissions"] == {"contents": "read"}
 
 
 def test_the_fix_job_ignores_runs_that_a_reply_started():

@@ -1,0 +1,11 @@
+check = "CH012-copy_paste_detection"
+
+[[locations]]
+path = "scripts/major_tag.py"
+justification = "Its main() and release_publish.py's main() share only the argparse preamble (ArgumentParser, two or three add_argument calls, parse_args) every command-line script here starts with; what each does after parsing has nothing in common."
+classification = "gourmand_bug"
+
+[[locations]]
+path = "scripts/release_publish.py"
+justification = "Same argparse preamble as major_tag.py's main(); the logic is in merged_release, wanted, publish and released, none of which duplicates another file."
+classification = "gourmand_bug"

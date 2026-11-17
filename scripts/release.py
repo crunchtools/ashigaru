@@ -9,8 +9,10 @@ merged. It keeps one issue listing what was released and what is waiting.
 
 Three steps, so the token that can write to a repository is minted only for the
 repositories that need it this hour: `plan` reads, `act` writes, `record`
-rewrites the issue. Nothing here calls a model, and no repository code runs:
-the edits are text replacements in a fresh clone.
+rewrites the issue. release_publish.py publishes a release the moment its pull
+request merges; the sweep's publish is the fallback.
+Nothing here calls a model, and no repository code runs: the edits are text
+replacements in a fresh clone.
 """
 
 from __future__ import annotations
@@ -288,10 +290,11 @@ def listing(pull: dict) -> dict:
     }
 
 
-def fetch(repo: str, path: str) -> str | None:
-    """A file from the default branch, or None when the repository has none."""
+def fetch(repo: str, path: str, ref: str = "") -> str | None:
+    """A file from the default branch, or from `ref`, or None when the repository has none."""
+    query = f"?ref={ref}" if ref else ""
     try:
-        return gh("api", f"repos/{repo}/contents/{path}", "-H", "Accept: application/vnd.github.raw")
+        return gh("api", f"repos/{repo}/contents/{path}{query}", "-H", "Accept: application/vnd.github.raw")
     except subprocess.CalledProcessError as error:
         if "404" not in error.stderr:
             raise
