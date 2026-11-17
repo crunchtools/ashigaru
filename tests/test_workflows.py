@@ -87,9 +87,10 @@ def test_a_caller_copied_at_2_13_1_reaches_the_same_release_tag():
     assert job["permissions"] == {"contents": "read"}
 
 
-def test_the_release_tag_pins_its_actions_by_commit():
-    """The step holding the app token runs only code whose owner cannot move it under us."""
-    uses = [step["uses"] for _, job in jobs("release-tag.yml") for step in steps_of(job) if "uses" in step]
+@pytest.mark.parametrize("name", ("release-tag.yml", "major-tag.yml"))
+def test_release_tagging_pins_its_actions_by_commit(name):
+    """The steps holding a write token run only code whose owner cannot move it under us."""
+    uses = [step["uses"] for _, job in jobs(name) for step in steps_of(job) if "uses" in step]
     assert uses
     for ref in uses:
         assert COMMIT.fullmatch(ref.partition("@")[2]), ref
