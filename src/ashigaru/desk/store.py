@@ -60,7 +60,8 @@ MIGRATIONS: tuple[str, ...] = (
     CREATE INDEX items_state ON items(state, expires_at);
     CREATE INDEX items_seat ON items(seat);
     CREATE INDEX items_filed_under ON items(filed_under);
-    CREATE INDEX items_number ON items(CAST(substr(id, 2) AS INTEGER)) WHERE id GLOB 'a[0-9]*';
+    CREATE INDEX items_number ON items(CAST(substr(id, 2) AS INTEGER))
+        WHERE id GLOB 'a[0-9]*' AND id NOT GLOB 'a*[^0-9]*';
 
     CREATE TABLE events (
         seq INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -272,10 +273,10 @@ def list_items(
 
 
 def next_id(conn: sqlite3.Connection) -> str:
-    """a<N+1> over the highest a<N>, read from the items_number index."""
+    """a<N+1> over the highest a<N> whose N is all digits (a12x is not a12), from the items_number index."""
     highest = conn.execute(
         "SELECT max(CAST(substr(id, 2) AS INTEGER)) FROM items INDEXED BY items_number"
-        " WHERE id GLOB 'a[0-9]*'"
+        " WHERE id GLOB 'a[0-9]*' AND id NOT GLOB 'a*[^0-9]*'"
     ).fetchone()[0]
     return f"a{(highest or 0) + 1}"
 
