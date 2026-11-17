@@ -42,6 +42,8 @@ class Summary:
     skipped: int = 0
     created: list[str] = field(default_factory=list)
     updated: set[str] = field(default_factory=set)
+    last_seen: str | None = None
+    """The newest time on any line so far, for an untimed line that starts an item."""
 
 
 def stamp(value: Any) -> Any:
@@ -111,14 +113,15 @@ def line_time(line: dict[str, Any]) -> str | None:
 
 
 def apply(conn: sqlite3.Connection, number: int, raw: str, summary: Summary) -> None:
+    line = json.loads(raw)
+    summary.last_seen = max(filter(None, (summary.last_seen, line_time(line))), default=None)
     key = (number, hashlib.sha256(raw.encode()).hexdigest())
     if conn.execute("SELECT 1 FROM ledger_lines WHERE line_no = ? AND line_hash = ?", key).fetchone():
         summary.skipped += 1
         return
-    line = json.loads(raw)
     patch, extra = to_patch(line)
     item = store.get_item(conn, line["id"])
-    at = line_time(line) or (item["updated_at"] if item else None)
+    at = line_time(line) or (item["updated_at"] if item else summary.last_seen)
     if item is None:
         store.insert_item(conn, {"id": line["id"], **patch, "extra": extra, "at": at}, ACTOR, "ledger")
         summary.created.append(line["id"])

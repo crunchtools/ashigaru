@@ -72,6 +72,12 @@ def test_a_grown_ledger_applies_only_new_lines(conn: sqlite3.Connection, tmp_pat
     assert dump(conn) == dump(whole)
 
 
+def test_untimed_lines_take_the_ledgers_time_not_the_clock(conn: sqlite3.Connection) -> None:
+    lines = ['{"id":"a1","state":"queued","at":"2026-11-15T02:40Z"}\n', '{"id":"a2","task":"no time"}\n']
+    importer.import_ledger(conn, lines)
+    assert (store.get_item(conn, "a2") or {})["created_at"] == "2026-11-15T02:40:00Z"
+
+
 def test_ledger_shapes_map_onto_columns(conn: sqlite3.Connection) -> None:
     importer.import_ledger(conn, LINES)
 
