@@ -7,9 +7,10 @@
 name = "ashigaru"
 version = "0"
 requires-python = ">=3.12"
-dependencies = ["fastapi>=0.115", "pydantic>=2.9", "uvicorn>=0.32"]
+dependencies = ["fastapi>=0.115", "httpx>=0.28", "pydantic>=2.9", "uvicorn>=0.32"]
 
 [project.scripts]
+ashigaru = "ashigaru.cli.__main__:main"
 ashigaru-desk = "ashigaru.desk.__main__:main"
 
 [build-system]
@@ -20,7 +21,7 @@ build-backend = "hatchling.build"
 packages = ["src/ashigaru"]
 
 [dependency-groups]
-dev = ["httpx>=0.28", "mypy>=1.14", "pytest>=8.3", "pyyaml>=6.0.3"]
+dev = ["mypy>=1.14", "pytest>=8.3", "pyyaml>=6.0.3"]
 
 [tool.ruff]
 line-length = 110
