@@ -242,7 +242,8 @@ def test_the_caller_is_thin_and_grants_what_every_route_needs():
     """A called workflow can only narrow the caller's token, never widen it."""
     (caller_job,) = CALLER["jobs"].values()
     assert set(caller_job) == {"name", "permissions", "uses", "secrets"}
-    assert caller_job["secrets"] == "inherit"
+    declared = ROUTER[True]["workflow_call"]["secrets"]
+    assert caller_job["secrets"] == {name: f"${{{{ secrets.{name} }}}}" for name in declared}
     for name, job in JOBS.items():
         for scope, level in job["permissions"].items():
             assert LEVEL[caller_job["permissions"].get(scope, "none")] >= LEVEL[level], (name, scope)

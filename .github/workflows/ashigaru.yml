@@ -58,7 +58,8 @@ permissions: {}
 
 # One run at a time per issue or per pull request branch; a second event waits.
 # The event name keeps a burst of events Ashigaru ignores (comments, pushes)
-# from replacing a run of another kind that is waiting its turn.
+# from replacing a run of another kind that is waiting its turn. Ignored
+# issues events (other labels, reopened) still share the issue's group.
 concurrency:
   group: ashigaru-${{ github.event_name }}-${{ github.event.issue.number || github.event.workflow_run.head_branch || github.event.pull_request.head.ref || github.run_id }}
   cancel-in-progress: false
@@ -74,6 +75,10 @@ jobs:
       checks: read
       actions: read
     uses: crunchtools/ashigaru/.github/workflows/router.yml@v2
-    # Same organization, so inherit is allowed. The router hands each workflow
-    # only the secrets that workflow declares.
-    secrets: inherit
+    # By name, not `inherit`: whoever can move v2 can read only these three,
+    # not every secret this repository holds. The router hands each workflow
+    # only the ones it declares.
+    secrets:
+      CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+      ASHIGARU_APP_KEY: ${{ secrets.ASHIGARU_APP_KEY }}
+      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}

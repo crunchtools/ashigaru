@@ -22,10 +22,11 @@ on:
   workflow_call:
     secrets:
       CLAUDE_CODE_OAUTH_TOKEN:
-        required: false
+        required: true
       ASHIGARU_APP_KEY:
-        required: false
+        required: true
       OPENROUTER_API_KEY:
+        description: "For the Gatehouse pre-commit hook. Without it that hook is skipped."
         required: false
 
 permissions: {}
