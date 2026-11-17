@@ -1,27 +1,31 @@
-# The [project] table exists so `uv lock` can pin the gate's own tools; the
-# agents are scripts under scripts/, run by path, not an installable package,
-# which is what `package = false` says. Without a lockfile naming mypy and
-# pytest the gate exits 2 (python-sdlc, need_lock_dep) rather than reporting a
-# pass it never ran.
+# 2.x is scripts under scripts/, run by path with the standard library only.
+# 3.x is the Desk, the installable package under src/ashigaru: the service,
+# and later its CLI and MCP server, are one Python project (ashigaru-3.md).
+# The lockfile also pins the gate's own tools: without mypy and pytest in it
+# the gate exits 2 (python-sdlc, need_lock_dep).
 [project]
 name = "ashigaru"
 version = "0"
 requires-python = ">=3.12"
-dependencies = []
+dependencies = ["fastapi>=0.115", "uvicorn>=0.32"]
 
-[tool.uv]
-package = false
+[project.scripts]
+ashigaru-desk = "ashigaru.desk.__main__:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/ashigaru"]
 
 [dependency-groups]
-dev = ["mypy>=1.14", "pytest>=8.3", "pyyaml>=6.0.3"]
-
-# Tool configuration only. Ashigaru ships workflows and scripts, not a package;
-# the scripts use the standard library and the `gh` CLI the runner provides.
+dev = ["httpx>=0.28", "mypy>=1.14", "pytest>=8.3", "pyyaml>=6.0.3"]
 
 [tool.ruff]
 line-length = 110
 target-version = "py312"
-src = ["scripts"]
+src = ["scripts", "src"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP", "SIM", "C90", "PLR"]
@@ -34,14 +38,14 @@ max-branches = 10
 max-statements = 50
 
 [tool.pytest.ini_options]
-pythonpath = ["scripts"]
+pythonpath = ["scripts", "src"]
 testpaths = ["tests"]
 
-# The agent scripts and their tests, by path -- not a package. pytest already
-# puts scripts/ on sys.path via [tool.pytest.ini_options] pythonpath.
+# The 2.x scripts by path, and the 3.x package from src/. pytest puts both on
+# sys.path via [tool.pytest.ini_options] pythonpath.
 [tool.mypy]
-files = ["scripts", "tests"]
-mypy_path = "scripts"
+files = ["scripts", "src", "tests"]
+mypy_path = "scripts:src"
 ignore_missing_imports = true
 
 [tool.sdlc.push]

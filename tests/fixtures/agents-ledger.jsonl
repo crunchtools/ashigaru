@@ -1,0 +1,816 @@
+{"id":"a1","seat":"Exedore (Max) 1","assigned":"2026-11-15T02:40Z","task":"task of a1 (line 1)","done_when":"done_when of a1 (line 1)","check_after":"2026-11-15T03:10Z","state":"assigned"}
+{"id":"a1","seat":"Exedore (Max) 1","assigned":"2026-11-15T02:40Z","task":"task of a1 (line 2)","done_when":"done_when of a1 (line 2)","check_after":"2026-11-15T03:10Z","state":"blocked","note":"note of a1 (line 2)"}
+{"id":"a1","seat":"Exedore (Max) 1","assigned":"2026-11-15T02:40Z","task":"task of a1 (line 3)","done_when":"done_when of a1 (line 3)","check_after":"2026-11-15T03:43Z","state":"working","note":"note of a1 (line 3)"}
+{"id":"a1","seat":"Exedore (Max) 1","assigned":"2026-11-15T02:40Z","task":"task of a1 (line 4)","done_when":"done_when of a1 (line 4)","check_after":"2026-11-15T03:43Z","state":"done","note":"note of a1 (line 4)"}
+{"id":"a2","seat":"Dolza 1 - Vertex","assigned":"2026-11-15T09:43Z","task":"task of a2 (line 5)","done_when":"done_when of a2 (line 5)","check_after":"2026-11-15T10:13Z","state":"assigned"}
+{"id":"a3","seat":"Dolza 1 - Max","assigned":"2026-11-15T09:43Z","task":"task of a3 (line 6)","done_when":"done_when of a3 (line 6)","check_after":"2026-11-15T11:43Z","state":"assigned"}
+{"id":"a2","seat":"Dolza 1 - Vertex","assigned":"2026-11-15T09:43Z","task":"task of a2 (line 7)","done_when":"done_when of a2 (line 7)","check_after":"2026-11-15T10:13Z","state":"done","note":"note of a2 (line 7)"}
+{"id":"a3","seat":"Dolza 1 - Max","assigned":"2026-11-15T09:43Z","task":"task of a3 (line 8)","done_when":"done_when of a3 (line 8)","check_after":"2026-11-15T11:43Z","state":"done","note":"note of a3 (line 8)"}
+{"id":"a2","seat":"Dolza 1 - Vertex","assigned":"2026-11-15T09:43Z","task":"task of a2 (line 9)","done_when":"done_when of a2 (line 9)","check_after":"2026-11-15T10:13Z","state":"done","note":"note of a2 (line 9)"}
+{"id":"a4","seat":"Exedore 2 - Max","assigned":"2026-11-15T17:31Z","task":"task of a4 (line 10)","done_when":"done_when of a4 (line 10)","check_after":"2026-11-15T19:31Z","state":"assigned"}
+{"id":"a5","seat":"Exedore 1 - Max","assigned":"2026-11-15T17:32Z","task":"task of a5 (line 11)","done_when":"done_when of a5 (line 11)","check_after":"2026-11-15T18:02Z","state":"assigned"}
+{"id":"a5","seat":"Exedore 1 - Max","assigned":"2026-11-15T17:3xZ","task":"task of a5 (line 12)","done_when":"done_when of a5 (line 12)","check_after":"","state":"done","note":"note of a5 (line 12)"}
+{"id":"a4","seat":"Exedore 2 - Max","assigned":"2026-11-15T15:2xZ","task":"task of a4 (line 13)","done_when":"done_when of a4 (line 13)","check_after":"","state":"done","note":"note of a4 (line 13)","learned":"learned of a4 (line 13)"}
+{"id":"a6","seat":"Exedore 3 - Max","assigned":"2026-11-15T18:41Z","task":"task of a6 (line 14)","done_when":"done_when of a6 (line 14)","check_after":"2026-11-15T19:26Z","state":"assigned"}
+{"id":"a7","seat":"Exedore 4 - Max","assigned":"2026-11-15T18:41Z","task":"task of a7 (line 15)","done_when":"done_when of a7 (line 15)","check_after":"2026-11-15T19:26Z","state":"assigned"}
+{"id":"a4","seat":"Exedore 2 - Max","state":"done","memorized":true}
+{"id":"a7","seat":"Exedore 4 - Max","task":"task of a7 (line 17)","state":"done","note":"note of a7 (line 17)","learned":"learned of a7 (line 17)"}
+{"id":"a8","seat":"Exedore 2 - Max","assigned":"2026-11-15T18:44Z","task":"task of a8 (line 18)","done_when":"done_when of a8 (line 18)","check_after":"2026-11-15T19:44Z","state":"assigned"}
+{"id":"a6","seat":"Exedore 3 - Max","task":"task of a6 (line 19)","state":"done","note":"note of a6 (line 19)","learned":"learned of a6 (line 19)"}
+{"id":"a9","seat":"Exedore 1 - Max","assigned":"2026-11-15T18:44Z","task":"task of a9 (line 20)","done_when":"done_when of a9 (line 20)","check_after":"2026-11-15T19:44Z","state":"assigned"}
+{"id":"a8","seat":"Exedore 2 - Max","task":"task of a8 (line 21)","state":"done","note":"note of a8 (line 21)","learned":"learned of a8 (line 21)"}
+{"id":"a10","seat":"Exedore 4 - Max","assigned":"2026-11-15T19:43Z","task":"task of a10 (line 22)","done_when":"done_when of a10 (line 22)","check_after":"2026-11-15T20:28Z","state":"assigned"}
+{"id":"a10","seat":"Exedore 4 - Max","task":"task of a10 (line 23)","state":"done","note":"note of a10 (line 23)","learned":"learned of a10 (line 23)"}
+{"id":"a11","seat":"Exedore 2 - Max","assigned":"2026-11-15T19:44Z","task":"task of a11 (line 24)","done_when":"done_when of a11 (line 24)","check_after":"2026-11-15T20:14Z","state":"assigned"}
+{"id":"a9","seat":"Exedore 1 - Max","task":"task of a9 (line 25)","state":"done","note":"note of a9 (line 25)","learned":"learned of a9 (line 25)"}
+{"id":"a12","seat":"Exedore 3 - Max","assigned":"2026-11-15T19:51Z","task":"task of a12 (line 26)","done_when":"done_when of a12 (line 26)","check_after":"2026-11-15T20:36Z","state":"assigned"}
+{"id":"a12","seat":"Exedore 3 - Max","task":"task of a12 (line 27)","state":"done","note":"note of a12 (line 27)","learned":"learned of a12 (line 27)"}
+{"id":"a13","seat":"Exedore 1 - Max","assigned":"2026-11-15T19:54Z","task":"task of a13 (line 28)","done_when":"done_when of a13 (line 28)","check_after":"2026-11-15T20:54Z","state":"assigned"}
+{"id":"a11","seat":"Exedore 2 - Max","task":"task of a11 (line 29)","state":"done","note":"note of a11 (line 29)","learned":"learned of a11 (line 29)"}
+{"id":"a13","seat":"Exedore 1 - Max","task":"task of a13 (line 30)","state":"done","note":"note of a13 (line 30)","learned":"learned of a13 (line 30)"}
+{"id":"a14","seat":"Exedore 2 - Max","assigned":"2026-11-15T21:41Z","task":"task of a14 (line 31)","done_when":"done_when of a14 (line 31)","check_after":"2026-11-15T22:11Z","state":"assigned"}
+{"id":"a14","seat":"Exedore 2 - Max","task":"task of a14 (line 32)","state":"done","note":"note of a14 (line 32)","learned":"learned of a14 (line 32)"}
+{"id":"a6","state":"done","memorized":true}
+{"id":"a7","state":"done","memorized":true}
+{"id":"a8","state":"done","memorized":true}
+{"id":"a9","state":"done","memorized":true}
+{"id":"a10","state":"done","memorized":true}
+{"id":"a11","state":"done","memorized":true}
+{"id":"a12","state":"done","memorized":true}
+{"id":"a13","state":"done","memorized":true}
+{"id":"a15","seat":"Exedore 2 - Max","assigned":"2026-11-15T22:46Z","task":"task of a15 (line 41)","done_when":"done_when of a15 (line 41)","check_after":"2026-11-15T23:46Z","state":"assigned"}
+{"id":"a15","seat":"Exedore 2 - Max","task":"task of a15 (line 42)","state":"done","note":"note of a15 (line 42)","learned":"learned of a15 (line 42)"}
+{"id":"a16","seat":"Exedore 4 - Max","assigned":"2026-11-15T23:02Z","task":"task of a16 (line 43)","done_when":"done_when of a16 (line 43)","check_after":"2026-11-15T23:47Z","state":"assigned"}
+{"id":"a16","seat":"Exedore 4 - Max","task":"task of a16 (line 44)","state":"done","note":"note of a16 (line 44)","learned":"learned of a16 (line 44)"}
+{"id":"a15","state":"done","memorized":true}
+{"id":"a16","state":"done","memorized":true}
+{"id":"a17","seat":"Exedore 2 - Max","assigned":"2026-11-16T00:00Z","task":"task of a17 (line 47)","done_when":"done_when of a17 (line 47)","check_after":"2026-11-16T01:00Z","state":"assigned"}
+{"id":"a18","seat":"Exedore 3 - Max","assigned":"2026-11-16T00:00Z","task":"task of a18 (line 48)","done_when":"done_when of a18 (line 48)","check_after":"2026-11-16T01:00Z","state":"assigned"}
+{"id":"a19","seat":"Exedore 1 - Max","assigned":"2026-11-16T00:00Z","task":"task of a19 (line 49)","done_when":"done_when of a19 (line 49)","check_after":"2026-11-16T01:30Z","state":"assigned"}
+{"id":"a20","seat":"Exedore 4 - Max","assigned":"2026-11-16T00:00Z","task":"task of a20 (line 50)","done_when":"done_when of a20 (line 50)","check_after":"2026-11-16T02:00Z","state":"assigned"}
+{"id":"a17","seat":"Exedore 2 - Max","state":"working","note":"note of a17 (line 51)","check_after":"2026-11-16T02:00Z"}
+{"id":"a18","seat":"Exedore 3 - Max","state":"working","note":"note of a18 (line 52)","check_after":"2026-11-16T02:00Z"}
+{"id":"a19","seat":"Exedore 1 - Max","state":"working","note":"note of a19 (line 53)","check_after":"2026-11-16T02:30Z"}
+{"id":"a20","seat":"Exedore 4 - Max","state":"working","note":"note of a20 (line 54)","check_after":"2026-11-16T01:45Z"}
+{"id":"a17","seat":"Exedore 2 - Max","task":"task of a17 (line 55)","state":"abandoned","note":"note of a17 (line 55)","learned":"learned of a17 (line 55)"}
+{"id":"a19","seat":"Exedore 1 - Max","state":"working","note":"note of a19 (line 56)"}
+{"id":"a21","seat":"Exedore 2 - Max","assigned":"2026-11-16T01:25Z","task":"task of a21 (line 57)","done_when":"done_when of a21 (line 57)","check_after":"2026-11-16T02:10Z","state":"assigned"}
+{"id":"a20","seat":"Exedore 4 - Max","state":"working","note":"note of a20 (line 58)","check_after":"2026-11-16T02:00Z"}
+{"id":"a19","seat":"Exedore 1 - Max","state":"working","note":"note of a19 (line 59)","check_after":"2026-11-16T02:00Z"}
+{"id":"a21","seat":"Exedore 2 - Max","task":"task of a21 (line 60)","state":"done","note":"note of a21 (line 60)","learned":"learned of a21 (line 60)"}
+{"id":"a18","seat":"Exedore 3 - Max","state":"working","note":"note of a18 (line 61)","check_after":"2026-11-16T02:45Z"}
+{"id":"a19","seat":"Exedore 1 - Max","task":"task of a19 (line 62)","state":"done","note":"note of a19 (line 62)","learned":"learned of a19 (line 62)"}
+{"id":"a22","seat":"Exedore 1 - Max","assigned":"2026-11-16T01:50Z","task":"task of a22 (line 63)","done_when":"done_when of a22 (line 63)","check_after":"2026-11-16T02:50Z","state":"assigned"}
+{"id":"a20","seat":"Exedore 4 - Max","state":"working","note":"note of a20 (line 64)","check_after":"2026-11-16T02:15Z"}
+{"id":"a18","seat":"Exedore 3 - Max","state":"working","note":"note of a18 (line 65)","check_after":"2026-11-16T02:15Z"}
+{"id":"a18","seat":"Exedore 3 - Max","task":"task of a18 (line 66)","state":"done","note":"note of a18 (line 66)","learned":"learned of a18 (line 66)"}
+{"id":"a23","seat":"Exedore 2 - Max","assigned":"2026-11-16T01:55Z","task":"task of a23 (line 67)","done_when":"done_when of a23 (line 67)","check_after":"2026-11-16T02:40Z","state":"assigned"}
+{"id":"a23","seat":"Exedore 2 - Max","task":"task of a23 (line 68)","state":"done","note":"note of a23 (line 68)","learned":"learned of a23 (line 68)"}
+{"id":"a24","seat":"Exedore 3 - Max","assigned":"2026-11-16T02:05Z","task":"task of a24 (line 69)","done_when":"done_when of a24 (line 69)","check_after":"2026-11-16T02:50Z","state":"assigned"}
+{"id":"a20","seat":"Exedore 4 - Max","state":"working","note":"note of a20 (line 70)","check_after":"2026-11-16T02:20Z"}
+{"id":"a22","seat":"Exedore 1 - Max","state":"working","note":"note of a22 (line 71)","check_after":"2026-11-16T02:20Z"}
+{"id":"a24","seat":"Exedore 3 - Max","state":"working","note":"note of a24 (line 72)","check_after":"2026-11-16T02:30Z"}
+{"id":"a24","seat":"Exedore 3 - Max","task":"task of a24 (line 73)","state":"done","note":"note of a24 (line 73)","learned":"learned of a24 (line 73)"}
+{"id":"a25","seat":"Exedore 3 - Max","assigned":"2026-11-16T02:25Z","task":"task of a25 (line 74)","done_when":"done_when of a25 (line 74)","check_after":"2026-11-16T03:10Z","state":"assigned"}
+{"id":"a25","seat":"Exedore 3 - Max","state":"assigned","note":"note of a25 (line 75)"}
+{"id":"a20","seat":"Exedore 4 - Max","task":"task of a20 (line 76)","state":"done","note":"note of a20 (line 76)","learned":"learned of a20 (line 76)"}
+{"id":"a26","seat":"Exedore 2 - Max","assigned":"2026-11-16T02:35Z","task":"task of a26 (line 77)","done_when":"done_when of a26 (line 77)","check_after":"2026-11-16T03:20Z","state":"assigned"}
+{"id":"a26","seat":"Exedore 2 - Max","task":"task of a26 (line 78)","state":"done","note":"note of a26 (line 78)","learned":"learned of a26 (line 78)"}
+{"id":"a27","seat":"Exedore 4 - Max","assigned":"2026-11-16T02:45Z","task":"task of a27 (line 79)","done_when":"done_when of a27 (line 79)","check_after":"2026-11-16T03:30Z","state":"assigned"}
+{"id":"a25","seat":"Exedore 3 - Max","state":"assigned","note":"note of a25 (line 80)","check_after":"2026-11-16T03:05Z"}
+{"id":"a22","seat":"Exedore 1 - Max","state":"working","note":"note of a22 (line 81)"}
+{"id":"a28","seat":"Exedore 2 - Max","assigned":"2026-11-16T02:20Z","task":"task of a28 (line 82)","done_when":"done_when of a28 (line 82)","check_after":"2026-11-16T03:05Z","state":"assigned"}
+{"id":"a28","seat":"Exedore 2 - Max","task":"task of a28 (line 83)","state":"done","note":"note of a28 (line 83)","learned":"learned of a28 (line 83)"}
+{"id":"a22","seat":"Exedore 1 - Max","task":"task of a22 (line 84)","state":"done","note":"note of a22 (line 84)","learned":"learned of a22 (line 84)"}
+{"id":"a25","seat":"Exedore 2 - Max","state":"assigned","note":"note of a25 (line 85)","check_after":"2026-11-16T03:20Z"}
+{"id":"a22","seat":"Exedore 1 - Max","task":"task of a22 (line 86)","state":"done","note":"note of a22 (line 86)","learned":"learned of a22 (line 86)"}
+{"id":"a29","seat":"Exedore 3 - Max","assigned":"2026-11-16T02:45Z","task":"task of a29 (line 87)","done_when":"done_when of a29 (line 87)","check_after":"2026-11-16T03:30Z","state":"assigned"}
+{"id":"a25","seat":"Exedore 2 - Max","task":"task of a25 (line 88)","state":"done","note":"note of a25 (line 88)","learned":"learned of a25 (line 88)"}
+{"id":"a25","state":"done","note":"note of a25 (line 89)"}
+{"id":"a27","seat":"Exedore 4 - Max","state":"working","note":"note of a27 (line 90)","check_after":"2026-11-16T03:10Z"}
+{"id":"a29","seat":"Exedore 3 - Max","state":"working","note":"note of a29 (line 91)","check_after":"2026-11-16T03:15Z"}
+{"id":"a30","seat":"Dolza 1 - Max","assigned":"2026-11-16T02:50Z","task":"task of a30 (line 92)","done_when":"done_when of a30 (line 92)","check_after":"2026-11-16T03:35Z","state":"assigned"}
+{"id":"a29","seat":"Exedore 3 - Max","task":"task of a29 (line 93)","state":"done","note":"note of a29 (line 93)","learned":"learned of a29 (line 93)"}
+{"id":"a31","seat":"Exedore 1 - Max","assigned":"2026-11-16T03:05Z","task":"task of a31 (line 94)","done_when":"done_when of a31 (line 94)","check_after":"2026-11-16T04:30Z","state":"assigned"}
+{"id":"a27","seat":"Exedore 4 - Max","state":"done","at":"2026-11-16T02:52Z","result":"result of a27 (line 95)","learned":"learned of a27 (line 95)"}
+{"id":"a32","seat":"Exedore 2 - Max","assigned":"2026-11-16T02:55Z","task":"task of a32 (line 96)","done_when":"done_when of a32 (line 96)","check_after":"2026-11-16T03:30Z","state":"assigned"}
+{"id":"a32","seat":"Exedore 2 - Max","state":"done","at":"2026-11-16T03:05Z","result":"result of a32 (line 97)","learned":"learned of a32 (line 97)"}
+{"id":"a30","seat":"Dolza 1 - Max","state":"done","at":"2026-11-16T03:20Z","result":"result of a30 (line 98)","learned":"learned of a30 (line 98)"}
+{"id":"a33","seat":"Dolza 1 - Max","assigned":"2026-11-16T03:25Z","task":"task of a33 (line 99)","done_when":"done_when of a33 (line 99)","check_after":"2026-11-16T04:15Z","state":"assigned"}
+{"id":"a34","seat":"Dolza 3 - Max","assigned":"2026-11-16T03:25Z","task":"task of a34 (line 100)","done_when":"done_when of a34 (line 100)","check_after":"2026-11-16T04:00Z","state":"assigned"}
+{"id":"a35","seat":"Dolza 2 - Max","assigned":"2026-11-16T03:25Z","task":"task of a35 (line 101)","done_when":"done_when of a35 (line 101)","check_after":"2026-11-16T04:00Z","state":"assigned"}
+{"id":"a35","seat":"Dolza 2 - Max","state":"abandoned","at":"2026-11-16T03:30Z","result":"result of a35 (line 102)","learned":"learned of a35 (line 102)"}
+{"id":"a34","seat":"Dolza 3 - Max","state":"done","at":"2026-11-16T03:15Z","result":"result of a34 (line 103)","learned":"learned of a34 (line 103)"}
+{"id":"a36","seat":"Dolza 1 - Max","assigned":"2026-11-16T03:15Z","task":"task of a36 (line 104)","done_when":"done_when of a36 (line 104)","check_after":"2026-11-16T04:45Z","state":"assigned"}
+{"id":"a33","seat":"Dolza 1 - Max","state":"done","at":"2026-11-16T03:52Z","result":"result of a33 (line 105)","learned":"learned of a33 (line 105)"}
+{"id":"a36","seat":"Dolza 1 - Max","state":"done","at":"2026-11-16T04:22Z","result":"result of a36 (line 106)","learned":"learned of a36 (line 106)"}
+{"id":"a37","seat":"Dolza 3 - Max","assigned":"2026-11-16T04:23Z","task":"task of a37 (line 107)","done_when":"done_when of a37 (line 107)","check_after":"2026-11-16T05:00Z","state":"assigned"}
+{"id":"a37","seat":"Dolza 3 - Max","state":"done","at":"2026-11-16T04:40Z","result":"result of a37 (line 108)","learned":"learned of a37 (line 108)"}
+{"id":"a38","seat":"Dolza 1 - Max","assigned":"2026-11-16T04:42Z","task":"task of a38 (line 109)","done_when":"done_when of a38 (line 109)","check_after":"2026-11-16T05:30Z","state":"assigned"}
+{"id":"a31","seat":"Exedore 1 - Max","state":"working","at":"2026-11-16T04:50Z","note":"note of a31 (line 110)","check_after":"2026-11-16T06:30Z"}
+{"id":"a38","seat":"Dolza 1 - Max","state":"done","at":"2026-11-16T05:00Z","result":"result of a38 (line 111)","learned":"learned of a38 (line 111)"}
+{"id":"a31","seat":"Exedore 1 - Max","state":"working","at":"2026-11-16T05:40Z","note":"note of a31 (line 112)","learned":"learned of a31 (line 112)","check_after":"2026-11-16T06:15Z"}
+{"id":"a31","seat":"Exedore 1 - Max","state":"working","at":"2026-11-16T06:25Z","note":"note of a31 (line 113)","check_after":"2026-11-16T07:15Z"}
+{"id":"a31","seat":"Exedore 1 - Max","state":"done","at":"2026-11-16T07:55Z","result":"result of a31 (line 114)","learned":"learned of a31 (line 114)"}
+{"id":"a39","seat":"Dolza 3 - Max","assigned":"2026-11-16T07:56Z","task":"task of a39 (line 115)","done_when":"done_when of a39 (line 115)","check_after":"2026-11-16T08:40Z","state":"assigned"}
+{"id":"a39","seat":"Dolza 3 - Max","state":"done","at":"2026-11-16T08:30Z","result":"result of a39 (line 116)","learned":"learned of a39 (line 116)"}
+{"id":"a40","seat":"Exedore 1 - Max","assigned":"2026-11-16T08:31Z","task":"task of a40 (line 117)","done_when":"done_when of a40 (line 117)","check_after":"2026-11-16T09:30Z","state":"assigned"}
+{"id":"a40","seat":"Exedore 1 - Max","state":"done","at":"2026-11-16T08:45Z","result":"result of a40 (line 118)","learned":"learned of a40 (line 118)"}
+{"id":"a41","seat":"Dolza 3 - Max","assigned":"2026-11-16T08:46Z","task":"task of a41 (line 119)","done_when":"done_when of a41 (line 119)","check_after":"2026-11-16T09:20Z","state":"assigned"}
+{"id":"a41","seat":"Dolza 3 - Max","state":"done","at":"2026-11-16T08:50Z","result":"result of a41 (line 120)","learned":"learned of a41 (line 120)"}
+{"id":"a42","seat":"Exedore 1 - Max","assigned":"2026-11-16T08:51Z","task":"task of a42 (line 121)","done_when":"done_when of a42 (line 121)","check_after":"2026-11-16T09:45Z","state":"assigned"}
+{"id":"a42","seat":"Exedore 1 - Max","state":"done","at":"2026-11-16T09:25Z","result":"result of a42 (line 122)","learned":"learned of a42 (line 122)"}
+{"id":"a43","seat":"Dolza 3 - Max","assigned":"2026-11-16T09:26Z","task":"task of a43 (line 123)","done_when":"done_when of a43 (line 123)","check_after":"2026-11-16T10:00Z","state":"assigned"}
+{"id":"a43","seat":"Dolza 3 - Max","state":"done","at":"2026-11-16T09:50Z","result":"result of a43 (line 124)","learned":"learned of a43 (line 124)"}
+{"id":"a44","seat":"Exedore 1 - Max","assigned":"2026-11-16T09:51Z","task":"task of a44 (line 125)","done_when":"done_when of a44 (line 125)","check_after":"2026-11-16T10:40Z","state":"assigned"}
+{"id":"a44","seat":"Exedore 1 - Max","state":"done","at":"2026-11-16T10:00Z","result":"result of a44 (line 126)","learned":"learned of a44 (line 126)"}
+{"id":"a45","seat":"Exedore 1 - Max","assigned":"2026-11-16T10:02Z","task":"task of a45 (line 127)","done_when":"done_when of a45 (line 127)","check_after":"2026-11-16T11:30Z","state":"assigned"}
+{"id":"a45","seat":"Exedore 1 - Max","state":"working","at":"2026-11-16T10:45Z","note":"note of a45 (line 128)","learned":"learned of a45 (line 128)","check_after":"2026-11-16T11:45Z"}
+{"id":"a45","seat":"Exedore 1 - Max","state":"done","at":"2026-11-16T11:40Z","result":"result of a45 (line 129)","learned":"learned of a45 (line 129)"}
+{"id":"a14","memorized":true,"at":"2026-11-16T11:55Z"}
+{"id":"a17","memorized":true,"at":"2026-11-16T11:55Z"}
+{"id":"a18","memorized":true,"at":"2026-11-16T11:55Z"}
+{"id":"a19","memorized":true,"at":"2026-11-16T11:55Z"}
+{"id":"a20","memorized":true,"at":"2026-11-16T11:55Z"}
+{"id":"a21","memorized":true,"at":"2026-11-16T11:55Z"}
+{"id":"a22","memorized":true,"at":"2026-11-16T11:55Z"}
+{"id":"a23","memorized":true,"at":"2026-11-16T11:55Z"}
+{"id":"a24","memorized":true,"at":"2026-11-16T11:55Z"}
+{"id":"a25","memorized":true,"at":"2026-11-16T11:55Z"}
+{"id":"a26","memorized":true,"at":"2026-11-16T11:55Z"}
+{"id":"a27","memorized":true,"at":"2026-11-16T11:55Z"}
+{"id":"a28","memorized":true,"at":"2026-11-16T11:55Z"}
+{"id":"a29","memorized":true,"at":"2026-11-16T11:55Z"}
+{"id":"a30","memorized":true,"at":"2026-11-16T11:55Z"}
+{"id":"a31","memorized":true,"at":"2026-11-16T11:55Z"}
+{"id":"a32","memorized":true,"at":"2026-11-16T11:55Z"}
+{"id":"a33","memorized":true,"at":"2026-11-16T11:55Z"}
+{"id":"a34","memorized":true,"at":"2026-11-16T11:55Z"}
+{"id":"a35","memorized":true,"at":"2026-11-16T11:55Z"}
+{"id":"a36","memorized":true,"at":"2026-11-16T11:55Z"}
+{"id":"a37","memorized":true,"at":"2026-11-16T11:55Z"}
+{"id":"a38","memorized":true,"at":"2026-11-16T11:55Z"}
+{"id":"a39","memorized":true,"at":"2026-11-16T11:55Z"}
+{"id":"a40","memorized":true,"at":"2026-11-16T11:55Z"}
+{"id":"a41","memorized":true,"at":"2026-11-16T11:55Z"}
+{"id":"a42","memorized":true,"at":"2026-11-16T11:55Z"}
+{"id":"a43","memorized":true,"at":"2026-11-16T11:55Z"}
+{"id":"a44","memorized":true,"at":"2026-11-16T11:55Z"}
+{"id":"a45","memorized":true,"at":"2026-11-16T11:55Z"}
+{"id":"a46","seat":"Dolza 1 - Max","assigned":"2026-11-16T15:35Z","task":"task of a46 (line 160)","done_when":"done_when of a46 (line 160)","check_after":"2026-11-16T16:30Z","state":"assigned"}
+{"id":"a46","state":"working","at":"2026-11-16T20:33Z","check_after":"2026-11-16T21:20Z","note":"note of a46 (line 161)"}
+{"id":"a47","seat":"Exedore 1 - Max","assigned":"2026-11-16T20:55Z","task":"task of a47 (line 162)","done_when":"done_when of a47 (line 162)","check_after":"2026-11-16T22:00Z","state":"assigned"}
+{"id":"a46","seat":"Dolza 1 - Max","state":"done","at":"2026-11-16T21:00Z","result":"result of a46 (line 163)","learned":"learned of a46 (line 163)"}
+{"id":"a47","state":"working","at":"2026-11-16T21:10Z","note":"note of a47 (line 164)","check_after":"2026-11-16T22:15Z"}
+{"id":"a48","seat":"Dolza 3 - Max","assigned":"2026-11-16T21:10Z","task":"task of a48 (line 165)","done_when":"done_when of a48 (line 165)","check_after":"2026-11-16T22:30Z","state":"assigned"}
+{"id":"a47","seat":"Exedore 1 - Max","state":"done","at":"2026-11-16T21:50Z","result":"result of a47 (line 166)","learned":"learned of a47 (line 166)"}
+{"id":"a48","state":"working","at":"2026-11-16T21:50Z","note":"note of a48 (line 167)","check_after":"2026-11-16T22:45Z"}
+{"id":"a49","seat":"Dolza 2 - Max","assigned":"2026-11-16T21:50Z","task":"task of a49 (line 168)","done_when":"done_when of a49 (line 168)","check_after":"2026-11-16T22:20Z","state":"assigned"}
+{"id":"a50","seat":"Exedore 2 - Max","assigned":"2026-11-16T21:50Z","task":"task of a50 (line 169)","done_when":"done_when of a50 (line 169)","check_after":"2026-11-16T22:30Z","state":"assigned"}
+{"id":"a51","seat":"Dolza 4 - Max","assigned":"2026-11-16T21:52Z","task":"task of a51 (line 170)","done_when":"done_when of a51 (line 170)","check_after":"2026-11-16T22:15Z","state":"assigned"}
+{"id":"a51","state":"blocked","at":"2026-11-16T21:55Z","note":"note of a51 (line 171)","learned":"learned of a51 (line 171)"}
+{"id":"a49","seat":"Dolza 2 - Max","state":"done","at":"2026-11-16T22:00Z","result":"result of a49 (line 172)","learned":"learned of a49 (line 172)"}
+{"id":"a51","state":"abandoned","at":"2026-11-16T22:00Z","note":"note of a51 (line 173)","learned":"learned of a51 (line 173)"}
+{"id":"a48","state":"working","at":"2026-11-16T22:00Z","note":"note of a48 (line 174)","check_after":"2026-11-16T23:00Z"}
+{"id":"a50","seat":"Exedore 2 - Max","state":"done","at":"2026-11-16T22:05Z","result":"result of a50 (line 175)","learned":"learned of a50 (line 175)"}
+{"id":"a52","seat":"Exedore 1 - Max","assigned":"2026-11-16T22:05Z","task":"task of a52 (line 176)","done_when":"done_when of a52 (line 176)","check_after":"2026-11-16T23:15Z","state":"assigned"}
+{"id":"a51","state":"done","at":"2026-11-16T22:15Z","note":"note of a51 (line 177)"}
+{"id":"a52","seat":"Exedore 1 - Max","state":"done","at":"2026-11-16T22:25Z","result":"result of a52 (line 178)","learned":"learned of a52 (line 178)"}
+{"id":"a53","seat":"Exedore 2 - Max","assigned":"2026-11-16T22:25Z","task":"task of a53 (line 179)","done_when":"done_when of a53 (line 179)","check_after":"2026-11-16T23:00Z","state":"assigned"}
+{"id":"a53","seat":"Exedore 2 - Max","state":"done","at":"2026-11-16T22:40Z","result":"result of a53 (line 180)","learned":"learned of a53 (line 180)"}
+{"id":"a54","seat":"Exedore 1 - Max","assigned":"2026-11-16T22:40Z","task":"task of a54 (line 181)","done_when":"done_when of a54 (line 181)","check_after":"2026-11-16T23:45Z","state":"assigned"}
+{"id":"a55","seat":"Exedore 3 - Max","mode":"auto","assigned":"2026-11-16T22:55Z","task":"task of a55 (line 182)","done_when":"done_when of a55 (line 182)","check_after":"2026-11-17T00:00Z","state":"assigned"}
+{"id":"a48","seat":"Dolza 3 - Max","state":"done","at":"2026-11-16T22:58Z","result":"result of a48 (line 183)","learned":"learned of a48 (line 183)"}
+{"id":"a56","seat":"Dolza 1 - Vertex","mode":"manual","assigned":"2026-11-16T22:40Z","task":"task of a56 (line 184)","done_when":"done_when of a56 (line 184)","state":"working"}
+{"id":"a55","seat":"Exedore 3 - Max","state":"done","at":"2026-11-16T22:43Z","result":"result of a55 (line 185)","learned":"learned of a55 (line 185)"}
+{"id":"a57","seat":"Dolza 2 - Max","mode":"auto","assigned":"2026-11-16T22:43Z","task":"task of a57 (line 186)","done_when":"done_when of a57 (line 186)","check_after":"2026-11-16T23:23Z","state":"assigned"}
+{"id":"a57","seat":"Dolza 2 - Max","state":"done","at":"2026-11-16T22:45Z","result":"result of a57 (line 187)","learned":"learned of a57 (line 187)"}
+{"id":"a58","seat":"Exedore 3 - Max","mode":"auto","assigned":"2026-11-16T22:45Z","task":"task of a58 (line 188)","done_when":"done_when of a58 (line 188)","check_after":"2026-11-16T23:30Z","state":"assigned"}
+{"id":"a56","state":"done","at":"2026-11-16T22:48Z","result":"result of a56 (line 189)"}
+{"id":"a59","seat":"Dolza 2 - Vertex","mode":"manual","assigned":"2026-11-16T22:49Z","task":"task of a59 (line 190)","done_when":"done_when of a59 (line 190)","state":"working","note":"note of a59 (line 190)"}
+{"id":"a58","seat":"Exedore 3 - Max","state":"done","at":"2026-11-16T22:51Z","result":"result of a58 (line 191)","learned":"learned of a58 (line 191)"}
+{"id":"a60","seat":"Dolza 2 - Max","mode":"auto","assigned":"2026-11-16T22:51Z","task":"task of a60 (line 192)","done_when":"done_when of a60 (line 192)","check_after":"2026-11-16T23:21Z","state":"assigned"}
+{"id":"a60","seat":"Dolza 2 - Max","state":"done","at":"2026-11-16T22:52Z","result":"result of a60 (line 193)","learned":"learned of a60 (line 193)"}
+{"id":"a48","state":"wrapping","mode":"auto","at":"2026-11-16T22:55Z","note":"note of a48 (line 194)"}
+{"id":"a58","state":"wrapping","mode":"auto","at":"2026-11-16T22:55Z","note":"note of a58 (line 195)"}
+{"id":"a60","state":"wrapping","mode":"auto","at":"2026-11-16T22:55Z","note":"note of a60 (line 196)"}
+{"id":"a58","seat":"Exedore 3 - Max","state":"done","at":"2026-11-16T22:56Z","result":"result of a58 (line 197)"}
+{"id":"a48","seat":"Dolza 3 - Max","state":"wrapping","at":"2026-11-16T22:56Z","note":"note of a48 (line 198)"}
+{"id":"a60","seat":"Dolza 2 - Max","state":"wrapping","at":"2026-11-16T22:56Z","note":"note of a60 (line 199)"}
+{"id":"a61","seat":"Exedore 3 - Max","mode":"auto","assigned":"2026-11-16T22:56Z","task":"task of a61 (line 200)","done_when":"done_when of a61 (line 200)","check_after":"2026-11-16T23:36Z","state":"assigned"}
+{"id":"a48","seat":"Dolza 3 - Max","state":"done","at":"2026-11-16T22:57Z","result":"result of a48 (line 201)"}
+{"id":"a60","seat":"Dolza 2 - Max","state":"done","at":"2026-11-16T22:57Z","result":"result of a60 (line 202)"}
+{"id":"a53","seat":"Exedore 2 - Max","state":"wrapping","mode":"auto","at":"2026-11-16T23:03Z","note":"note of a53 (line 203)"}
+{"id":"a54","state":"working","at":"2026-11-16T23:03Z","note":"note of a54 (line 204)","check_after":"2026-11-16T23:33Z"}
+{"id":"a53","seat":"Exedore 2 - Max","state":"done","at":"2026-11-16T23:04Z","result":"result of a53 (line 205)"}
+{"id":"a62","seat":"Exedore 2 - Max","mode":"auto","assigned":"2026-11-16T23:09Z","task":"task of a62 (line 206)","done_when":"done_when of a62 (line 206)","check_after":"2026-11-17T01:09Z","state":"assigned"}
+{"id":"a63","seat":"Exedore 4 - Max","mode":"auto","assigned":"2026-11-16T23:09Z","task":"task of a63 (line 207)","done_when":"done_when of a63 (line 207)","check_after":"2026-11-17T01:09Z","state":"assigned"}
+{"id":"a54","at":"2026-11-16T23:11Z","note":"note of a54 (line 208)"}
+{"id":"a64","seat":"Dolza 3 - Max","mode":"auto","assigned":"2026-11-16T23:12Z","task":"task of a64 (line 209)","done_when":"done_when of a64 (line 209)","check_after":"2026-11-17T01:12Z","state":"assigned"}
+{"id":"a59","at":"2026-11-16T23:14Z","state":"working","note":"note of a59 (line 210)"}
+{"id":"a59","at":"2026-11-16T23:17Z","state":"working","note":"note of a59 (line 211)"}
+{"id":"a61","seat":"Exedore 3 - Max","state":"done","at":"2026-11-16T23:17Z","result":"result of a61 (line 212)","learned":"learned of a61 (line 212)"}
+{"id":"a65","seat":"Dolza 4 - Max","mode":"auto","assigned":"2026-11-16T23:17Z","task":"task of a65 (line 213)","done_when":"done_when of a65 (line 213)","check_after":"2026-11-16T23:47Z","state":"assigned"}
+{"id":"a66","seat":"Dolza 1 - Max","mode":"auto","assigned":"2026-11-16T23:19Z","task":"task of a66 (line 214)","done_when":"done_when of a66 (line 214)","check_after":"2026-11-17T00:49Z","state":"assigned"}
+{"id":"a59","mode":"auto","at":"2026-11-16T23:20Z","state":"wrapping","note":"note of a59 (line 215)"}
+{"id":"a65","seat":"Dolza 4 - Max","at":"2026-11-16T23:20Z","state":"assigned","note":"note of a65 (line 216)"}
+{"id":"a54","at":"2026-11-16T23:20Z","note":"note of a54 (line 217)"}
+{"id":"a65","seat":"Dolza 4 - Max","state":"done","at":"2026-11-16T23:20Z","result":"result of a65 (line 218)","learned":"learned of a65 (line 218)"}
+{"id":"a67","seat":"Exedore 3 - Max","mode":"auto","assigned":"2026-11-16T23:20Z","task":"task of a67 (line 219)","done_when":"done_when of a67 (line 219)","check_after":"2026-11-17T00:00Z","state":"assigned"}
+{"id":"a59","at":"2026-11-16T23:23Z","state":"blocked","mode":"auto","note":"note of a59 (line 220)","learned":"learned of a59 (line 220)"}
+{"id":"a54","seat":"Exedore 1 - Max","state":"done","at":"2026-11-16T23:24Z","result":"result of a54 (line 221)","learned":"learned of a54 (line 221)"}
+{"id":"a68","seat":"Exedore 1 - Max","mode":"auto","assigned":"2026-11-16T23:24Z","task":"task of a68 (line 222)","done_when":"done_when of a68 (line 222)","check_after":"2026-11-17T01:24Z","state":"working"}
+{"id":"a59","at":"2026-11-16T23:26Z","state":"working","mode":"auto","note":"note of a59 (line 223)"}
+{"id":"a59","at":"2026-11-16T23:30Z","state":"working","note":"note of a59 (line 224)","learned":"learned of a59 (line 224)"}
+{"id":"a66","seat":"Dolza 1 - Max","state":"done","at":"2026-11-16T23:31Z","result":"result of a66 (line 225)","learned":"learned of a66 (line 225)"}
+{"id":"a69","seat":"Dolza 2 - Max","mode":"auto","assigned":"2026-11-16T23:31Z","task":"task of a69 (line 226)","done_when":"done_when of a69 (line 226)","check_after":"2026-11-17T00:11Z","state":"assigned"}
+{"id":"a59","at":"2026-11-16T23:31Z","state":"working","note":"note of a59 (line 227)"}
+{"id":"a67","seat":"Exedore 3 - Max","state":"done","at":"2026-11-16T23:34Z","result":"result of a67 (line 228)","learned":"learned of a67 (line 228)"}
+{"id":"a70","seat":"Dolza 4 - Max","mode":"auto","assigned":"2026-11-16T23:34Z","task":"task of a70 (line 229)","done_when":"done_when of a70 (line 229)","check_after":"2026-11-17T00:04Z","state":"assigned"}
+{"id":"a63","seat":"Exedore 4 - Max","state":"done","at":"2026-11-16T23:36Z","result":"result of a63 (line 230)","learned":"learned of a63 (line 230)"}
+{"id":"a71","seat":"Exedore 3 - Max","mode":"auto","assigned":"2026-11-16T23:36Z","task":"task of a71 (line 231)","done_when":"done_when of a71 (line 231)","check_after":"2026-11-17T00:36Z","state":"assigned"}
+{"id":"a67","at":"2026-11-16T23:36Z","note":"note of a67 (line 232)"}
+{"id":"a59","seat":"Dolza 2 - Vertex","state":"wrapping","at":"2026-11-16T23:37Z","result":"result of a59 (line 233)","learned":"learned of a59 (line 233)"}
+{"id":"a69","seat":"Dolza 2 - Max","state":"done","at":"2026-11-16T23:37Z","result":"result of a69 (line 234)","learned":"learned of a69 (line 234)"}
+{"id":"a72","seat":"Dolza 1 - Max","mode":"auto","assigned":"2026-11-16T23:37Z","task":"task of a72 (line 235)","done_when":"done_when of a72 (line 235)","check_after":"2026-11-17T00:22Z","state":"assigned"}
+{"id":"a59","seat":"Dolza 2 - Vertex","state":"done","at":"2026-11-16T23:39Z","result":"result of a59 (line 236)"}
+{"id":"a70","seat":"Dolza 4 - Max","state":"done","at":"2026-11-16T23:39Z","result":"result of a70 (line 237)","learned":"learned of a70 (line 237)"}
+{"id":"a67","state":"done","at":"2026-11-16T23:39Z","result":"result of a67 (line 238)"}
+{"id":"a73","seat":"Exedore 4 - Max","mode":"auto","assigned":"2026-11-16T23:39Z","task":"task of a73 (line 239)","done_when":"done_when of a73 (line 239)","check_after":"2026-11-17T00:19Z","state":"assigned"}
+{"id":"a72","seat":"Dolza 1 - Max","state":"done","at":"2026-11-16T23:43Z","result":"result of a72 (line 240)","learned":"learned of a72 (line 240)"}
+{"id":"a74","seat":"Dolza 2 - Max","mode":"auto","assigned":"2026-11-16T23:43Z","task":"task of a74 (line 241)","done_when":"done_when of a74 (line 241)","check_after":"2026-11-17T00:13Z","state":"assigned","note":"note of a74 (line 241)"}
+{"id":"a71","seat":"Exedore 3 - Max","state":"done","at":"2026-11-16T23:48Z","result":"result of a71 (line 242)","learned":"learned of a71 (line 242)"}
+{"id":"a74","seat":"Dolza 2 - Max","state":"done","at":"2026-11-16T23:48Z","result":"result of a74 (line 243)"}
+{"id":"a75","seat":"Dolza 1 - Max","mode":"auto","assigned":"2026-11-16T23:48Z","task":"task of a75 (line 244)","done_when":"done_when of a75 (line 244)","check_after":"2026-11-17T00:48Z","state":"assigned"}
+{"id":"a63","at":"2026-11-16T23:48Z","note":"note of a63 (line 245)"}
+{"id":"a73","seat":"Exedore 4 - Max","state":"done","at":"2026-11-16T23:57Z","result":"result of a73 (line 246)"}
+{"id":"a76","seat":"Dolza 4 - Max","mode":"auto","assigned":"2026-11-16T23:57Z","task":"task of a76 (line 247)","done_when":"done_when of a76 (line 247)","check_after":"2026-11-17T00:27Z","state":"assigned"}
+{"id":"a64","seat":"Dolza 3 - Max","state":"blocked","at":"2026-11-16T23:58Z","note":"note of a64 (line 248)","learned":"learned of a64 (line 248)"}
+{"id":"a76","seat":"Dolza 4 - Max","state":"done","at":"2026-11-16T23:58Z","result":"result of a76 (line 249)","learned":"learned of a76 (line 249)"}
+{"id":"a77","seat":"Exedore 4 - Max","mode":"auto","assigned":"2026-11-16T23:58Z","task":"task of a77 (line 250)","done_when":"done_when of a77 (line 250)","check_after":"2026-11-17T00:38Z","state":"assigned"}
+{"id":"a68","at":"2026-11-17T00:03Z","note":"note of a68 (line 251)"}
+{"id":"a62","at":"2026-11-17T00:03Z","note":"note of a62 (line 252)"}
+{"id":"a78","seat":"Exedore 3 - Max","mode":"auto","assigned":"2026-11-17T00:03Z","task":"task of a78 (line 253)","done_when":"done_when of a78 (line 253)","check_after":"2026-11-17T01:03Z","state":"assigned"}
+{"id":"a77","seat":"Exedore 4 - Max","state":"done","at":"2026-11-17T00:03Z","result":"result of a77 (line 254)","learned":"learned of a77 (line 254)"}
+{"id":"a79","seat":"Dolza 4 - Max","mode":"auto","assigned":"2026-11-17T00:03Z","task":"task of a79 (line 255)","done_when":"done_when of a79 (line 255)","check_after":"2026-11-17T00:33Z","state":"assigned"}
+{"id":"a79","seat":"Dolza 4 - Max","state":"done","at":"2026-11-17T00:04Z","result":"result of a79 (line 256)","learned":"learned of a79 (line 256)"}
+{"id":"a68","seat":"Exedore 1 - Max","state":"done","at":"2026-11-17T00:05Z","result":"result of a68 (line 257)","learned":"learned of a68 (line 257)"}
+{"id":"a75","seat":"Dolza 1 - Max","state":"done","at":"2026-11-17T00:08Z","result":"result of a75 (line 258)","learned":"learned of a75 (line 258)"}
+{"id":"a78","seat":"Exedore 3 - Max","state":"done","at":"2026-11-17T00:10Z","result":"result of a78 (line 259)","learned":"learned of a78 (line 259)"}
+{"id":"a80","seat":"Exedore 1 - Max","mode":"auto","assigned":"2026-11-17T00:10Z","task":"task of a80 (line 260)","done_when":"done_when of a80 (line 260)","check_after":"2026-11-17T00:55Z","state":"assigned"}
+{"id":"a81","seat":"Exedore 4 - Max","mode":"auto","assigned":"2026-11-17T00:17Z","task":"task of a81 (line 261)","done_when":"done_when of a81 (line 261)","check_after":"2026-11-17T00:57Z","state":"assigned"}
+{"id":"a81","seat":"Exedore 4 - Max","state":"done","at":"2026-11-17T00:24Z","result":"result of a81 (line 262)","learned":"learned of a81 (line 262)"}
+{"id":"a82","seat":"Dolza 4 - Max","mode":"auto","assigned":"2026-11-17T00:24Z","task":"task of a82 (line 263)","done_when":"done_when of a82 (line 263)","check_after":"2026-11-17T00:54Z","state":"assigned"}
+{"id":"a82","seat":"Dolza 4 - Max","state":"done","at":"2026-11-17T00:26Z","result":"result of a82 (line 264)","learned":"learned of a82 (line 264)"}
+{"id":"a83","seat":"Dolza 2 - Max","mode":"auto","assigned":"2026-11-17T00:26Z","task":"task of a83 (line 265)","done_when":"done_when of a83 (line 265)","check_after":"2026-11-17T01:26Z","state":"assigned"}
+{"id":"a84","seat":"Exedore 4 - Max","mode":"auto","assigned":"2026-11-17T00:26Z","task":"task of a84 (line 266)","done_when":"done_when of a84 (line 266)","check_after":"2026-11-17T00:56Z","state":"assigned"}
+{"id":"a80","at":"2026-11-17T00:26Z","note":"note of a80 (line 267)"}
+{"id":"a62","at":"2026-11-17T00:26Z","note":"note of a62 (line 268)"}
+{"id":"a62","seat":"Exedore 2 - Max","state":"done","at":"2026-11-17T00:30Z","result":"result of a62 (line 269)","learned":"learned of a62 (line 269)"}
+{"id":"a84","seat":"Exedore 4 - Max","state":"done","at":"2026-11-17T00:31Z","result":"result of a84 (line 270)","learned":"learned of a84 (line 270)"}
+{"id":"a85","seat":"Dolza 4 - Max","mode":"auto","assigned":"2026-11-17T00:31Z","task":"task of a85 (line 271)","done_when":"done_when of a85 (line 271)","check_after":"2026-11-17T01:01Z","state":"assigned"}
+{"id":"a85","seat":"Dolza 4 - Max","state":"done","at":"2026-11-17T00:32Z","result":"result of a85 (line 272)","learned":"learned of a85 (line 272)"}
+{"id":"a81","state":"done","at":"2026-11-17T00:32Z","result":"result of a81 (line 273)"}
+{"id":"a83","seat":"Dolza 2 - Max","state":"done","at":"2026-11-17T00:37Z","result":"result of a83 (line 274)","learned":"learned of a83 (line 274)"}
+{"id":"a86","seat":"Exedore 2 - Max","mode":"auto","assigned":"2026-11-17T00:37Z","task":"task of a86 (line 275)","done_when":"done_when of a86 (line 275)","check_after":"2026-11-17T01:37Z","state":"assigned"}
+{"id":"a80","seat":"Exedore 1 - Max","state":"done","at":"2026-11-17T00:40Z","result":"result of a80 (line 276)","learned":"learned of a80 (line 276)"}
+{"id":"a87","seat":"Exedore 3 - Max","mode":"auto","assigned":"2026-11-17T00:40Z","task":"task of a87 (line 277)","done_when":"done_when of a87 (line 277)","check_after":"2026-11-17T01:20Z","state":"assigned"}
+{"id":"a87","seat":"Exedore 3 - Max","state":"done","at":"2026-11-17T00:41Z","result":"result of a87 (line 278)","learned":"learned of a87 (line 278)"}
+{"id":"a88","seat":"Exedore 1 - Max","mode":"auto","assigned":"2026-11-17T00:41Z","task":"task of a88 (line 279)","done_when":"done_when of a88 (line 279)","check_after":"2026-11-17T02:41Z","state":"assigned"}
+{"id":"a89","seat":"Dolza 4 - Max","mode":"auto","assigned":"2026-11-17T00:42Z","task":"task of a89 (line 280)","done_when":"done_when of a89 (line 280)","check_after":"2026-11-17T01:27Z","state":"assigned"}
+{"id":"a90","seat":"Exedore 4 - Max","mode":"auto","assigned":"2026-11-17T00:42Z","task":"task of a90 (line 281)","done_when":"done_when of a90 (line 281)","check_after":"2026-11-17T01:27Z","state":"assigned"}
+{"id":"a88","at":"2026-11-17T00:42Z","state":"working","note":"note of a88 (line 282)"}
+{"id":"a91","seat":"Dolza 1 - Max","mode":"auto","assigned":"2026-11-17T00:44Z","task":"task of a91 (line 283)","done_when":"done_when of a91 (line 283)","check_after":"2026-11-17T02:44Z","state":"assigned"}
+{"id":"a90","at":"2026-11-17T00:47Z","state":"working","note":"note of a90 (line 284)"}
+{"id":"a90","seat":"Exedore 4 - Max","state":"done","at":"2026-11-17T00:52Z","result":"result of a90 (line 285)","learned":"learned of a90 (line 285)"}
+{"id":"a92","seat":"Dolza 2 - Max","mode":"auto","assigned":"2026-11-17T00:52Z","task":"task of a92 (line 286)","done_when":"done_when of a92 (line 286)","check_after":"2026-11-17T01:22Z","state":"assigned"}
+{"id":"a89","seat":"Dolza 4 - Max","state":"done","at":"2026-11-17T00:53Z","result":"result of a89 (line 287)","learned":"learned of a89 (line 287)"}
+{"id":"a93","seat":"Exedore 3 - Max","mode":"auto","assigned":"2026-11-17T00:53Z","task":"task of a93 (line 288)","done_when":"done_when of a93 (line 288)","check_after":"2026-11-17T01:23Z","state":"assigned"}
+{"id":"a92","seat":"Dolza 2 - Max","state":"done","at":"2026-11-17T00:54Z","result":"result of a92 (line 289)","learned":"learned of a92 (line 289)"}
+{"id":"a94","seat":"Exedore 4 - Max","mode":"auto","assigned":"2026-11-17T00:54Z","task":"task of a94 (line 290)","done_when":"done_when of a94 (line 290)","check_after":"2026-11-17T01:24Z","state":"assigned"}
+{"id":"a93","seat":"Exedore 3 - Max","state":"done","at":"2026-11-17T00:55Z","result":"result of a93 (line 291)","learned":"learned of a93 (line 291)"}
+{"id":"a95","seat":"Dolza 4 - Max","mode":"auto","assigned":"2026-11-17T00:55Z","task":"task of a95 (line 292)","done_when":"done_when of a95 (line 292)","check_after":"2026-11-17T01:25Z","state":"assigned"}
+{"id":"a92","seat":"Dolza 2 - Max","state":"wrapping","at":"2026-11-17T00:58Z","note":"note of a92 (line 293)"}
+{"id":"a92","seat":"Dolza 2 - Max","state":"done","at":"2026-11-17T00:58Z","result":"result of a92 (line 294)","learned":"learned of a92 (line 294)"}
+{"id":"a95","state":"working","at":"2026-11-17T01:03Z","note":"note of a95 (line 295)","learned":"learned of a95 (line 295)"}
+{"id":"a96","seat":"Dolza 2 - Max","mode":"manual","assigned":"2026-11-17T01:03Z","task":"task of a96 (line 296)","state":"working"}
+{"id":"a94","state":"working","at":"2026-11-17T01:06Z","note":"note of a94 (line 297)","learned":"learned of a94 (line 297)"}
+{"id":"a94","state":"done","at":"2026-11-17T01:06Z","note":"note of a94 (line 298)","memorized":true}
+{"id":"a63","state":"done","at":"2026-11-17T01:06Z","note":"note of a63 (line 299)"}
+{"id":"a97","seat":"Exedore 4 - Max","mode":"auto","assigned":"2026-11-17T01:06Z","task":"task of a97 (line 300)","done_when":"done_when of a97 (line 300)","check_after":"2026-11-17T03:06Z","state":"assigned"}
+{"id":"a95","state":"working","at":"2026-11-17T01:12Z","note":"note of a95 (line 301)","learned":"learned of a95 (line 301)"}
+{"id":"a95","state":"done","at":"2026-11-17T01:14Z","note":"note of a95 (line 302)","memorized":true}
+{"id":"a98","seat":"Dolza 4 - Max","mode":"manual","assigned":"2026-11-17T01:17Z","task":"task of a98 (line 303)","state":"working"}
+{"id":"a64","state":"working","at":"2026-11-17T01:22Z","check_after":"2026-11-17T02:22Z","note":"note of a64 (line 304)"}
+{"id":"a91","state":"working","at":"2026-11-17T01:25Z","note":"note of a91 (line 305)","learned":"learned of a91 (line 305)"}
+{"id":"a99","seat":"Exedore 3 - Max","mode":"auto","assigned":"2026-11-17T01:25Z","task":"task of a99 (line 306)","done_when":"done_when of a99 (line 306)","check_after":"2026-11-17T02:25Z","state":"assigned"}
+{"id":"a91","state":"working","at":"2026-11-17T01:26Z","note":"note of a91 (line 307)"}
+{"id":"a98","state":"done","at":"2026-11-17T01:28Z","note":"note of a98 (line 308)"}
+{"id":"a99","state":"working","at":"2026-11-17T01:30Z","note":"note of a99 (line 309)","learned":"learned of a99 (line 309)"}
+{"id":"a91","state":"working","at":"2026-11-17T01:30Z","note":"note of a91 (line 310)"}
+{"id":"a91","state":"working","at":"2026-11-17T01:30Z","note":"note of a91 (line 311)"}
+{"id":"a99","state":"working","at":"2026-11-17T01:30Z","note":"note of a99 (line 312)"}
+{"id":"a88","state":"working","at":"2026-11-17T01:30Z","note":"note of a88 (line 313)"}
+{"id":"a88","state":"working","at":"2026-11-17T01:31Z","note":"note of a88 (line 314)"}
+{"id":"a86","state":"working","at":"2026-11-17T01:45Z","note":"note of a86 (line 315)","learned":"learned of a86 (line 315)"}
+{"id":"a100","seat":"Dolza 4 - Max","mode":"auto","assigned":"2026-11-17T01:45Z","task":"task of a100 (line 316)","done_when":"done_when of a100 (line 316)","check_after":"2026-11-17T02:30Z","state":"assigned"}
+{"id":"a86","state":"done","at":"2026-11-17T01:47Z","note":"note of a86 (line 317)","memorized":true}
+{"id":"a91","state":"working","at":"2026-11-17T01:47Z","note":"note of a91 (line 318)","learned":"learned of a91 (line 318)"}
+{"id":"a100","state":"working","at":"2026-11-17T01:49Z","note":"note of a100 (line 319)","learned":"learned of a100 (line 319)"}
+{"id":"a100","state":"done","at":"2026-11-17T01:50Z","memorized":true}
+{"id":"a99","state":"working","at":"2026-11-17T01:50Z","note":"note of a99 (line 321)","learned":"learned of a99 (line 321)"}
+{"id":"a91","state":"working","at":"2026-11-17T01:50Z","note":"note of a91 (line 322)"}
+{"id":"a88","state":"working","at":"2026-11-17T01:50Z","note":"note of a88 (line 323)"}
+{"id":"a96","mode":"auto","at":"2026-11-17T02:03Z"}
+{"id":"a96","state":"working","at":"2026-11-17T02:03Z","note":"note of a96 (line 325)"}
+{"id":"a96","state":"done","at":"2026-11-17T02:04Z","memorized":true}
+{"id":"a91","state":"working","at":"2026-11-17T02:04Z","note":"note of a91 (line 327)","learned":"learned of a91 (line 327)"}
+{"id":"a91","state":"working","at":"2026-11-17T02:08Z","note":"note of a91 (line 328)","learned":"learned of a91 (line 328)"}
+{"id":"a99","state":"working","at":"2026-11-17T02:08Z","note":"note of a99 (line 329)"}
+{"id":"a99","state":"done","at":"2026-11-17T02:09Z","memorized":true}
+{"id":"a64","state":"working","at":"2026-11-17T02:09Z","note":"note of a64 (line 331)","learned":"learned of a64 (line 331)"}
+{"id":"a91","state":"done","at":"2026-11-17T02:10Z","memorized":true,"note":"note of a91 (line 332)"}
+{"id":"a101","seat":"Josui Prime","mode":"auto","assigned":"2026-11-17T02:10Z","task":"task of a101 (line 333)","state":"assigned"}
+{"id":"a102","seat":"Exedore 2 - Max","mode":"auto","assigned":"2026-11-17T02:11Z","task":"task of a102 (line 334)","done_when":"done_when of a102 (line 334)","check_after":"2026-11-17T02:51Z","state":"assigned"}
+{"id":"a97","state":"working","at":"2026-11-17T02:15Z","note":"note of a97 (line 335)","learned":"learned of a97 (line 335)"}
+{"id":"a103","seat":"Josui Prime","mode":"auto","assigned":"2026-11-17T02:15Z","task":"task of a103 (line 336)","check_after":"2026-11-17T12:00Z","state":"assigned"}
+{"id":"a97","state":"done","at":"2026-11-17T02:17Z","memorized":true}
+{"id":"a102","state":"working","at":"2026-11-17T02:22Z","note":"note of a102 (line 338)","learned":"learned of a102 (line 338)"}
+{"id":"a102","state":"done","at":"2026-11-17T02:24Z","memorized":true,"note":"note of a102 (line 339)"}
+{"id":"a104","seat":"Exedore 3 - Max","mode":"auto","assigned":"2026-11-17T02:28Z","task":"task of a104 (line 340)","ref":"https://github.com/crunchtools/example/issues/340","done_when":"done_when of a104 (line 340)","check_after":"2026-11-17T03:28Z","state":"assigned"}
+{"id":"a105","seat":"Exedore 4 - Max","mode":"auto","assigned":"2026-11-17T02:28Z","task":"task of a105 (line 341)","done_when":"done_when of a105 (line 341)","check_after":"2026-11-17T03:28Z","state":"assigned"}
+{"id":"a106","mode":"auto","state":"queued","lane":"dolza-max","at":"2026-11-17T02:28Z","task":"task of a106 (line 342)","after":["a88"]}
+{"id":"a107","mode":"auto","state":"queued","lane":"exedore-max","at":"2026-11-17T02:28Z","task":"task of a107 (line 343)","ref":"https://github.com/crunchtools/example/issues/343","after":["a106"]}
+{"id":"a108","mode":"auto","state":"queued","lane":"exedore-max","at":"2026-11-17T02:28Z","task":"task of a108 (line 344)","ref":"https://github.com/crunchtools/example/issues/344","after":["a106"]}
+{"id":"a109","mode":"auto","state":"queued","lane":"exedore-max","at":"2026-11-17T02:28Z","task":"task of a109 (line 345)","ref":"https://github.com/crunchtools/example/issues/345","after":["a64"]}
+{"id":"a110","mode":"auto","state":"queued","lane":"exedore-max","at":"2026-11-17T02:28Z","task":"task of a110 (line 346)","ref":"https://github.com/crunchtools/example/issues/346"}
+{"id":"a111","mode":"auto","state":"queued","lane":"exedore-max","at":"2026-11-17T02:28Z","task":"task of a111 (line 347)","after":["a105"]}
+{"id":"a88","state":"working","at":"2026-11-17T02:30Z","task":"task of a88 (line 348)","note":"note of a88 (line 348)","learned":"learned of a88 (line 348)"}
+{"id":"a106","task":"task of a106 (line 349)","at":"2026-11-17T02:30Z"}
+{"id":"a110","seat":"Exedore 2 - Max","state":"assigned","assigned":"2026-11-17T02:32Z","check_after":"2026-11-17T03:32Z","done_when":"done_when of a110 (line 350)"}
+{"id":"a110","state":"working","at":"2026-11-17T02:33Z","note":"note of a110 (line 351)","learned":"learned of a110 (line 351)"}
+{"id":"a110","state":"done","at":"2026-11-17T02:35Z","memorized":true}
+{"id":"a64","ref_rt":"ref_rt of a64 (line 353)","at":"2026-11-17T02:41Z"}
+{"id":"a104","state":"working","at":"2026-11-17T02:42Z","note":"note of a104 (line 354)","learned":"learned of a104 (line 354)"}
+{"id":"a112","seat":"Josui Prime","mode":"auto","state":"queued","lane":"prime","at":"2026-11-17T02:42Z","task":"task of a112 (line 355)","ref":"https://github.com/crunchtools/example/issues/355"}
+{"id":"a104","state":"done","at":"2026-11-17T02:45Z","memorized":true}
+{"id":"a113","mode":"auto","state":"queued","lane":"dolza-max","at":"2026-11-17T02:46Z","task":"task of a113 (line 357)","ref":"https://github.com/crunchtools/example/issues/357","after":["a105"]}
+{"id":"a105","state":"working","at":"2026-11-17T02:48Z","note":"note of a105 (line 358)","learned":"learned of a105 (line 358)"}
+{"id":"a114","seat":"Exedore 3 - Max","mode":"auto","assigned":"2026-11-17T02:48Z","task":"task of a114 (line 359)","done_when":"done_when of a114 (line 359)","check_after":"2026-11-17T03:33Z","state":"assigned"}
+{"id":"a88","state":"working","at":"2026-11-17T02:49Z","note":"note of a88 (line 360)","learned":"learned of a88 (line 360)"}
+{"id":"a106","seat":"Josui Prime","state":"working","at":"2026-11-17T02:49Z","note":"note of a106 (line 361)"}
+{"id":"a88","state":"done","at":"2026-11-17T02:51Z","memorized":true}
+{"id":"a64","state":"working","at":"2026-11-17T02:59Z","note":"note of a64 (line 363)","learned":"learned of a64 (line 363)"}
+{"id":"a115","seat":"Exedore 2 - Max","mode":"auto","assigned":"2026-11-17T02:59Z","task":"task of a115 (line 364)","done_when":"done_when of a115 (line 364)","check_after":"2026-11-17T03:44Z","state":"assigned"}
+{"id":"a106","state":"working","at":"2026-11-17T02:59Z","note":"note of a106 (line 365)"}
+{"id":"a115","state":"working","at":"2026-11-17T03:06Z","note":"note of a115 (line 366)","learned":"learned of a115 (line 366)"}
+{"id":"a64","state":"blocked","at":"2026-11-17T03:06Z","note":"note of a64 (line 367)"}
+{"id":"a116","mode":"auto","state":"queued","lane":"dolza-max","at":"2026-11-17T03:16Z","ref":"https://github.com/crunchtools/example/issues/368","task":"task of a116 (line 368)","after":["a64"]}
+{"id":"a64","at":"2026-11-17T03:17Z","note":"note of a64 (line 369)"}
+{"id":"a64","state":"working","at":"2026-11-17T03:17Z","note":"note of a64 (line 370)"}
+{"id":"a105","state":"working","at":"2026-11-17T03:18Z","note":"note of a105 (line 371)","learned":"learned of a105 (line 371)"}
+{"id":"a114","at":"2026-11-17T03:19Z","note":"note of a114 (line 372)","learned":"learned of a114 (line 372)"}
+{"id":"a64","at":"2026-11-17T03:19Z","note":"note of a64 (line 373)"}
+{"id":"a64","at":"2026-11-17T03:20Z","note":"note of a64 (line 374)"}
+{"id":"a64","at":"2026-11-17T03:23Z","note":"note of a64 (line 375)"}
+{"id":"a109","at":"2026-11-17T03:28Z","note":"note of a109 (line 376)"}
+{"id":"a105","state":"working","at":"2026-11-17T03:45Z","note":"note of a105 (line 377)","learned":"learned of a105 (line 377)"}
+{"id":"a105","state":"working","at":"2026-11-17T03:47Z","note":"note of a105 (line 378)"}
+{"id":"a114","state":"working","at":"2026-11-17T03:47Z","note":"note of a114 (line 379)"}
+{"id":"a111","seat":"Exedore 1 - Max","state":"assigned","assigned":"2026-11-17T03:47Z","check_after":"2026-11-17T04:32Z","done_when":"done_when of a111 (line 380)"}
+{"id":"a113","seat":"Dolza 1 - Max","state":"assigned","assigned":"2026-11-17T03:47Z","check_after":"2026-11-17T05:17Z","done_when":"done_when of a113 (line 381)"}
+{"id":"a105","state":"done","at":"2026-11-17T03:49Z","memorized":true}
+{"id":"a114","state":"done","at":"2026-11-17T03:49Z","memorized":true}
+{"id":"a106","at":"2026-11-17T03:50Z","note":"note of a106 (line 384)"}
+{"id":"a64","state":"working","at":"2026-11-17T03:51Z","note":"note of a64 (line 385)","learned":"learned of a64 (line 385)"}
+{"id":"a115","state":"working","at":"2026-11-17T03:53Z","note":"note of a115 (line 386)","learned":"learned of a115 (line 386)"}
+{"id":"a64","state":"working","at":"2026-11-17T03:53Z","note":"note of a64 (line 387)"}
+{"id":"a115","state":"done","closed":"2026-11-17T04:24Z","result":"result of a115 (line 388)"}
+{"id":"a111","state":"done","closed":"2026-11-17T04:24Z","result":"result of a111 (line 389)","learned":"learned of a111 (line 389)"}
+{"id":"a113","state":"working","check_after":"2026-11-17T06:24Z"}
+{"id":"a64","state":"working","check_after":"2026-11-17T06:24Z","note":"note of a64 (line 391)"}
+{"id":"a117","seat":"Josui Prime","mode":"auto","state":"done","assigned":"2026-11-17T04:24Z","closed":"2026-11-17T04:24Z","task":"task of a117 (line 392)","result":"result of a117 (line 392)","learned":"learned of a117 (line 392)"}
+{"id":"a118","state":"queued","queued":"2026-11-17T04:26Z","ref":"https://github.com/crunchtools/example/issues/393","task":"task of a118 (line 393)","lane":"dolza-max","mode":"auto","after":["a113"]}
+{"id":"a113","state":"working","check_after":"2026-11-17T05:18Z","note":"note of a113 (line 394)"}
+{"id":"a64","state":"working","check_after":"2026-11-17T05:50Z","note":"note of a64 (line 395)","learned":"learned of a64 (line 395)"}
+{"id":"a113","state":"working","check_after":"2026-11-17T05:31Z","note":"note of a113 (line 396)"}
+{"id":"a112","state":"done","closed":"2026-11-17T04:47Z","result":"result of a112 (line 397)"}
+{"id":"a101","seat":"Dolza 2 - Max","mode":"auto","state":"assigned","assigned":"2026-11-17T04:51Z","task":"task of a101 (line 398)","done_when":"done_when of a101 (line 398)","check_after":"2026-11-17T06:21Z"}
+{"id":"a119","state":"queued","queued":"2026-11-17T04:51Z","ref":"https://github.com/crunchtools/example/issues/399","task":"task of a119 (line 399)","lane":"dolza-max","mode":"auto","after":["a101"]}
+{"id":"a120","seat":"Exedore 3 - Max","mode":"auto","state":"assigned","assigned":"2026-11-17T04:51Z","task":"task of a120 (line 400)","done_when":"done_when of a120 (line 400)","check_after":"2026-11-17T05:21Z"}
+{"id":"a101","seat":"Josui Prime","state":"working","note":"note of a101 (line 401)"}
+{"id":"a101","state":"done","closed":"2026-11-17T04:54Z","result":"result of a101 (line 402)","learned":"learned of a101 (line 402)"}
+{"id":"a119","seat":"Dolza 2 - Max","mode":"auto","state":"assigned","assigned":"2026-11-17T04:54Z","done_when":"done_when of a119 (line 403)","check_after":"2026-11-17T06:54Z"}
+{"id":"a119","state":"done","closed":"2026-11-17T04:56Z","result":"result of a119 (line 404)","learned":"learned of a119 (line 404)"}
+{"id":"a121","seat":"Josui Prime","mode":"auto","state":"blocked","assigned":"2026-11-17T04:56Z","task":"task of a121 (line 405)","blocker":"blocker of a121 (line 405)"}
+{"id":"a119","memorized":true,"wrapped":"2026-11-17T04:57Z"}
+{"id":"a120","state":"working","note":"note of a120 (line 407)","learned":"learned of a120 (line 407)"}
+{"id":"a122","seat":"Exedore 3 - Max","mode":"auto","state":"assigned","assigned":"2026-11-17T05:05Z","ref":"https://github.com/crunchtools/example/issues/408","task":"task of a122 (line 408)","done_when":"done_when of a122 (line 408)","check_after":"2026-11-17T05:50Z"}
+{"id":"a123","state":"done","closed":"2026-11-17T05:05Z","ref":"https://github.com/crunchtools/example/issues/409","result":"result of a123 (line 409)"}
+{"id":"a113","state":"working","note":"note of a113 (line 410)","learned":"learned of a113 (line 410)"}
+{"id":"a124","seat":"Exedore 4 - Max","mode":"auto","state":"assigned","assigned":"2026-11-17T05:23Z","task":"task of a124 (line 411)","done_when":"done_when of a124 (line 411)","check_after":"2026-11-17T05:53Z"}
+{"id":"a125","seat":"Dolza 1 - Vertex","mode":"auto","state":"assigned","assigned":"2026-11-17T05:23Z","task":"task of a125 (line 412)","done_when":"done_when of a125 (line 412)","check_after":"2026-11-17T05:53Z"}
+{"id":"a118","seat":"Dolza 2 - Max","mode":"auto","state":"assigned","assigned":"2026-11-17T05:23Z","done_when":"done_when of a118 (line 413)","check_after":"2026-11-17T06:53Z"}
+{"id":"a125","state":"done","closed":"2026-11-17T05:23Z","result":"result of a125 (line 414)","learned":"learned of a125 (line 414)"}
+{"id":"a125","memorized":true,"wrapped":"2026-11-17T05:24Z"}
+{"id":"a124","state":"working","note":"note of a124 (line 416)","learned":"learned of a124 (line 416)"}
+{"id":"a122","state":"done","closed":"2026-11-17T05:32Z","result":"result of a122 (line 417)"}
+{"id":"a118","state":"working","note":"note of a118 (line 418)","learned":"learned of a118 (line 418)"}
+{"id":"a113","state":"working","note":"note of a113 (line 419)","learned":"learned of a113 (line 419)"}
+{"id":"a124","state":"working","note":"note of a124 (line 420)"}
+{"id":"a120","state":"done","closed":"2026-11-17T05:45Z","result":"result of a120 (line 421)","learned":"learned of a120 (line 421)"}
+{"id":"a126","seat":"Exedore 1 - Max","mode":"auto","state":"assigned","assigned":"2026-11-17T05:45Z","ref":"https://github.com/crunchtools/example/issues/422","task":"task of a126 (line 422)","done_when":"done_when of a126 (line 422)","check_after":"2026-11-17T06:15Z"}
+{"id":"a113","state":"done","closed":"2026-11-17T05:46Z","result":"result of a113 (line 423)"}
+{"id":"a113","memorized":true,"wrapped":"2026-11-17T05:46Z"}
+{"id":"a126","state":"done","closed":"2026-11-17T05:48Z","result":"result of a126 (line 425)","learned":"learned of a126 (line 425)"}
+{"id":"a126","memorized":true,"wrapped":"2026-11-17T05:48Z"}
+{"id":"a118","state":"working","note":"note of a118 (line 427)","learned":"learned of a118 (line 427)"}
+{"id":"a127","seat":"Exedore 1 - Max","mode":"auto","state":"assigned","assigned":"2026-11-17T06:11Z","ref":"https://github.com/crunchtools/example/issues/428","task":"task of a127 (line 428)","done_when":"done_when of a127 (line 428)","check_after":"2026-11-17T06:56Z"}
+{"id":"a124","state":"working","note":"note of a124 (line 429)","learned":"learned of a124 (line 429)"}
+{"id":"a120","state":"done","closed":"2026-11-17T06:15Z","result":"result of a120 (line 430)","learned":"learned of a120 (line 430)"}
+{"id":"a120","memorized":true,"wrapped":"2026-11-17T06:15Z"}
+{"id":"a127","state":"working","note":"note of a127 (line 432)"}
+{"id":"a124","state":"working","note":"note of a124 (line 433)"}
+{"id":"a127","state":"working","note":"note of a127 (line 434)"}
+{"id":"a128","state":"queued","queued":"2026-11-17T06:38Z","ref":"https://github.com/crunchtools/example/issues/435","task":"task of a128 (line 435)","lane":"exedore-max","mode":"auto"}
+{"id":"a64","state":"blocked","note":"note of a64 (line 436)","blocker":"blocker of a64 (line 436)"}
+{"id":"a128","seat":"Exedore 3 - Max","state":"assigned","assigned":"2026-11-17T06:38Z","done_when":"done_when of a128 (line 437)","check_after":"2026-11-17T08:08Z"}
+{"id":"a127","state":"done","closed":"2026-11-17T06:38Z","result":"result of a127 (line 438)"}
+{"id":"a127","memorized":true,"wrapped":"2026-11-17T06:39Z"}
+{"id":"a118","state":"working","note":"note of a118 (line 440)","learned":"learned of a118 (line 440)"}
+{"id":"a118","state":"done","closed":"2026-11-17T07:00Z","result":"result of a118 (line 441)"}
+{"id":"a124","state":"done","closed":"2026-11-17T07:00Z","result":"result of a124 (line 442)","learned":"learned of a124 (line 442)"}
+{"id":"a124","memorized":true,"wrapped":"2026-11-17T07:01Z"}
+{"id":"a129","seat":"Exedore 1 - Max","mode":"auto","state":"assigned","assigned":"2026-11-17T07:01Z","task":"task of a129 (line 444)","done_when":"done_when of a129 (line 444)","check_after":"2026-11-17T07:46Z"}
+{"id":"a118","memorized":true,"wrapped":"2026-11-17T07:02Z"}
+{"id":"a128","state":"working","note":"note of a128 (line 446)","learned":"learned of a128 (line 446)"}
+{"id":"a130","seat":"Exedore 2 - Max","mode":"auto","state":"assigned","assigned":"2026-11-17T07:07Z","ref":"https://github.com/crunchtools/example/issues/447","task":"task of a130 (line 447)","done_when":"done_when of a130 (line 447)","check_after":"2026-11-17T07:37Z"}
+{"id":"a131","seat":"Exedore 4 - Max","mode":"auto","state":"assigned","assigned":"2026-11-17T07:07Z","ref":"https://github.com/crunchtools/example/issues/448","task":"task of a131 (line 448)","done_when":"done_when of a131 (line 448)","check_after":"2026-11-17T09:07Z"}
+{"id":"a130","state":"working","note":"note of a130 (line 449)","learned":"learned of a130 (line 449)"}
+{"id":"a129","state":"done","closed":"2026-11-17T07:10Z","result":"result of a129 (line 450)","learned":"learned of a129 (line 450)"}
+{"id":"a129","memorized":true,"wrapped":"2026-11-17T07:10Z"}
+{"id":"a131","state":"working","note":"note of a131 (line 452)","learned":"learned of a131 (line 452)"}
+{"id":"a132","seat":"Exedore 1 - Max","mode":"auto","state":"assigned","assigned":"2026-11-17T07:12Z","ref":"https://github.com/crunchtools/example/issues/453","task":"task of a132 (line 453)","done_when":"done_when of a132 (line 453)","check_after":"2026-11-17T07:42Z"}
+{"id":"a132","state":"working","note":"note of a132 (line 454)","learned":"learned of a132 (line 454)"}
+{"id":"a106","state":"working","note":"note of a106 (line 455)"}
+{"id":"a107","seat":"Dolza 1 - Max","mode":"auto","state":"assigned","assigned":"2026-11-17T07:18Z","after":[],"task":"task of a107 (line 456)","done_when":"done_when of a107 (line 456)","check_after":"2026-11-17T09:18Z"}
+{"id":"a128","state":"working","note":"note of a128 (line 457)","learned":"learned of a128 (line 457)"}
+{"id":"a130","state":"done","closed":"2026-11-17T07:25Z","result":"result of a130 (line 458)","memorized":true}
+{"id":"a128","state":"done","closed":"2026-11-17T07:25Z","result":"result of a128 (line 459)"}
+{"id":"a128","memorized":true,"wrapped":"2026-11-17T07:26Z"}
+{"id":"a133","seat":"Exedore 3 - Max","mode":"auto","state":"assigned","assigned":"2026-11-17T07:27Z","ref":"https://github.com/crunchtools/example/issues/461","task":"task of a133 (line 461)","done_when":"done_when of a133 (line 461)","check_after":"2026-11-17T08:57Z"}
+{"id":"a131","state":"working","note":"note of a131 (line 462)","learned":"learned of a131 (line 462)"}
+{"id":"a132","state":"done","closed":"2026-11-17T07:48Z","result":"result of a132 (line 463)"}
+{"id":"a131","state":"done","closed":"2026-11-17T07:48Z","result":"result of a131 (line 464)"}
+{"id":"a132","memorized":true,"wrapped":"2026-11-17T07:49Z"}
+{"id":"a131","memorized":true,"wrapped":"2026-11-17T07:49Z"}
+{"id":"a107","state":"working","note":"note of a107 (line 467)","learned":"learned of a107 (line 467)"}
+{"id":"a134","seat":"Exedore 1 - Max","mode":"auto","state":"assigned","assigned":"2026-11-17T08:13Z","task":"task of a134 (line 468)","done_when":"done_when of a134 (line 468)","check_after":"2026-11-17T08:53Z"}
+{"id":"a135","seat":"Exedore 4 - Max","mode":"auto","state":"assigned","assigned":"2026-11-17T08:13Z","task":"task of a135 (line 469)","done_when":"done_when of a135 (line 469)","check_after":"2026-11-17T08:43Z"}
+{"id":"a134","state":"done","closed":"2026-11-17T08:16Z","result":"result of a134 (line 470)","learned":"learned of a134 (line 470)"}
+{"id":"a107","state":"working","note":"note of a107 (line 471)"}
+{"id":"a136","seat":"Dolza 1 - Max","mode":"auto","state":"assigned","assigned":"2026-11-17T08:16Z","ref":"https://github.com/crunchtools/example/issues/472","task":"task of a136 (line 472)","done_when":"done_when of a136 (line 472)","check_after":"2026-11-17T09:01Z"}
+{"id":"a134","memorized":true,"wrapped":"2026-11-17T08:16Z"}
+{"id":"a133","state":"working","note":"note of a133 (line 474)"}
+{"id":"a137","seat":"Exedore 1 - Max","mode":"auto","state":"assigned","assigned":"2026-11-17T08:18Z","ref":"https://github.com/crunchtools/example/issues/475","task":"task of a137 (line 475)","done_when":"done_when of a137 (line 475)","check_after":"2026-11-17T08:48Z"}
+{"id":"a138","state":"queued","queued":"2026-11-17T08:18Z","ref":"https://github.com/crunchtools/example/issues/476","task":"task of a138 (line 476)","lane":"exedore-max","mode":"auto","after":["a133"]}
+{"id":"a135","state":"done","closed":"2026-11-17T08:18Z","result":"result of a135 (line 477)","learned":"learned of a135 (line 477)"}
+{"id":"a135","memorized":true,"wrapped":"2026-11-17T08:19Z"}
+{"id":"a137","state":"done","closed":"2026-11-17T08:21Z","result":"result of a137 (line 479)","learned":"learned of a137 (line 479)"}
+{"id":"a133","state":"done","closed":"2026-11-17T08:21Z","result":"result of a133 (line 480)"}
+{"id":"a139","state":"queued","queued":"2026-11-17T08:21Z","ref":"https://github.com/crunchtools/example/issues/481","task":"task of a139 (line 481)","lane":"exedore-max","mode":"auto"}
+{"id":"a140","state":"queued","queued":"2026-11-17T08:21Z","task":"task of a140 (line 482)","lane":"exedore-max","mode":"auto","after":["a138"]}
+{"id":"a138","seat":"Exedore 3 - Max","state":"assigned","assigned":"2026-11-17T08:22Z","done_when":"done_when of a138 (line 483)","check_after":"2026-11-17T10:22Z","note":"note of a138 (line 483)"}
+{"id":"a140","state":"done","closed":"2026-11-17T08:22Z","result":"result of a140 (line 484)"}
+{"id":"a139","seat":"Exedore 4 - Max","state":"assigned","assigned":"2026-11-17T08:22Z","done_when":"done_when of a139 (line 485)","check_after":"2026-11-17T10:22Z"}
+{"id":"a137","memorized":true,"wrapped":"2026-11-17T08:22Z"}
+{"id":"a136","state":"working","note":"note of a136 (line 487)","learned":"learned of a136 (line 487)"}
+{"id":"a141","seat":"Exedore 1 - Max","mode":"auto","state":"assigned","assigned":"2026-11-17T08:35Z","ref":"https://github.com/crunchtools/example/issues/488","task":"task of a141 (line 488)","done_when":"done_when of a141 (line 488)","check_after":"2026-11-17T09:05Z"}
+{"id":"a141","state":"done","closed":"2026-11-17T08:39Z","result":"result of a141 (line 489)","learned":"learned of a141 (line 489)"}
+{"id":"a141","memorized":true,"wrapped":"2026-11-17T08:39Z"}
+{"id":"a138","state":"working","note":"note of a138 (line 491)","learned":"learned of a138 (line 491)"}
+{"id":"a142","seat":"Exedore 2 - Max","mode":"auto","state":"assigned","assigned":"2026-11-17T08:40Z","ref":"https://github.com/crunchtools/example/issues/492","task":"task of a142 (line 492)","done_when":"done_when of a142 (line 492)","check_after":"2026-11-17T09:10Z"}
+{"id":"a142","state":"done","closed":"2026-11-17T08:54Z","result":"result of a142 (line 493)"}
+{"id":"a138","state":"working","note":"note of a138 (line 494)"}
+{"id":"a142","memorized":true,"wrapped":"2026-11-17T08:54Z"}
+{"id":"a138","state":"working","note":"note of a138 (line 496)","check_after":"2026-11-17T09:54Z"}
+{"id":"a139","state":"working","note":"note of a139 (line 497)","learned":"learned of a139 (line 497)"}
+{"id":"a143","seat":"Exedore 1 - Max","mode":"auto","state":"assigned","assigned":"2026-11-17T08:56Z","ref":"https://github.com/crunchtools/example/issues/498","task":"task of a143 (line 498)","done_when":"done_when of a143 (line 498)","check_after":"2026-11-17T09:36Z"}
+{"id":"a144","seat":"Exedore 2 - Max","mode":"auto","state":"assigned","assigned":"2026-11-17T08:56Z","task":"task of a144 (line 499)","done_when":"done_when of a144 (line 499)","check_after":"2026-11-17T09:26Z"}
+{"id":"a143","state":"working","note":"note of a143 (line 500)","learned":"learned of a143 (line 500)"}
+{"id":"a145","state":"queued","queued":"2026-11-17T09:01Z","ref":"https://github.com/crunchtools/example/issues/501","task":"task of a145 (line 501)","lane":"exedore-max","mode":"auto","after":["a139"]}
+{"id":"a144","state":"done","result":"result of a144 (line 502)","learned":"learned of a144 (line 502)"}
+{"id":"a146","seat":"Dolza 2 - Max","mode":"auto","assigned":"2026-11-17T09:03Z","task":"task of a146 (line 503)","done_when":"done_when of a146 (line 503)","check_after":"2026-11-17T09:33Z","state":"assigned"}
+{"id":"a146","state":"done","result":"result of a146 (line 504)","learned":"learned of a146 (line 504)"}
+{"id":"a144","state":"done","memorized":true,"cleared":true}
+{"id":"a146","state":"done","cleared":true}
+{"id":"a139","state":"done","result":"result of a139 (line 507)","learned":"learned of a139 (line 507)"}
+{"id":"a143","state":"done","result":"result of a143 (line 508)","learned":"learned of a143 (line 508)"}
+{"id":"a145","seat":"Exedore 2 - Max","mode":"auto","assigned":"2026-11-17T09:13Z","task":"task of a145 (line 509)","done_when":"done_when of a145 (line 509)","check_after":"2026-11-17T10:13Z","state":"assigned"}
+{"id":"a139","cleared":true,"memorized":true}
+{"id":"a143","cleared":true,"memorized":true}
+{"id":"a147","seat":"Exedore 1 - Max","mode":"auto","assigned":"2026-11-17T09:14Z","task":"task of a147 (line 512)","done_when":"done_when of a147 (line 512)","check_after":"2026-11-17T09:44Z","state":"assigned"}
+{"id":"a147","state":"done","result":"result of a147 (line 513)","learned":"learned of a147 (line 513)"}
+{"id":"a147","cleared":true,"memorized":true}
+{"id":"a145","state":"done","result":"result of a145 (line 515)","learned":"learned of a145 (line 515)"}
+{"id":"a148","seat":"Exedore 4 - Max","mode":"auto","assigned":"2026-11-17T09:24Z","task":"task of a148 (line 516)","done_when":"done_when of a148 (line 516)","check_after":"2026-11-17T09:54Z","state":"assigned"}
+{"id":"a148","state":"working","result":"result of a148 (line 517)","learned":"learned of a148 (line 517)"}
+{"id":"a145","state":"working","result":"result of a145 (line 518)"}
+{"id":"a145","state":"done","result":"result of a145 (line 519)","learned":"learned of a145 (line 519)"}
+{"id":"a138","state":"working","result":"result of a138 (line 520)","learned":"learned of a138 (line 520)"}
+{"id":"a149","state":"queued","queued":"2026-11-17T09:38Z","ref":"https://github.com/crunchtools/example/issues/521","lane":"exedore-max"}
+{"id":"a149","seat":"Exedore 1 - Max","mode":"auto","assigned":"2026-11-17T09:39Z","task":"task of a149 (line 522)","done_when":"done_when of a149 (line 522)","check_after":"2026-11-17T11:39Z","state":"assigned"}
+{"id":"a148","state":"done","result":"result of a148 (line 523)","learned":"learned of a148 (line 523)"}
+{"id":"a145","state":"working","result":"result of a145 (line 524)"}
+{"id":"a148","cleared":true,"memorized":true}
+{"id":"a136","state":"done","result":"result of a136 (line 526)","learned":"learned of a136 (line 526)"}
+{"id":"a150","seat":"Exedore 4 - Max","mode":"auto","assigned":"2026-11-17T09:43Z","task":"task of a150 (line 527)","done_when":"done_when of a150 (line 527)","check_after":"2026-11-17T10:13Z","state":"assigned"}
+{"id":"a150","state":"working","result":"result of a150 (line 528)","learned":"learned of a150 (line 528)"}
+{"id":"a136","state":"working","result":"result of a136 (line 529)"}
+{"id":"a138","state":"working","result":"result of a138 (line 530)","learned":"learned of a138 (line 530)"}
+{"id":"a151","seat":"Dolza 2 - Max","mode":"auto","assigned":"2026-11-17T09:54Z","task":"task of a151 (line 531)","done_when":"done_when of a151 (line 531)","check_after":"2026-11-17T10:24Z","state":"assigned"}
+{"id":"a151","state":"done","result":"result of a151 (line 532)","learned":"learned of a151 (line 532)"}
+{"id":"a138","state":"done","result":"result of a138 (line 533)"}
+{"id":"a151","cleared":true}
+{"id":"a138","cleared":true,"memorized":true}
+{"id":"a145","state":"done","result":"result of a145 (line 536)","learned":"learned of a145 (line 536)"}
+{"id":"a145","cleared":true,"memorized":true}
+{"id":"a136","state":"done","result":"result of a136 (line 538)","learned":"learned of a136 (line 538)"}
+{"id":"a150","state":"done","result":"result of a150 (line 539)"}
+{"id":"a136","result":"result of a136 (line 540)"}
+{"id":"a150","cleared":true}
+{"id":"a136","cleared":true,"memorized":true}
+{"id":"a107","state":"working","seat":"Josui Prime","result":"result of a107 (line 543)"}
+{"id":"a149","state":"done","result":"result of a149 (line 544)","learned":"learned of a149 (line 544)"}
+{"id":"a152","seat":"Exedore 4 - Max","mode":"auto","assigned":"2026-11-17T10:12Z","task":"task of a152 (line 545)","done_when":"done_when of a152 (line 545)","check_after":"2026-11-17T10:57Z","state":"assigned"}
+{"id":"a152","state":"done","result":"result of a152 (line 546)","learned":"learned of a152 (line 546)"}
+{"id":"a153","seat":"Josui Prime","mode":"auto","assigned":"2026-11-17T10:14Z","task":"task of a153 (line 547)","check_after":"2026-11-17T11:15Z","state":"assigned"}
+{"id":"a149","cleared":true,"memorized":true}
+{"id":"a152","cleared":true,"memorized":true}
+{"id":"a64","state":"working","seat":"Josui Prime","result":"result of a64 (line 550)"}
+{"id":"a154","seat":"Exedore 1 - Max","mode":"auto","assigned":"2026-11-17T10:40Z","task":"task of a154 (line 551)","done_when":"done_when of a154 (line 551)","check_after":"2026-11-17T11:10Z","state":"assigned"}
+{"id":"a155","seat":"Exedore 2 - Max","mode":"auto","assigned":"2026-11-17T10:46Z","task":"task of a155 (line 552)","done_when":"done_when of a155 (line 552)","check_after":"2026-11-17T12:46Z","state":"assigned"}
+{"id":"a121","state":"assigned","result":"result of a121 (line 553)"}
+{"id":"a154","state":"done","result":"result of a154 (line 554)","learned":"learned of a154 (line 554)"}
+{"id":"a156","seat":"Exedore 3 - Max","mode":"auto","assigned":"2026-11-17T10:48Z","task":"task of a156 (line 555)","done_when":"done_when of a156 (line 555)","check_after":"2026-11-17T11:08Z","state":"assigned"}
+{"id":"a156","state":"done","result":"result of a156 (line 556)","learned":"learned of a156 (line 556)"}
+{"id":"a154","result":"result of a154 (line 557)"}
+{"id":"a156","cleared":true,"memorized":true}
+{"id":"a154","cleared":true,"memorized":true}
+{"id":"a157","state":"queued","queued":"2026-11-17T10:56Z","ref":"https://github.com/crunchtools/example/issues/560","lane":"dolza-max","after":["a155"],"note":"note of a157 (line 560)"}
+{"id":"a116","seat":"Dolza 2 - Max","mode":"auto","assigned":"2026-11-17T11:09Z","after":[],"done_when":"done_when of a116 (line 561)","check_after":"2026-11-17T13:09Z","state":"assigned","result":"result of a116 (line 561)"}
+{"id":"a109","seat":"Exedore 3 - Max","mode":"auto","assigned":"2026-11-17T11:09Z","after":[],"task":"task of a109 (line 562)","done_when":"done_when of a109 (line 562)","check_after":"2026-11-17T13:09Z","state":"assigned"}
+{"id":"a158","seat":"Exedore 1 - Max","mode":"auto","assigned":"2026-11-17T11:17Z","task":"task of a158 (line 563)","done_when":"done_when of a158 (line 563)","check_after":"2026-11-17T12:02Z","state":"assigned"}
+{"id":"a64","result":"result of a64 (line 564)"}
+{"id":"a153","state":"working","result":"result of a153 (line 565)"}
+{"id":"a116","state":"working","result":"result of a116 (line 566)","learned":"learned of a116 (line 566)"}
+{"id":"a109","state":"working","result":"result of a109 (line 567)","learned":"learned of a109 (line 567)"}
+{"id":"a159","seat":"Exedore 4 - Max","mode":"auto","assigned":"2026-11-17T11:23Z","task":"task of a159 (line 568)","done_when":"done_when of a159 (line 568)","check_after":"2026-11-17T12:03Z","state":"assigned"}
+{"id":"a159","state":"done","result":"result of a159 (line 569)","learned":"learned of a159 (line 569)"}
+{"id":"a109","result":"result of a109 (line 570)"}
+{"id":"a159","cleared":true,"memorized":true}
+{"id":"a160","seat":"Dolza 4 - Max","mode":"auto","assigned":"2026-11-17T11:30Z","task":"task of a160 (line 572)","done_when":"done_when of a160 (line 572)","check_after":"2026-11-17T12:30Z","state":"assigned"}
+{"id":"a161","state":"queued","queued":"2026-11-17T11:34Z","ref":"https://github.com/crunchtools/example/issues/573","lane":"exedore-max","after":["a155"]}
+{"id":"a107","state":"done","result":"result of a107 (line 574)"}
+{"id":"a107","state":"working","result":"result of a107 (line 575)"}
+{"id":"a153","result":"result of a153 (line 576)"}
+{"id":"a160","state":"done","result":"result of a160 (line 577)","learned":"learned of a160 (line 577)"}
+{"id":"a160","cleared":true,"memorized":true}
+{"id":"a153","result":"result of a153 (line 579)"}
+{"id":"a162","seat":"Exedore 4 - Max","mode":"auto","assigned":"2026-11-17T11:44Z","task":"task of a162 (line 580)","done_when":"done_when of a162 (line 580)","check_after":"2026-11-17T12:24Z","state":"assigned"}
+{"id":"a109","state":"working","result":"result of a109 (line 581)","learned":"learned of a109 (line 581)"}
+{"id":"a162","state":"working","result":"result of a162 (line 582)"}
+{"id":"a163","seat":"Dolza 1 - Max","mode":"auto","assigned":"2026-11-17T11:50Z","task":"task of a163 (line 583)","done_when":"done_when of a163 (line 583)","check_after":"2026-11-17T12:20Z","state":"assigned"}
+{"id":"a163","state":"working","result":"result of a163 (line 584)","learned":"learned of a163 (line 584)"}
+{"id":"a162","state":"working","result":"result of a162 (line 585)","learned":"learned of a162 (line 585)"}
+{"id":"a164","seat":"Dolza 3 - Max","mode":"auto","assigned":"2026-11-17T11:57Z","task":"task of a164 (line 586)","done_when":"done_when of a164 (line 586)","check_after":"2026-11-17T12:27Z","state":"assigned"}
+{"id":"a165","state":"queued","queued":"2026-11-17T11:57Z","ref":"https://github.com/crunchtools/example/issues/587","lane":"exedore-max","after":["a155","a164"]}
+{"id":"a158","state":"done","result":"result of a158 (line 588)","learned":"learned of a158 (line 588)"}
+{"id":"a166","seat":"Dolza 4 - Max","mode":"auto","assigned":"2026-11-17T11:57Z","task":"task of a166 (line 589)","done_when":"done_when of a166 (line 589)","check_after":"2026-11-17T12:27Z","state":"assigned"}
+{"id":"a166","state":"done","result":"result of a166 (line 590)","learned":"learned of a166 (line 590)"}
+{"id":"a158","state":"working","result":"result of a158 (line 591)"}
+{"id":"a166","cleared":true,"memorized":true}
+{"id":"a164","state":"done","result":"result of a164 (line 593)","learned":"learned of a164 (line 593)"}
+{"id":"a164","cleared":true,"memorized":true}
+{"id":"a103","state":"done","result":"result of a103 (line 595)"}
+{"id":"a103","result":"result of a103 (line 596)"}
+{"id":"a167","seat":"Dolza 4 - Max","mode":"auto","assigned":"2026-11-17T12:04Z","task":"task of a167 (line 597)","done_when":"done_when of a167 (line 597)","check_after":"2026-11-17T14:04Z","state":"assigned"}
+{"id":"a165","after":["a155","a167"],"result":"result of a165 (line 598)"}
+{"id":"a168","seat":"Dolza 1 - Max","mode":"auto","assigned":"2026-11-17T12:05Z","task":"task of a168 (line 599)","done_when":"done_when of a168 (line 599)","check_after":"2026-11-17T14:05Z","state":"assigned"}
+{"id":"a155","state":"working","result":"result of a155 (line 600)","learned":"learned of a155 (line 600)"}
+{"id":"a109","state":"working","result":"result of a109 (line 601)"}
+{"id":"a162","state":"working","result":"result of a162 (line 602)","learned":"learned of a162 (line 602)"}
+{"id":"a169","seat":"Dolza 3 - Max","mode":"auto","assigned":"2026-11-17T12:17Z","task":"task of a169 (line 603)","done_when":"done_when of a169 (line 603)","check_after":"2026-11-17T13:02Z","state":"assigned"}
+{"id":"a163","state":"done","result":"result of a163 (line 604)"}
+{"id":"a169","state":"done","result":"result of a169 (line 605)","learned":"learned of a169 (line 605)"}
+{"id":"a109","state":"working","result":"result of a109 (line 606)"}
+{"id":"a170","seat":"Exedore 3 - Max","mode":"auto","assigned":"2026-11-17T12:19Z","ref":"https://github.com/crunchtools/example/issues/607","task":"task of a170 (line 607)","done_when":"done_when of a170 (line 607)","check_after":"2026-11-17T13:19Z","state":"assigned"}
+{"id":"a109","result":"result of a109 (line 608)"}
+{"id":"a169","cleared":true,"memorized":false,"result":"result of a169 (line 609)"}
+{"id":"a171","seat":"Dolza 3 - Max","mode":"auto","assigned":"2026-11-17T12:27Z","task":"task of a171 (line 610)","done_when":"done_when of a171 (line 610)","check_after":"2026-11-17T13:12Z","state":"assigned"}
+{"id":"a155","state":"blocked","result":"result of a155 (line 611)"}
+{"id":"a171","state":"working","result":"result of a171 (line 612)","learned":"learned of a171 (line 612)"}
+{"id":"a172","state":"queued","queued":"2026-11-17T12:31Z","ref":"https://github.com/crunchtools/example/issues/613","lane":"exedore-max","after":["a155"]}
+{"id":"a173","state":"queued","queued":"2026-11-17T12:31Z","ref":"https://github.com/crunchtools/example/issues/614","lane":"exedore-max"}
+{"id":"a162","state":"done","result":"result of a162 (line 615)"}
+{"id":"a116","result":"result of a116 (line 616)"}
+{"id":"a162","cleared":true,"memorized":true}
+{"id":"a171","state":"working","result":"result of a171 (line 618)","learned":"learned of a171 (line 618)"}
+{"id":"a155","state":"working","result":"result of a155 (line 619)"}
+{"id":"a171","state":"done","result":"result of a171 (line 620)"}
+{"id":"a173","ref":"https://github.com/crunchtools/example/issues/621"}
+{"id":"a171","cleared":true,"memorized":true}
+{"id":"a173","seat":"Dolza 3 - Max","mode":"auto","assigned":"2026-11-17T12:38Z","task":"task of a173 (line 623)","done_when":"done_when of a173 (line 623)","check_after":"2026-11-17T14:38Z","state":"assigned"}
+{"id":"a158","state":"done","result":"result of a158 (line 624)"}
+{"id":"a158","cleared":true,"memorized":true}
+{"id":"a170","state":"done","result":"result of a170 (line 626)"}
+{"id":"a174","seat":"Exedore 1 - Max","mode":"auto","assigned":"2026-11-17T12:56Z","task":"task of a174 (line 627)","done_when":"done_when of a174 (line 627)","check_after":"2026-11-17T13:41Z","state":"assigned"}
+{"id":"a175","seat":"Exedore 4 - Max","mode":"auto","assigned":"2026-11-17T12:56Z","task":"task of a175 (line 628)","done_when":"done_when of a175 (line 628)","check_after":"2026-11-17T13:41Z","state":"assigned"}
+{"id":"a64","result":"result of a64 (line 629)"}
+{"id":"a173","result":"result of a173 (line 630)"}
+{"id":"a116","result":"result of a116 (line 631)"}
+{"id":"a175","state":"done","result":"result of a175 (line 632)","learned":"learned of a175 (line 632)"}
+{"id":"a155","result":"result of a155 (line 633)"}
+{"id":"a175","memorized":true,"state":"done","closed":"cleared"}
+{"id":"a116","result":"result of a116 (line 635)"}
+{"id":"a167","result":"result of a167 (line 636)"}
+{"id":"a109","state":"done","result":"result of a109 (line 637)"}
+{"id":"a170","state":"done","seat":"Exedore 3 - Max","result":"result of a170 (line 638)"}
+{"id":"a170","memorized":true,"closed":"cleared"}
+{"id":"a167","state":"working","result":"result of a167 (line 640)"}
+{"id":"a168","state":"done","result":"result of a168 (line 641)","learned":"learned of a168 (line 641)"}
+{"id":"a176","seat":"Exedore 4 - Max","mode":"auto","assigned":"2026-11-17T13:10Z","task":"task of a176 (line 642)","done_when":"done_when of a176 (line 642)","check_after":"2026-11-17T13:45Z","state":"assigned"}
+{"id":"a173","state":"blocked","result":"result of a173 (line 643)"}
+{"id":"a171","state":"done","result":"result of a171 (line 644)","memorized":true}
+{"id":"a173","state":"working","result":"result of a173 (line 645)"}
+{"id":"a176","state":"working","result":"result of a176 (line 646)","learned":"learned of a176 (line 646)"}
+{"id":"a168","state":"working","result":"result of a168 (line 647)"}
+{"id":"a177","state":"queued","queued":"2026-11-17T13:20Z","ref":"https://github.com/crunchtools/example/issues/648","lane":"exedore-max","after":["a168"]}
+{"id":"a167","state":"working","result":"result of a167 (line 649)","learned":"learned of a167 (line 649)"}
+{"id":"a178","seat":"Exedore 3 - Max","mode":"auto","assigned":"2026-11-17T13:25Z","task":"task of a178 (line 650)","done_when":"done_when of a178 (line 650)","check_after":"2026-11-17T14:00Z","state":"assigned"}
+{"id":"a157","state":"working","seat":"Josui Prime","result":"result of a157 (line 651)"}
+{"id":"a178","state":"blocked","result":"result of a178 (line 652)"}
+{"id":"a155","state":"blocked","result":"result of a155 (line 653)"}
+{"id":"a174","state":"blocked","result":"result of a174 (line 654)"}
+{"id":"a176","state":"blocked","result":"result of a176 (line 655)"}
+{"id":"a173","state":"working","result":"result of a173 (line 656)","learned":"learned of a173 (line 656)"}
+{"id":"a179","seat":"Dolza 4 - Max","mode":"auto","assigned":"2026-11-17T13:45Z","task":"task of a179 (line 657)","done_when":"done_when of a179 (line 657)","check_after":"2026-11-17T14:30Z","state":"assigned"}
+{"id":"a175","note":"note of a175 (line 658)"}
+{"id":"a179","state":"done","result":"result of a179 (line 659)","learned":"learned of a179 (line 659)"}
+{"id":"a173","state":"working","result":"result of a173 (line 660)"}
+{"id":"a157","note":"note of a157 (line 661)"}
+{"id":"a173","state":"done","result":"result of a173 (line 662)","learned":"learned of a173 (line 662)"}
+{"id":"a180","state":"queued","queued":"2026-11-17T14:10Z","ref":"https://github.com/crunchtools/example/issues/663","lane":"exedore-max","note":"note of a180 (line 663)"}
+{"id":"a181","seat":"Josui Prime","mode":"auto","state":"working","task":"task of a181 (line 664)"}
+{"id":"a173","memorized":true,"closed":"cleared"}
+{"id":"a180","seat":"Dolza 3 - Max","mode":"auto","state":"assigned","assigned":"2026-11-17T14:15Z","task":"task of a180 (line 666)","done_when":"done_when of a180 (line 666)","check_after":"2026-11-17T14:50Z"}
+{"id":"a181","state":"working","result":"result of a181 (line 667)"}
+{"id":"a155","state":"working"}
+{"id":"a174","state":"working"}
+{"id":"a178","state":"assigned","assigned":"2026-11-17T14:20Z"}
+{"id":"a174","state":"done","result":"result of a174 (line 671)","learned":"learned of a174 (line 671)"}
+{"id":"a182","seat":"Exedore 4 - Max","mode":"auto","state":"assigned","assigned":"2026-11-17T14:25Z","task":"task of a182 (line 672)","done_when":"done_when of a182 (line 672)","check_after":"2026-11-17T15:00Z"}
+{"id":"a183","state":"queued","queued":"2026-11-17T14:25Z","ref":"https://github.com/crunchtools/example/issues/673","lane":"exedore-max","after":[]}
+{"id":"a184","state":"queued","queued":"2026-11-17T14:25Z","ref":"https://github.com/crunchtools/example/issues/674","lane":"exedore-max","after":[]}
+{"id":"a155","state":"working","result":"result of a155 (line 675)"}
+{"id":"a183","seat":"Exedore 1 - Max","mode":"auto","state":"assigned","assigned":"2026-11-17T14:35Z","done_when":"done_when of a183 (line 676)","check_after":"2026-11-17T15:10Z"}
+{"id":"a180","state":"working","result":"result of a180 (line 677)"}
+{"id":"a178","state":"done","result":"result of a178 (line 678)","learned":"learned of a178 (line 678)"}
+{"id":"a167","state":"working","result":"result of a167 (line 679)"}
+{"id":"a168","state":"done","result":"result of a168 (line 680)","learned":"learned of a168 (line 680)"}
+{"id":"a176","seat":"Exedore 3 - Max","state":"assigned","assigned":"2026-11-17T14:45Z","check_after":"2026-11-17T15:20Z"}
+{"id":"a177","seat":"Dolza 1 - Max","mode":"auto","state":"assigned","assigned":"2026-11-17T14:45Z","done_when":"done_when of a177 (line 682)","check_after":"2026-11-17T16:00Z"}
+{"id":"a182","state":"done","result":"result of a182 (line 683)","learned":"learned of a182 (line 683)"}
+{"id":"a174","state":"working","result":"result of a174 (line 684)"}
+{"id":"a184","seat":"Exedore 4 - Max","mode":"auto","state":"assigned","assigned":"2026-11-17T14:55Z","done_when":"done_when of a184 (line 685)","check_after":"2026-11-17T15:40Z"}
+{"id":"a185","seat":"Dolza 1 - Vertex","mode":"manual","state":"working","assigned":"2026-11-17T14:24Z","task":"task of a185 (line 686)"}
+{"id":"a174","state":"abandoned","result":"result of a174 (line 687)"}
+{"id":"a184","state":"abandoned","result":"result of a184 (line 688)"}
+{"id":"a116","state":"blocked","result":"result of a116 (line 689)"}
+{"id":"a184","memorized":true,"closed":"cleared"}
+{"id":"a176","state":"done","result":"result of a176 (line 691)","learned":"learned of a176 (line 691)"}
+{"id":"a168","state":"working","result":"result of a168 (line 692)"}
+{"id":"a176","memorized":true,"closed":"cleared"}
+{"id":"a178","memorized":true,"closed":"cleared"}
+{"id":"a116","state":"blocked","result":"result of a116 (line 695)","memorized":true}
+{"id":"a155","state":"done","result":"result of a155 (line 696)","learned":"learned of a155 (line 696)"}
+{"id":"a186","seat":"Exedore 4 - Max","mode":"auto","state":"assigned","assigned":"2026-11-17T15:20Z","task":"task of a186 (line 697)","check_after":"2026-11-17T15:50Z"}
+{"id":"a187","state":"queued","queued":"2026-11-17T15:20Z","ref":"https://github.com/crunchtools/example/issues/698","lane":"exedore-max","after":["a168","a155","a167","a183"]}
+{"id":"a167","state":"done","result":"result of a167 (line 699)","learned":"learned of a167 (line 699)"}
+{"id":"a180","state":"done","result":"result of a180 (line 700)","learned":"learned of a180 (line 700)"}
+{"id":"a188","state":"queued","queued":"2026-11-17T15:30Z","ref":"https://github.com/crunchtools/example/issues/701","lane":"exedore-max","after":["a187"],"note":"note of a188 (line 701)"}
+{"id":"a186","state":"done","result":"result of a186 (line 702)","memorized":true,"closed":"cleared"}
+{"id":"a180","memorized":true,"closed":"cleared"}
+{"id":"a167","memorized":true,"closed":"cleared"}
+{"id":"a155","state":"working","result":"result of a155 (line 705)"}
+{"id":"a183","state":"done","result":"result of a183 (line 706)","learned":"learned of a183 (line 706)"}
+{"id":"a165","state":"blocked","result":"result of a165 (line 707)"}
+{"id":"a187","state":"queued","note":"note of a187 (line 708)"}
+{"id":"a168","state":"done","result":"result of a168 (line 709)"}
+{"id":"a189","seat":"Dolza 1 - Max","mode":"auto","state":"assigned","assigned":"2026-11-17T15:50Z","task":"task of a189 (line 710)","check_after":"2026-11-17T16:30Z"}
+{"id":"a190","seat":"Josui Prime","state":"working","task":"task of a190 (line 711)"}
+{"id":"a183","memorized":true,"closed":"cleared"}
+{"id":"a155","state":"done","result":"result of a155 (line 713)"}
+{"id":"a177","state":"working","result":"result of a177 (line 714)"}
+{"id":"a190","state":"done","result":"result of a190 (line 715)"}
+{"id":"a155","memorized":true,"closed":"cleared"}
+{"id":"a191","seat":"Dolza 2 - Vertex","mode":"manual","state":"working","assigned":"2026-11-17T16:10Z","task":"task of a191 (line 717)"}
+{"id":"a190","state":"done","result":"result of a190 (line 718)"}
+{"id":"a189","state":"working","result":"result of a189 (line 719)"}
+{"id":"a189","state":"done","result":"result of a189 (line 720)","learned":"learned of a189 (line 720)"}
+{"id":"a177","state":"done","result":"result of a177 (line 721)"}
+{"id":"a189","memorized":true,"closed":"cleared"}
+{"id":"a192","state":"queued","queued":"2026-11-17T15:30Z","ref":"https://github.com/crunchtools/example/issues/723","lane":"desk","after":["redesign"]}
+{"id":"a153","state":"done","at":"2026-11-17T15:32Z","result":"result of a153 (line 724)"}
+{"id":"a181","state":"done","at":"2026-11-17T15:32Z","result":"result of a181 (line 725)","learned":"learned of a181 (line 725)"}
+{"id":"a157","state":"done","at":"2026-11-17T15:32Z","result":"result of a157 (line 726)"}
+{"id":"a64","state":"blocked","at":"2026-11-17T15:32Z","result":"result of a64 (line 727)"}
+{"id":"a172","state":"assigned","mode":"auto","seat":"Exedore 1 - Max","assigned":"2026-11-17T15:32Z","task":"task of a172 (line 728)","done_when":"done_when of a172 (line 728)","check_after":"2026-11-17T16:17Z"}
+{"id":"a172","state":"review","at":"2026-11-17T15:41Z","result":"result of a172 (line 729)","learned":"learned of a172 (line 729)"}
+{"id":"a193","state":"assigned","mode":"auto","seat":"Exedore 2 - Max","assigned":"2026-11-17T15:41Z","task":"task of a193 (line 730)","done_when":"done_when of a193 (line 730)","check_after":"2026-11-17T16:11Z"}
+{"id":"a194","state":"assigned","mode":"auto","seat":"Exedore 3 - Max","assigned":"2026-11-17T15:45Z","task":"task of a194 (line 731)","done_when":"done_when of a194 (line 731)","check_after":"2026-11-17T17:45Z"}
+{"id":"a195","state":"assigned","mode":"auto","seat":"Exedore 4 - Max","assigned":"2026-11-17T15:45Z","task":"task of a195 (line 732)","done_when":"done_when of a195 (line 732)","check_after":"2026-11-17T17:15Z"}
+{"id":"a193","state":"done","at":"2026-11-17T15:47Z","result":"result of a193 (line 733)","learned":"learned of a193 (line 733)"}
+{"id":"a193","closed":"cleared","memorized":true,"at":"2026-11-17T15:48Z"}
+{"id":"a195","state":"done","at":"2026-11-17T15:52Z","result":"result of a195 (line 735)","learned":"learned of a195 (line 735)"}
+{"id":"a195","closed":"cleared","memorized":true,"at":"2026-11-17T15:54Z"}
+{"id":"a172","state":"done","at":"2026-11-17T15:54Z","result":"result of a172 (line 737)","learned":"learned of a172 (line 737)"}
+{"id":"a172","closed":"cleared","memorized":true,"at":"2026-11-17T15:55Z"}
+{"id":"a196","state":"assigned","mode":"auto","seat":"Exedore 1 - Max","assigned":"2026-11-17T15:57Z","task":"task of a196 (line 739)","done_when":"done_when of a196 (line 739)","check_after":"2026-11-17T17:57Z"}
+{"id":"a194","state":"review","at":"2026-11-17T16:08Z","result":"result of a194 (line 740)","learned":"learned of a194 (line 740)"}
+{"id":"a197","state":"assigned","mode":"auto","seat":"Exedore 2 - Max","assigned":"2026-11-17T16:08Z","task":"task of a197 (line 741)","done_when":"done_when of a197 (line 741)","check_after":"2026-11-17T16:53Z"}
+{"id":"a197","state":"done","at":"2026-11-17T16:10Z","result":"result of a197 (line 742)","learned":"learned of a197 (line 742)"}
+{"id":"a197","closed":"cleared","memorized":true,"at":"2026-11-17T16:11Z"}
+{"id":"a198","state":"assigned","mode":"auto","seat":"Dolza 1 - Max","assigned":"2026-11-17T16:13Z","task":"task of a198 (line 744)","done_when":"done_when of a198 (line 744)","check_after":"2026-11-17T17:43Z"}
+{"id":"a198","state":"blocked","at":"2026-11-17T16:16Z","result":"result of a198 (line 745)"}
+{"id":"a198","state":"assigned","at":"2026-11-17T16:17Z","result":"result of a198 (line 746)"}
+{"id":"a194","state":"working","at":"2026-11-17T16:32Z","result":"result of a194 (line 747)","learned":"learned of a194 (line 747)"}
+{"id":"a199","state":"assigned","mode":"auto","seat":"Dolza 2 - Max","assigned":"2026-11-17T16:33Z","task":"task of a199 (line 748)","done_when":"done_when of a199 (line 748)","check_after":"2026-11-17T18:03Z"}
+{"id":"a198","state":"review","at":"2026-11-17T16:37Z","result":"result of a198 (line 749)","learned":"learned of a198 (line 749)"}
+{"id":"a200","state":"assigned","mode":"auto","seat":"Dolza 3 - Max","assigned":"2026-11-17T16:37Z","task":"task of a200 (line 750)","done_when":"done_when of a200 (line 750)","check_after":"2026-11-17T17:17Z"}
+{"id":"a200","state":"done","at":"2026-11-17T16:40Z","result":"result of a200 (line 751)","learned":"learned of a200 (line 751)"}
+{"id":"a194","state":"working","at":"2026-11-17T16:40Z","result":"result of a194 (line 752)"}
+{"id":"a194","state":"working","at":"2026-11-17T16:41Z","result":"result of a194 (line 753)"}
+{"id":"a200","closed":"cleared","memorized":true,"at":"2026-11-17T16:41Z","learned":"learned of a200 (line 754)"}
+{"id":"a194","state":"working","at":"2026-11-17T16:49Z","result":"result of a194 (line 755)"}
+{"id":"a194","state":"done","closed":"cleared","memorized":true,"at":"2026-11-17T16:50Z","result":"result of a194 (line 756)"}
+{"id":"a198","state":"review","at":"2026-11-17T17:12Z","result":"result of a198 (line 757)","learned":"learned of a198 (line 757)"}
+{"id":"a201","state":"assigned","mode":"auto","seat":"Dolza 3 - Max","assigned":"2026-11-17T17:12Z","task":"task of a201 (line 758)","done_when":"done_when of a201 (line 758)","check_after":"2026-11-17T17:52Z"}
+{"id":"a201","state":"done","at":"2026-11-17T17:14Z","result":"result of a201 (line 759)","learned":"learned of a201 (line 759)"}
+{"id":"a201","closed":"cleared","memorized":true,"at":"2026-11-17T17:15Z"}
+{"id":"a198","state":"working","at":"2026-11-17T17:26Z","result":"result of a198 (line 761)","learned":"learned of a198 (line 761)"}
+{"id":"a198","state":"done","closed":"rolled","memorized":true,"at":"2026-11-17T17:28Z","result":"result of a198 (line 762)"}
+{"id":"a199","state":"done","at":"2026-11-17T17:32Z","result":"result of a199 (line 763)"}
+{"id":"a196","state":"working","at":"2026-11-17T17:47Z","result":"result of a196 (line 764)","learned":"learned of a196 (line 764)"}
+{"id":"a198","state":"done","at":"2026-11-17T18:19Z","result":"result of a198 (line 765)"}
+{"id":"a196","state":"review","at":"2026-11-17T18:27Z","result":"result of a196 (line 766)","learned":"learned of a196 (line 766)"}
+{"id":"a202","state":"assigned","mode":"auto","seat":"Exedore 2 - Max","assigned":"2026-11-17T18:27Z","task":"task of a202 (line 767)","done_when":"done_when of a202 (line 767)","check_after":"2026-11-17T19:27Z"}
+{"id":"a202","state":"done","at":"2026-11-17T18:33Z","result":"result of a202 (line 768)","learned":"learned of a202 (line 768)"}
+{"id":"a196","state":"working","at":"2026-11-17T18:33Z","result":"result of a196 (line 769)"}
+{"id":"a202","closed":"cleared","memorized":true,"at":"2026-11-17T18:33Z"}
+{"id":"a196","state":"review","at":"2026-11-17T18:52Z","result":"result of a196 (line 771)","learned":"learned of a196 (line 771)"}
+{"id":"a203","state":"assigned","mode":"auto","seat":"Exedore 2 - Max","assigned":"2026-11-17T18:52Z","task":"task of a203 (line 772)","done_when":"done_when of a203 (line 772)","check_after":"2026-11-17T19:37Z"}
+{"id":"a203","state":"blocked","at":"2026-11-17T18:53Z","result":"result of a203 (line 773)"}
+{"id":"a196","state":"review","at":"2026-11-17T19:10Z","result":"result of a196 (line 774)","learned":"learned of a196 (line 774)"}
+{"id":"a203","state":"assigned","at":"2026-11-17T19:10Z","result":"result of a203 (line 775)"}
+{"id":"a203","state":"done","at":"2026-11-17T19:12Z","result":"result of a203 (line 776)","learned":"learned of a203 (line 776)"}
+{"id":"a196","state":"review","at":"2026-11-17T19:28Z","result":"result of a196 (line 777)","learned":"learned of a196 (line 777)"}
+{"id":"a203","state":"assigned","at":"2026-11-17T19:28Z","result":"result of a203 (line 778)"}
+{"id":"a204","state":"assigned","mode":"auto","seat":"Exedore 3 - Max","assigned":"2026-11-17T19:28Z","task":"task of a204 (line 779)","done_when":"done_when of a204 (line 779)","check_after":"2026-11-17T20:13Z","ref":"https://github.com/crunchtools/example/issues/779"}
+{"id":"a203","state":"done","at":"2026-11-17T19:31Z","result":"result of a203 (line 780)","learned":"learned of a203 (line 780)"}
+{"id":"a196","state":"working","at":"2026-11-17T19:31Z","result":"result of a196 (line 781)"}
+{"id":"a203","closed":"cleared","memorized":true,"at":"2026-11-17T19:32Z"}
+{"id":"a204","state":"done","at":"2026-11-17T19:40Z","result":"result of a204 (line 783)","learned":"learned of a204 (line 783)"}
+{"id":"a196","state":"working","at":"2026-11-17T19:40Z","result":"result of a196 (line 784)","learned":"learned of a196 (line 784)"}
+{"id":"a204","closed":"cleared","memorized":true,"at":"2026-11-17T19:42Z"}
+{"id":"a205","state":"assigned","mode":"auto","seat":"Exedore 3 - Max","assigned":"2026-11-17T19:52Z","task":"task of a205 (line 786)","done_when":"done_when of a205 (line 786)","check_after":"2026-11-17T20:22Z","ref":"https://github.com/crunchtools/example/issues/786"}
+{"id":"a196","state":"done","at":"2026-11-17T19:54Z","result":"result of a196 (line 787)"}
+{"id":"a206","state":"assigned","mode":"auto","seat":"Exedore 1 - Max","assigned":"2026-11-17T19:54Z","task":"task of a206 (line 788)","done_when":"done_when of a206 (line 788)","check_after":"2026-11-17T21:54Z"}
+{"id":"a207","state":"assigned","mode":"auto","seat":"Exedore 4 - Max","assigned":"2026-11-17T19:57Z","task":"task of a207 (line 789)","done_when":"done_when of a207 (line 789)","check_after":"2026-11-17T21:27Z"}
+{"id":"a208","state":"assigned","mode":"auto","seat":"Exedore 2 - Max","assigned":"2026-11-17T19:57Z","task":"task of a208 (line 790)","done_when":"done_when of a208 (line 790)","check_after":"2026-11-17T21:57Z"}
+{"id":"a205","state":"done","mode":"auto","seat":"Exedore 3 - Max","result":"result of a205 (line 791)","learned":"learned of a205 (line 791)","at":"2026-11-17T19:59Z"}
+{"id":"a208","state":"done","mode":"auto","seat":"Exedore 2 - Max","result":"result of a208 (line 792)","learned":"learned of a208 (line 792)","at":"2026-11-17T20:21Z"}
+{"id":"a209","state":"assigned","mode":"auto","seat":"Exedore 3 - Max","assigned":"2026-11-17T20:21Z","task":"task of a209 (line 793)","done_when":"done_when of a209 (line 793)","check_after":"2026-11-17T21:21Z"}
+{"id":"a209","state":"working","mode":"auto","seat":"Exedore 3 - Max","result":"result of a209 (line 794)","learned":"learned of a209 (line 794)","at":"2026-11-17T20:24Z"}
+{"id":"a210","state":"assigned","mode":"auto","seat":"Exedore 2 - Max","assigned":"2026-11-17T20:24Z","task":"task of a210 (line 795)","done_when":"done_when of a210 (line 795)","check_after":"2026-11-17T21:54Z"}
+{"id":"a210","state":"done","mode":"auto","seat":"Exedore 2 - Max","result":"result of a210 (line 796)","learned":"learned of a210 (line 796)","at":"2026-11-17T20:34Z"}
+{"id":"a209","state":"done","mode":"auto","seat":"Exedore 3 - Max","result":"result of a209 (line 797)","learned":"learned of a209 (line 797)","at":"2026-11-17T20:34Z"}
+{"id":"a206","state":"working","mode":"auto","seat":"Exedore 1 - Max","result":"result of a206 (line 798)","learned":"learned of a206 (line 798)","at":"2026-11-17T20:50Z"}
+{"id":"a211","state":"assigned","mode":"auto","seat":"Exedore 2 - Max","assigned":"2026-11-17T20:50Z","task":"task of a211 (line 799)","done_when":"done_when of a211 (line 799)","check_after":"2026-11-17T22:05Z"}
+{"id":"a212","state":"assigned","mode":"auto","seat":"Exedore 3 - Max","assigned":"2026-11-17T20:50Z","task":"task of a212 (line 800)","done_when":"done_when of a212 (line 800)","check_after":"2026-11-17T22:05Z"}
+{"id":"a211","state":"working","mode":"auto","seat":"Exedore 2 - Max","result":"result of a211 (line 801)","learned":"learned of a211 (line 801)","at":"2026-11-17T20:56Z"}
+{"id":"a212","state":"working","mode":"auto","seat":"Exedore 3 - Max","result":"result of a212 (line 802)","learned":"learned of a212 (line 802)","at":"2026-11-17T21:04Z"}
+{"id":"a213","state":"assigned","mode":"auto","seat":"Dolza 1 - Max","assigned":"2026-11-17T21:04Z","task":"task of a213 (line 803)","done_when":"done_when of a213 (line 803)","check_after":"2026-11-17T21:49Z"}
+{"id":"a213","state":"done","mode":"auto","seat":"Dolza 1 - Max","result":"result of a213 (line 804)","learned":"learned of a213 (line 804)","at":"2026-11-17T21:08Z"}
+{"id":"a214","state":"working","mode":"manual","seat":"Dolza 1 - Max","task":"task of a214 (line 805)","at":"2026-11-17T21:08Z"}
+{"id":"a214","state":"done","mode":"manual","seat":"Dolza 1 - Max","result":"result of a214 (line 806)","at":"2026-11-17T21:17Z"}
+{"id":"a185","state":"abandoned","mode":"manual","seat":"Dolza 1 - Vertex","result":"result of a185 (line 807)","at":"2026-11-17T21:19Z"}
+{"id":"a215","state":"working","mode":"manual","seat":"Dolza 1 - Vertex","task":"task of a215 (line 808)","at":"2026-11-17T21:19Z"}
+{"id":"a212","state":"working","mode":"auto","seat":"Exedore 3 - Max","result":"result of a212 (line 809)","learned":"learned of a212 (line 809)","at":"2026-11-17T21:21Z"}
+{"id":"a216","state":"assigned","mode":"auto","seat":"Dolza 2 - Max","assigned":"2026-11-17T21:21Z","task":"task of a216 (line 810)","done_when":"done_when of a216 (line 810)","check_after":"2026-11-17T22:01Z"}
+{"id":"a206","state":"working","mode":"auto","seat":"Exedore 1 - Max","result":"result of a206 (line 811)","learned":"learned of a206 (line 811)","at":"2026-11-17T21:24Z"}
+{"id":"a211","state":"done","mode":"auto","seat":"Exedore 2 - Max","result":"result of a211 (line 812)","learned":"learned of a211 (line 812)","at":"2026-11-17T21:26Z"}
+{"id":"a207","state":"done","mode":"auto","seat":"Exedore 4 - Max","result":"result of a207 (line 813)","learned":"learned of a207 (line 813)","at":"2026-11-17T21:38Z"}
+{"id":"a216","state":"done","mode":"auto","seat":"Dolza 2 - Max","result":"result of a216 (line 814)","learned":"learned of a216 (line 814)","at":"2026-11-17T21:38Z"}
+{"id":"a217","state":"assigned","mode":"auto","seat":"Exedore 2 - Max","assigned":"2026-11-17T21:38Z","task":"task of a217 (line 815)","done_when":"done_when of a217 (line 815)","check_after":"2026-11-17T23:08Z"}
+{"id":"a212","state":"done","mode":"auto","seat":"Exedore 3 - Max","result":"result of a212 (line 816)","learned":"learned of a212 (line 816)","at":"2026-11-17T21:45Z"}

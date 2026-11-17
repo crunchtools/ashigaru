@@ -1,0 +1,6 @@
+check = "DC005-dead_variants"
+
+[[locations]]
+path = "src/ashigaru/desk/model.py"
+justification = "These enums are the API's vocabulary (ashigaru-3.md: every ledger state, lane, mode and role). Pydantic reads every member to validate requests and to publish the enum in docs/desk-api.json; a member no Python line names is still a value clients send."
+classification = "by_design"
