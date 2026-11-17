@@ -163,6 +163,11 @@ Actions:
 Seats report usage and turn state by calling the same CLI from their Claude
 Code hooks and status line.
 
+The skill uses whichever is available. It calls the MCP tools when the session
+has them (claude.ai, the phone, any client without a shell), and the `ashigaru`
+CLI otherwise. Because both share one command set, the skill's instructions are
+the same either way.
+
 ### 2. Josui Prime, the dispatcher
 
 Josui reads the Desk, assigns free seats, routes every code story to a second
