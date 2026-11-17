@@ -5,6 +5,7 @@ These tests evaluate those lines the way GitHub does, against event payloads.
 """
 
 import re
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -25,7 +26,7 @@ TOKEN = re.compile(r"\s*(?:('(?:[^']|'')*')|(==|!=|&&|\|\||[!(),])|([A-Za-z_][\w
 class Expression:
     """Enough of GitHub's expression language for the router's `if:` lines."""
 
-    FUNCTIONS = {
+    FUNCTIONS: dict[str, Callable[..., object]] = {
         "always": lambda: True,
         "startsWith": lambda text, prefix: str(text or "").lower().startswith(str(prefix).lower()),
         "contains": lambda text, part: str(part).lower() in str(text or "").lower(),
@@ -121,7 +122,7 @@ def runs(job: str, context: dict) -> bool:
 
 def route(event_name: str, event: dict, auto_code: str = "", enabled: str = "true") -> set[str]:
     """The router jobs that start for one event; code waits on triage's verdict."""
-    context = {
+    context: dict = {
         "github": {"event_name": event_name, "event": event, "repository": REPO},
         "vars": {"ASHIGARU_ENABLED": enabled},
         "needs": {"triage": {"outputs": {"auto_code": ""}}},
