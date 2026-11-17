@@ -1,0 +1,6 @@
+check = "CH010-over_abstraction"
+
+[[locations]]
+path = "src/ashigaru/desk/api.py"
+justification = "patch_item and report are FastAPI routes, not wrappers: each is a public endpoint with its own path, request model and OpenAPI entry. Both delegate to _patch_item so PATCH and the report contract share one authority check."
+classification = "by_design"

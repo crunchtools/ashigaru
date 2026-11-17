@@ -1,0 +1,6 @@
+check = "DC004-dead_structs"
+
+[[locations]]
+path = "src/ashigaru/desk/model.py"
+justification = "ItemCreate and ItemPatch are request bodies: FastAPI instantiates them from the JSON of POST and PATCH /v1/items, named in api.py's route signatures, and they are what docs/desk-api.json publishes."
+classification = "gourmand_bug"
