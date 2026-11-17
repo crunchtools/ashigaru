@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [2.15.0] - 2026-11-17
+
 ### Changed
 
 - Release tagging no longer stops when `ASHIGARU_ENABLED` is `false`. Switching Ashigaru off skipped `release.yml` and `major-tag.yml` too, so a release pull request that merged afterwards was never tagged, and because a tag pushed with `GITHUB_TOKEN` starts nothing, `container.yml` and `publish.yml` would have stopped without an error (a194). The tagging now lives in a new reusable `release-tag.yml` with the gate `release.yml` carried, minus the switch; it mints the app token with `actions/checkout` and `actions/create-github-app-token` pinned by commit. `router.yml`'s release route calls it ungated, `release.yml` is now a thin call to it for callers copied at 2.13.1, and `major-tag.yml` moves `v2` with the switch off. No caller changes. Triage, code, fix, review and the sweep still stop at the switch.
