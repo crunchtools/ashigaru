@@ -19,3 +19,8 @@ classification = "gourmand_bug"
 path = "src/ashigaru/desk/api.py"
 justification = "The matches are FastAPI route handlers whose shared shape is the framework's: a decorator, dependency parameters, one store call, one model_validate. check and list_keys, or revoke_key and create_app, do different things."
 classification = "gourmand_bug"
+
+[[locations]]
+path = "src/ashigaru/desk/importer.py"
+justification = "apply() folds one ledger line into an item and records the line; store.write_seat() patches a seat row and stamps since and turn_started_at. They share only a get-current, merge, write shape over different tables and fields."
+classification = "gourmand_bug"

@@ -73,6 +73,14 @@ class Turn(StrEnum):
     IDLE = "idle"
 
 
+class Billing(StrEnum):
+    """Who pays for a seat's tokens."""
+
+    MAX = "max"
+    VERTEX = "vertex"
+    OPENROUTER = "openrouter"
+
+
 class Verb(StrEnum):
     """The report contract: the first word of a seat's report."""
 
@@ -234,9 +242,20 @@ class Seat(BaseModel):
     item: str | None = Field(None, description="The item the seat holds.")
     since: str | None = Field(None, description="When status last changed.")
     updated_at: str
+    model: str | None = None
+    billing: Billing | None = None
+    context_used: int | None = Field(None, description="Tokens in the context window now.")
+    context_window: int | None = None
+    session_id: str | None = None
+    session_tokens: int | None = Field(None, description="Tokens used this session.")
+    session_cost_usd: float = 0.0
+    turn_started_at: str | None = Field(None, description="When the turn last went active.")
 
 
 class SeatPatch(BaseModel):
+    """A seat may send SEAT_ROW_FIELDS for its own row. The rest are Josui's: lane, status, the owner
+    that is Scott's manual hold, and the item it holds."""
+
     model_config = ConfigDict(extra="forbid")
 
     lane: Lane | None = None
@@ -245,6 +264,81 @@ class SeatPatch(BaseModel):
     turn: Turn | None = None
     task: str | None = None
     item: str | None = None
+    since: str | None = None
+
+
+SEAT_ROW_FIELDS = frozenset({"turn", "task", "since"})
+
+
+class UsageReport(BaseModel):
+    """What a seat's hooks and status line send. `cost_usd` is the session's running total, as Claude
+    Code reports it; the Desk books the difference from the last report against today's spend."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    session_id: str = Field(min_length=1)
+    model: str | None = None
+    billing: Billing | None = None
+    context_used: int | None = Field(None, ge=0)
+    context_window: int | None = Field(None, ge=0)
+    session_tokens: int | None = Field(None, ge=0)
+    cost_usd: float | None = Field(None, ge=0)
+
+
+class SeatUsage(BaseModel):
+    """One row of `ashigaru usage`."""
+
+    name: str
+    model: str | None
+    billing: Billing | None
+    context_used: int | None
+    context_window: int | None
+    session_tokens: int | None
+    session_cost_usd: float
+    turn: Turn
+    turn_seconds: int | None = Field(description="Time in the current turn; null when idle.")
+
+
+class Spend(BaseModel):
+    billing: Billing
+    today_usd: float
+    month_usd: float
+    daily_limit_usd: float | None
+    monthly_limit_usd: float | None
+
+
+class Usage(BaseModel):
+    seats: list[SeatUsage]
+    spend: list[Spend]
+
+
+class BillingLimits(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    daily_usd: float | None = Field(None, ge=0)
+    monthly_usd: float | None = Field(None, ge=0)
+
+
+class OutcomeRow(BaseModel):
+    """One row of `ashigaru outcomes`: an outcome and the state of its stories."""
+
+    id: str
+    task: str
+    ref: str | None
+    state: State
+    total: int
+    done: int
+    blocked: int
+    open: int
+
+
+class Assign(BaseModel):
+    """Name a seat, or let the Desk pick the longest-free unheld seat in the lane."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    seat: str | None = None
+    lane: Lane | None = Field(None, description="Defaults to the item's lane.")
 
 
 class Identity(BaseModel):

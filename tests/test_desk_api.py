@@ -37,6 +37,18 @@ def test_migrate_is_idempotent(conn: sqlite3.Connection) -> None:
     assert store.schema_version(conn) == len(store.MIGRATIONS)
 
 
+def test_a_version_one_database_upgrades_in_place(tmp_path: Path) -> None:
+    old = store.connect(tmp_path / "v1.db")
+    with store.transaction(old):
+        for statement in filter(str.strip, store.MIGRATIONS[0].split(";")):
+            old.execute(statement)
+        old.execute("INSERT INTO schema_version (version, applied_at) VALUES (1, 'then')")
+    old.execute("INSERT INTO seats (name, updated_at) VALUES ('Exedore 1 - Max', 'then')")
+    assert store.migrate(old) == len(store.MIGRATIONS)
+    upgraded = store.get_seat(old, "Exedore 1 - Max") or {}
+    assert upgraded["session_cost_usd"] == 0 and upgraded["model"] is None
+
+
 def test_subject_key_and_id_are_unique(client: TestClient, keys: Keys) -> None:
     body = {"task": "t", "subject_key": "crunchtools/ashigaru#1"}
     first = client.post("/v1/items", headers=keys[JOSUI], json=body)
@@ -97,3 +109,9 @@ def test_bootstrap_mints_a_working_admin_key(
     assert token not in capsys.readouterr().out
     assert desk_main.main(argv) == 1
     assert client.get("/v1/identities", headers={"Authorization": f"Bearer {token}"}).status_code == OK
+    other = db.parent / "key2"
+    assert desk_main.main(["mint-key", "Scott", "--role", "seat", "--db", str(db), "--out", str(other)]) == 1
+    assert not other.exists()
+    changed = ["mint-key", "Scott", "--role", "seat", "--change-role", "--db", str(db), "--out", str(other)]
+    assert desk_main.main(changed) == 0
+    assert client.get("/v1/me", headers={"Authorization": f"Bearer {token}"}).json()["role"] == "seat"

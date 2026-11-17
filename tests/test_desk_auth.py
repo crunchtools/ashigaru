@@ -137,16 +137,46 @@ def test_seat_files_one_child_per_assignment(
     )
 
 
-def test_seat_writes_its_own_seat_row_only(client: TestClient, keys: Keys) -> None:
-    ok = client.patch(f"/v1/seats/{MINE}", headers=keys[MINE], json={"status": "busy", "turn": "active"})
-    assert ok.status_code == OK and ok.json()["since"]
-    assert (
-        client.patch(f"/v1/seats/{OTHER}", headers=keys[MINE], json={"status": "busy"}).status_code
-        == FORBIDDEN
+def test_seat_writes_only_turn_task_and_since_on_its_own_row(client: TestClient, keys: Keys) -> None:
+    ok = client.patch(
+        f"/v1/seats/{MINE}", headers=keys[MINE], json={"turn": "active", "task": "first prompt"}
     )
-    assert client.patch(f"/v1/seats/{OTHER}", headers=keys[JOSUI], json={"owner": "Scott"}).status_code == OK
-    assert client.patch(f"/v1/seats/{CI}", headers=keys[CI], json={"status": "busy"}).status_code == FORBIDDEN
-    assert [seat["name"] for seat in client.get("/v1/seats", headers=keys[CI]).json()] == [MINE, OTHER]
+    assert ok.status_code == OK and ok.json()["turn_started_at"]
+    for body in ({"owner": None}, {"lane": "vertex"}, {"item": "a1"}, {"status": "free"}):
+        assert client.patch(f"/v1/seats/{MINE}", headers=keys[MINE], json=body).status_code == FORBIDDEN, body
+    assert (
+        client.patch(f"/v1/seats/{OTHER}", headers=keys[MINE], json={"turn": "idle"}).status_code == FORBIDDEN
+    )
+    assert client.patch(f"/v1/seats/{CI}", headers=keys[CI], json={"turn": "idle"}).status_code == FORBIDDEN
+    assert [seat["name"] for seat in client.get("/v1/seats", headers=keys[CI]).json()] == [MINE]
+
+
+def test_a_seat_cannot_undo_scotts_manual_hold(client: TestClient, keys: Keys) -> None:
+    held = client.patch(f"/v1/seats/{MINE}", headers=keys[JOSUI], json={"owner": "Scott", "status": "busy"})
+    assert held.status_code == OK
+    assert (
+        client.patch(f"/v1/seats/{MINE}", headers=keys[MINE], json={"owner": None}).status_code == FORBIDDEN
+    )
+    seat = client.get(f"/v1/seats/{MINE}", headers=keys[MINE]).json()
+    assert (seat["owner"], seat["status"]) == ("Scott", "busy")
+
+
+def test_a_seat_cannot_reopen_or_file_under_a_closed_item(client: TestClient, keys: Keys) -> None:
+    done = make(client, keys, state="done")
+    cleared = make(client, keys, state="review", wrap="cleared")
+    wontdo = make(client, keys, state="wontdo")
+    for item in (done, cleared, wontdo):
+        attempts = (
+            client.patch(f"/v1/items/{item}", headers=keys[MINE], json={"state": "working"}),
+            client.patch(f"/v1/items/{item}", headers=keys[MINE], json={"result": "rewritten"}),
+            client.post(f"/v1/items/{item}/report", headers=keys[MINE], json={"verb": "DONE", "text": "x"}),
+            client.post(f"/v1/items/{item}/file", headers=keys[MINE], json={"task": "child"}),
+        )
+        assert [response.status_code for response in attempts] == [FORBIDDEN] * len(attempts), item
+    after = client.get(f"/v1/items/{done}", headers=keys[MINE]).json()
+    assert after["state"] == "done" and after["result"] is None
+    reopened = client.patch(f"/v1/items/{done}", headers=keys[JOSUI], json={"state": "working"})
+    assert reopened.status_code == OK
 
 
 def test_keys_minted_by_admin_and_revoked_by_admin_or_self(client: TestClient, keys: Keys) -> None:

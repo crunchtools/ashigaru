@@ -60,6 +60,77 @@
         "title": "ApiKey",
         "type": "object"
       },
+      "Assign": {
+        "additionalProperties": false,
+        "description": "Name a seat, or let the Desk pick the longest-free unheld seat in the lane.",
+        "properties": {
+          "lane": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Lane"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Defaults to the item's lane."
+          },
+          "seat": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Seat"
+          }
+        },
+        "title": "Assign",
+        "type": "object"
+      },
+      "Billing": {
+        "description": "Who pays for a seat's tokens.",
+        "enum": [
+          "max",
+          "vertex",
+          "openrouter"
+        ],
+        "title": "Billing",
+        "type": "string"
+      },
+      "BillingLimits": {
+        "additionalProperties": false,
+        "properties": {
+          "daily_usd": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Daily Usd"
+          },
+          "monthly_usd": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Monthly Usd"
+          }
+        },
+        "title": "BillingLimits",
+        "type": "object"
+      },
       "CheckRow": {
         "description": "One row of the /agents check table.",
         "properties": {
@@ -1202,6 +1273,61 @@
         "title": "Mode",
         "type": "string"
       },
+      "OutcomeRow": {
+        "description": "One row of `ashigaru outcomes`: an outcome and the state of its stories.",
+        "properties": {
+          "blocked": {
+            "title": "Blocked",
+            "type": "integer"
+          },
+          "done": {
+            "title": "Done",
+            "type": "integer"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "open": {
+            "title": "Open",
+            "type": "integer"
+          },
+          "ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ref"
+          },
+          "state": {
+            "$ref": "#/components/schemas/State"
+          },
+          "task": {
+            "title": "Task",
+            "type": "string"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "task",
+          "ref",
+          "state",
+          "total",
+          "done",
+          "blocked",
+          "open"
+        ],
+        "title": "OutcomeRow",
+        "type": "object"
+      },
       "Problem": {
         "description": "Every 4xx body.",
         "properties": {
@@ -1276,6 +1402,39 @@
       },
       "Seat": {
         "properties": {
+          "billing": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Billing"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "context_used": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Tokens in the context window now.",
+            "title": "Context Used"
+          },
+          "context_window": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Context Window"
+          },
           "item": {
             "anyOf": [
               {
@@ -1298,6 +1457,17 @@
               }
             ]
           },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
           "name": {
             "title": "Name",
             "type": "string"
@@ -1313,6 +1483,34 @@
             ],
             "description": "Who holds a manual seat (Scott), else null.",
             "title": "Owner"
+          },
+          "session_cost_usd": {
+            "default": 0.0,
+            "title": "Session Cost Usd",
+            "type": "number"
+          },
+          "session_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Session Id"
+          },
+          "session_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Tokens used this session.",
+            "title": "Session Tokens"
           },
           "since": {
             "anyOf": [
@@ -1346,6 +1544,18 @@
             "$ref": "#/components/schemas/Turn",
             "default": "idle"
           },
+          "turn_started_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When the turn last went active.",
+            "title": "Turn Started At"
+          },
           "updated_at": {
             "title": "Updated At",
             "type": "string"
@@ -1360,6 +1570,7 @@
       },
       "SeatPatch": {
         "additionalProperties": false,
+        "description": "A seat may send SEAT_ROW_FIELDS for its own row. The rest are Josui's: lane, status, the owner\nthat is Scott's manual hold, and the item it holds.",
         "properties": {
           "item": {
             "anyOf": [
@@ -1392,6 +1603,17 @@
               }
             ],
             "title": "Owner"
+          },
+          "since": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Since"
           },
           "status": {
             "anyOf": [
@@ -1436,6 +1658,147 @@
         "title": "SeatStatus",
         "type": "string"
       },
+      "SeatUsage": {
+        "description": "One row of `ashigaru usage`.",
+        "properties": {
+          "billing": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Billing"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "context_used": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Context Used"
+          },
+          "context_window": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Context Window"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "session_cost_usd": {
+            "title": "Session Cost Usd",
+            "type": "number"
+          },
+          "session_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Session Tokens"
+          },
+          "turn": {
+            "$ref": "#/components/schemas/Turn"
+          },
+          "turn_seconds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Time in the current turn; null when idle.",
+            "title": "Turn Seconds"
+          }
+        },
+        "required": [
+          "name",
+          "model",
+          "billing",
+          "context_used",
+          "context_window",
+          "session_tokens",
+          "session_cost_usd",
+          "turn",
+          "turn_seconds"
+        ],
+        "title": "SeatUsage",
+        "type": "object"
+      },
+      "Spend": {
+        "properties": {
+          "billing": {
+            "$ref": "#/components/schemas/Billing"
+          },
+          "daily_limit_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Daily Limit Usd"
+          },
+          "month_usd": {
+            "title": "Month Usd",
+            "type": "number"
+          },
+          "monthly_limit_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Monthly Limit Usd"
+          },
+          "today_usd": {
+            "title": "Today Usd",
+            "type": "number"
+          }
+        },
+        "required": [
+          "billing",
+          "today_usd",
+          "month_usd",
+          "daily_limit_usd",
+          "monthly_limit_usd"
+        ],
+        "title": "Spend",
+        "type": "object"
+      },
       "State": {
         "enum": [
           "proposed",
@@ -1458,6 +1821,115 @@
         ],
         "title": "Turn",
         "type": "string"
+      },
+      "Usage": {
+        "properties": {
+          "seats": {
+            "items": {
+              "$ref": "#/components/schemas/SeatUsage"
+            },
+            "title": "Seats",
+            "type": "array"
+          },
+          "spend": {
+            "items": {
+              "$ref": "#/components/schemas/Spend"
+            },
+            "title": "Spend",
+            "type": "array"
+          }
+        },
+        "required": [
+          "seats",
+          "spend"
+        ],
+        "title": "Usage",
+        "type": "object"
+      },
+      "UsageReport": {
+        "additionalProperties": false,
+        "description": "What a seat's hooks and status line send. `cost_usd` is the session's running total, as Claude\nCode reports it; the Desk books the difference from the last report against today's spend.",
+        "properties": {
+          "billing": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Billing"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "context_used": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Context Used"
+          },
+          "context_window": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Context Window"
+          },
+          "cost_usd": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cost Usd"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "session_id": {
+            "minLength": 1,
+            "title": "Session Id",
+            "type": "string"
+          },
+          "session_tokens": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Session Tokens"
+          }
+        },
+        "required": [
+          "session_id"
+        ],
+        "title": "UsageReport",
+        "type": "object"
       },
       "ValidationError": {
         "properties": {
@@ -1556,6 +2028,83 @@
         "summary": "Healthz",
         "tags": [
           "meta"
+        ]
+      }
+    },
+    "/v1/billing/{billing}": {
+      "put": {
+        "description": "Admin: the daily and monthly limits `usage` reports spend against. Null clears one.",
+        "operationId": "set_limits_v1_billing__billing__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "billing",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Billing"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BillingLimits"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Usage"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Missing, unknown or revoked API key."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The caller's role, or its seat, may not do this."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Set Limits",
+        "tags": [
+          "views"
         ]
       }
     },
@@ -1722,7 +2271,7 @@
                 }
               }
             },
-            "description": "A taken id or subject_key, an existing identity, or a second child in one assignment."
+            "description": "A taken id or subject_key, an existing identity, a second child in one assignment, or an item or seat not in a state to assign or claim."
           },
           "422": {
             "content": {
@@ -2212,7 +2761,7 @@
                 }
               }
             },
-            "description": "A taken id or subject_key, an existing identity, or a second child in one assignment."
+            "description": "A taken id or subject_key, an existing identity, a second child in one assignment, or an item or seat not in a state to assign or claim."
           },
           "422": {
             "content": {
@@ -2374,7 +2923,7 @@
                 }
               }
             },
-            "description": "A taken id or subject_key, an existing identity, or a second child in one assignment."
+            "description": "A taken id or subject_key, an existing identity, a second child in one assignment, or an item or seat not in a state to assign or claim."
           },
           "422": {
             "content": {
@@ -2393,6 +2942,192 @@
           }
         ],
         "summary": "Patch Item",
+        "tags": [
+          "items"
+        ]
+      }
+    },
+    "/v1/items/{item_id}/assign": {
+      "post": {
+        "description": "Admin: give an open item whose `after` items are all done to a seat. With no seat named, picks\nthe seat in the lane that has been free longest and is not held by Scott; 409 when none is.",
+        "operationId": "assign_v1_items__item_id__assign_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "title": "Item Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Assign"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Item"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Missing, unknown or revoked API key."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The caller's role, or its seat, may not do this."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "No such item, seat, identity or key."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A taken id or subject_key, an existing identity, a second child in one assignment, or an item or seat not in a state to assign or claim."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Assign",
+        "tags": [
+          "items"
+        ]
+      }
+    },
+    "/v1/items/{item_id}/claim": {
+      "post": {
+        "description": "desk_claim: the calling seat takes a queued, unowned, auto item in its lane whose `after` items\nare done. Atomic: of two seats claiming one item, one gets 409. The seat must be free and unheld.",
+        "operationId": "claim_v1_items__item_id__claim_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "title": "Item Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Item"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Missing, unknown or revoked API key."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The caller's role, or its seat, may not do this."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "No such item, seat, identity or key."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A taken id or subject_key, an existing identity, a second child in one assignment, or an item or seat not in a state to assign or claim."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Claim",
         "tags": [
           "items"
         ]
@@ -2569,7 +3304,7 @@
                 }
               }
             },
-            "description": "A taken id or subject_key, an existing identity, or a second child in one assignment."
+            "description": "A taken id or subject_key, an existing identity, a second child in one assignment, or an item or seat not in a state to assign or claim."
           },
           "422": {
             "content": {
@@ -2667,7 +3402,7 @@
                 }
               }
             },
-            "description": "A taken id or subject_key, an existing identity, or a second child in one assignment."
+            "description": "A taken id or subject_key, an existing identity, a second child in one assignment, or an item or seat not in a state to assign or claim."
           },
           "422": {
             "content": {
@@ -2728,6 +3463,47 @@
         "summary": "Me",
         "tags": [
           "identities"
+        ]
+      }
+    },
+    "/v1/outcomes": {
+      "get": {
+        "description": "`ashigaru outcomes`: each outcome with its stories' total, done, blocked and open counts.",
+        "operationId": "outcomes_v1_outcomes_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/OutcomeRow"
+                  },
+                  "title": "Response Outcomes V1 Outcomes Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Missing, unknown or revoked API key."
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Outcomes",
+        "tags": [
+          "views"
         ]
       }
     },
@@ -2838,7 +3614,7 @@
         ]
       },
       "patch": {
-        "description": "Created on first report. A seat writes only its own row; `since` moves when status does.",
+        "description": "Created on first report. A seat writes only turn, task and since on its own row; lane, status,\nowner (Scott's manual hold) and item are Josui's. `since` moves when status does.",
         "operationId": "patch_seat_v1_seats__name__patch",
         "parameters": [
           {
@@ -2911,6 +3687,121 @@
         "summary": "Patch Seat",
         "tags": [
           "seats"
+        ]
+      }
+    },
+    "/v1/seats/{name}/usage": {
+      "post": {
+        "description": "From the seat's hooks and status line: model, billing source, context, session tokens, and the\nsession's running cost, of which the increase since the last report is booked to today's spend.",
+        "operationId": "report_usage_v1_seats__name__usage_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UsageReport"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Seat"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Missing, unknown or revoked API key."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The caller's role, or its seat, may not do this."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Report Usage",
+        "tags": [
+          "seats"
+        ]
+      }
+    },
+    "/v1/usage": {
+      "get": {
+        "description": "`ashigaru usage`: per seat context, tokens, turn time and model; spend by billing source today\nand this month (UTC), against the limits Josui set.",
+        "operationId": "usage_v1_usage_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Usage"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Missing, unknown or revoked API key."
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Usage",
+        "tags": [
+          "views"
         ]
       }
     }

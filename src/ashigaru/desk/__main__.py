@@ -42,14 +42,23 @@ def import_ledger(args: argparse.Namespace) -> int:
 
 def mint_key(args: argparse.Namespace) -> int:
     conn = _open(args.db)
+    existing = store.get_identity(conn, args.identity)
+    if existing and existing["role"] != args.role and not args.change_role:
+        print(
+            f"{args.identity} is {existing['role']}, not {args.role}; pass --change-role to change it",
+            file=sys.stderr,
+        )
+        return 1
     try:
         descriptor = os.open(args.out, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     except FileExistsError:
         print(f"{args.out} exists; mint-key writes only a new file", file=sys.stderr)
         return 1
     with os.fdopen(descriptor, "w", encoding="utf-8") as out, store.transaction(conn):
-        if store.get_identity(conn, args.identity) is None:
+        if existing is None:
             store.create_identity(conn, args.identity, args.role)
+        elif existing["role"] != args.role:
+            store.set_role(conn, args.identity, args.role)
         key_id, token = auth.mint(conn, args.identity, args.label)
         out.write(token + "\n")
     print(f"key {key_id} for {args.identity} written to {args.out}")
@@ -83,6 +92,7 @@ def main(argv: list[str] | None = None) -> int:
     key.add_argument("identity")
     key.add_argument("--role", choices=[role.value for role in Role], required=True)
     key.add_argument("--label")
+    key.add_argument("--change-role", action="store_true", help="change an existing identity's role")
     key.add_argument("--out", required=True, help="a new file to write the token to, mode 0600")
     key.add_argument("--db", required=True, help="the SQLite file; created and migrated if new")
     key.set_defaults(func=mint_key)

@@ -13,11 +13,16 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
-from . import auth, store
+from . import auth, dispatch, store
 from .model import (
+    CLOSED,
     SEAT_FIELDS,
+    SEAT_ROW_FIELDS,
     SEAT_STATES,
     ApiKey,
+    Assign,
+    Billing,
+    BillingLimits,
     CheckRow,
     Event,
     FileChild,
@@ -29,13 +34,17 @@ from .model import (
     ItemPatch,
     KeyCreate,
     MintedKey,
+    OutcomeRow,
     Problem,
     Report,
     Role,
     Seat,
     SeatPatch,
     State,
+    Usage,
+    UsageReport,
     Verb,
+    Wrap,
 )
 
 VERSION = "3.0.0-dev"
@@ -85,11 +94,16 @@ def _conflict(error: store.Conflict) -> HTTPException:
 
 
 def writable_item(conn: sqlite3.Connection, item_id: str, who: auth.Caller) -> dict[str, Any]:
-    """The item, if `who` may write it: admins any, a seat only its own."""
+    """The item, if `who` may write it: admins any, a seat only its own and only while it is open.
+    Once Josui closes an item (done, wontdo, abandoned) or clears it, a seat cannot reopen it."""
     item = _found(store.get_item(conn, item_id), "item")
-    if who.admin or (who.role == Role.SEAT and item["seat"] == who.name):
+    if who.admin:
         return item
-    raise HTTPException(status.HTTP_403_FORBIDDEN, f"{item_id} belongs to {item['seat'] or 'no seat'}")
+    if who.role != Role.SEAT or item["seat"] != who.name:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, f"{item_id} belongs to {item['seat'] or 'no seat'}")
+    if item["state"] in CLOSED or item["wrap"] == Wrap.CLEARED:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, f"{item_id} is closed; only an admin may change it")
+    return item
 
 
 def seat_may(who: auth.Caller, fields: dict[str, Any]) -> None:
@@ -133,7 +147,10 @@ ERRORS = {
     401: "Missing, unknown or revoked API key.",
     403: "The caller's role, or its seat, may not do this.",
     404: "No such item, seat, identity or key.",
-    409: "A taken id or subject_key, an existing identity, or a second child in one assignment.",
+    409: (
+        "A taken id or subject_key, an existing identity, a second child in one assignment, or an item"
+        " or seat not in a state to assign or claim."
+    ),
 }
 
 
@@ -241,10 +258,70 @@ def get_seat(conn: Conn, who: Who, name: str) -> Seat:
 
 @router.patch("/v1/seats/{name}", tags=["seats"], responses=errors(401, 403))
 def patch_seat(conn: Conn, who: Who, name: str, body: SeatPatch) -> Seat:
-    """Created on first report. A seat writes only its own row; `since` moves when status does."""
-    if not (who.admin or (who.role == Role.SEAT and who.name == name)):
-        raise HTTPException(status.HTTP_403_FORBIDDEN, f"{who.name} may not write seat {name}")
-    return Seat.model_validate(store.upsert_seat(conn, name, body.model_dump(exclude_unset=True)))
+    """Created on first report. A seat writes only turn, task and since on its own row; lane, status,
+    owner (Scott's manual hold) and item are Josui's. `since` moves when status does."""
+    own_seat(who, name)
+    fields = body.model_dump(exclude_unset=True)
+    refused = sorted(set(fields) - SEAT_ROW_FIELDS)
+    if refused and not who.admin:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, f"a seat may not set: {', '.join(refused)}")
+    return Seat.model_validate(store.upsert_seat(conn, name, fields))
+
+
+@router.post("/v1/seats/{name}/usage", tags=["seats"], responses=errors(401, 403))
+def report_usage(conn: Conn, who: Who, name: str, body: UsageReport) -> Seat:
+    """From the seat's hooks and status line: model, billing source, context, session tokens, and the
+    session's running cost, of which the increase since the last report is booked to today's spend."""
+    own_seat(who, name)
+    return Seat.model_validate(dispatch.report_usage(conn, name, body.model_dump()))
+
+
+@router.get("/v1/usage", tags=["views"], responses=errors(401))
+def usage(conn: Conn, who: Who) -> Usage:
+    """`ashigaru usage`: per seat context, tokens, turn time and model; spend by billing source today
+    and this month (UTC), against the limits Josui set."""
+    return Usage.model_validate(dispatch.usage(conn))
+
+
+@router.put("/v1/billing/{billing}", tags=["views"], responses=errors(401, 403))
+def set_limits(conn: Conn, who: Admin, billing: Billing, body: BillingLimits) -> Usage:
+    """Admin: the daily and monthly limits `usage` reports spend against. Null clears one."""
+    dispatch.set_limits(conn, billing, body.model_dump())
+    return Usage.model_validate(dispatch.usage(conn))
+
+
+@router.get("/v1/outcomes", tags=["views"], responses=errors(401))
+def outcomes(conn: Conn, who: Who) -> list[OutcomeRow]:
+    """`ashigaru outcomes`: each outcome with its stories' total, done, blocked and open counts."""
+    return [OutcomeRow.model_validate(row) for row in dispatch.outcomes(conn)]
+
+
+@router.post("/v1/items/{item_id}/assign", tags=["items"], responses=errors(401, 403, 404, 409))
+def assign(conn: Conn, who: Admin, item_id: str, body: Assign) -> Item:
+    """Admin: give an open item whose `after` items are all done to a seat. With no seat named, picks
+    the seat in the lane that has been free longest and is not held by Scott; 409 when none is."""
+    try:
+        dispatch.assign(conn, item_id, body.seat, body.lane, who.name)
+    except KeyError as error:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "no such item") from error
+    except store.Conflict as error:
+        raise _conflict(error) from error
+    return Item.model_validate(store.get_item(conn, item_id))
+
+
+@router.post("/v1/items/{item_id}/claim", tags=["items"], responses=errors(401, 403, 404, 409))
+def claim(conn: Conn, who: Who, item_id: str) -> Item:
+    """desk_claim: the calling seat takes a queued, unowned, auto item in its lane whose `after` items
+    are done. Atomic: of two seats claiming one item, one gets 409. The seat must be free and unheld."""
+    if who.role != Role.SEAT:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "only a seat claims; an admin assigns")
+    try:
+        dispatch.claim(conn, item_id, who.name)
+    except KeyError as error:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "no such item") from error
+    except store.Conflict as error:
+        raise _conflict(error) from error
+    return Item.model_validate(store.get_item(conn, item_id))
 
 
 @router.get("/v1/identities", tags=["identities"], responses=errors(401, 403))
@@ -263,6 +340,11 @@ def create_identity(conn: Conn, who: Admin, body: IdentityCreate) -> Identity:
         return Identity.model_validate(store.create_identity(conn, body.name, body.role))
     except store.Conflict as error:
         raise _conflict(error) from error
+
+
+def own_seat(who: auth.Caller, name: str) -> None:
+    if not (who.admin or (who.role == Role.SEAT and who.name == name)):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, f"{who.name} may not write seat {name}")
 
 
 def self_or_admin(who: auth.Caller, name: str) -> None:

@@ -108,6 +108,32 @@ MIGRATIONS: tuple[str, ...] = (
         last_used_at TEXT
     );
     """,
+    """
+    ALTER TABLE seats ADD COLUMN model TEXT;
+    ALTER TABLE seats ADD COLUMN billing TEXT;
+    ALTER TABLE seats ADD COLUMN context_used INTEGER;
+    ALTER TABLE seats ADD COLUMN context_window INTEGER;
+    ALTER TABLE seats ADD COLUMN session_id TEXT;
+    ALTER TABLE seats ADD COLUMN session_tokens INTEGER;
+    ALTER TABLE seats ADD COLUMN session_cost_usd REAL NOT NULL DEFAULT 0;
+    ALTER TABLE seats ADD COLUMN turn_started_at TEXT;
+    CREATE INDEX seats_pick ON seats(lane, status, since);
+    CREATE INDEX items_parent ON items(parent);
+
+    CREATE TABLE spend (
+        billing TEXT NOT NULL,
+        day TEXT NOT NULL,
+        cost_usd REAL NOT NULL DEFAULT 0,
+        PRIMARY KEY (billing, day)
+    );
+
+    CREATE TABLE billing_limits (
+        billing TEXT PRIMARY KEY,
+        daily_usd REAL,
+        monthly_usd REAL,
+        updated_at TEXT NOT NULL
+    );
+    """,
 )
 
 ITEM_DEFAULTS: dict[str, Any] = {
@@ -165,16 +191,31 @@ CHECK_ACTIVE = """
 CHECK_ALL = "SELECT * FROM items ORDER BY state = 'blocked' DESC, updated_at DESC, id DESC"
 
 UPSERT_SEAT = """
-    INSERT INTO seats (name, lane, status, owner, turn, task, item, since, updated_at)
-    VALUES (:name, :lane, :status, :owner, :turn, :task, :item, :since, :updated_at)
+    INSERT INTO seats (
+        name, lane, status, owner, turn, task, item, since, updated_at, model, billing, context_used,
+        context_window, session_id, session_tokens, session_cost_usd, turn_started_at
+    ) VALUES (
+        :name, :lane, :status, :owner, :turn, :task, :item, :since, :updated_at, :model, :billing,
+        :context_used, :context_window, :session_id, :session_tokens, :session_cost_usd, :turn_started_at
+    )
     ON CONFLICT (name) DO UPDATE SET
         lane = excluded.lane, status = excluded.status, owner = excluded.owner, turn = excluded.turn,
-        task = excluded.task, item = excluded.item, since = excluded.since, updated_at = excluded.updated_at
+        task = excluded.task, item = excluded.item, since = excluded.since, updated_at = excluded.updated_at,
+        model = excluded.model, billing = excluded.billing, context_used = excluded.context_used,
+        context_window = excluded.context_window, session_id = excluded.session_id,
+        session_tokens = excluded.session_tokens, session_cost_usd = excluded.session_cost_usd,
+        turn_started_at = excluded.turn_started_at
 """
 
 SEAT_DEFAULTS: dict[str, Any] = {
     "lane": None, "status": "free", "owner": None, "turn": "idle", "task": None, "item": None,
+    "model": None, "billing": None, "context_used": None, "context_window": None, "session_id": None,
+    "session_tokens": None, "session_cost_usd": 0.0, "turn_started_at": None,
 }  # fmt: skip
+
+RELEASE_SEAT = """
+    UPDATE seats SET status = 'free', item = NULL, since = :at, updated_at = :at WHERE item = :item
+"""
 
 ITEM_FILTERS = ("state", "seat", "lane", "kind", "mode", "parent")
 ITEM_JSON = ("after", "extra")
@@ -334,6 +375,8 @@ def update_item(
     except sqlite3.IntegrityError as error:
         raise Conflict(str(error)) from error
     _record(conn, item_id, actor, source, fields)
+    if fields.get("state") in CLOSED or fields.get("wrap") == Wrap.CLEARED:
+        conn.execute(RELEASE_SEAT, {"at": at, "item": item_id})
 
 
 def file_child(conn: sqlite3.Connection, story: dict[str, Any], fields: dict[str, Any], actor: str) -> str:
@@ -410,16 +453,27 @@ def get_seat(conn: sqlite3.Connection, name: str) -> dict[str, Any] | None:
     return dict(row) if row else None
 
 
-def upsert_seat(conn: sqlite3.Connection, name: str, fields: dict[str, Any]) -> dict[str, Any]:
-    """Create the seat on first report; `since` moves when `status` does."""
+def write_seat(conn: sqlite3.Connection, name: str, fields: dict[str, Any]) -> dict[str, Any]:
+    """Create or patch a seat row; the caller holds the transaction.
+
+    `since` moves when `status` does, unless the caller sets it; `turn_started_at` when the turn goes active.
+    """
     at = now()
-    with transaction(conn):
-        current = get_seat(conn, name) or {**SEAT_DEFAULTS, "status": None, "since": at}
-        since = at if "status" in fields and fields["status"] != current["status"] else current["since"]
-        seat = {**SEAT_DEFAULTS, **current, **fields, "name": name, "since": since, "updated_at": at}
-        seat["status"] = seat["status"] or SEAT_DEFAULTS["status"]
-        conn.execute(UPSERT_SEAT, seat)
+    current = get_seat(conn, name) or {**SEAT_DEFAULTS, "status": None, "since": at}
+    stamps: dict[str, Any] = {}
+    if "status" in fields and fields["status"] != current["status"]:
+        stamps["since"] = at
+    if fields.get("turn") == "active" and current["turn"] != "active":
+        stamps["turn_started_at"] = at
+    seat = {**SEAT_DEFAULTS, **current, **stamps, **fields, "name": name, "updated_at": at}
+    seat["status"] = seat["status"] or SEAT_DEFAULTS["status"]
+    conn.execute(UPSERT_SEAT, seat)
     return seat
+
+
+def upsert_seat(conn: sqlite3.Connection, name: str, fields: dict[str, Any]) -> dict[str, Any]:
+    with transaction(conn):
+        return write_seat(conn, name, fields)
 
 
 # Identities and keys
@@ -432,6 +486,10 @@ def get_identity(conn: sqlite3.Connection, name: str) -> dict[str, Any] | None:
 
 def list_identities(conn: sqlite3.Connection) -> list[dict[str, Any]]:
     return [dict(row) for row in conn.execute("SELECT * FROM identities ORDER BY name")]
+
+
+def set_role(conn: sqlite3.Connection, name: str, role: str) -> None:
+    conn.execute("UPDATE identities SET role = ? WHERE name = ?", (role, name))
 
 
 def create_identity(conn: sqlite3.Connection, name: str, role: str) -> dict[str, Any]:
