@@ -57,3 +57,16 @@ def test_the_build_refuses_a_tag_that_does_not_name_version(tmp_path: Path) -> N
     )
     assert result.returncode == 1 and "does not match VERSION" in result.stderr
     assert not (tmp_path / "out").exists()
+
+
+def test_packaging_runs_no_model() -> None:
+    """rpm.yml and container.yml are outside the ASHIGARU_ENABLED switch (constitution), so they must
+    never run an agent; container.yml calls the constitution's release workflow at an exact version."""
+    for name in ("rpm.yml", "container.yml"):
+        text = (ROOT / ".github" / "workflows" / name).read_text()
+        assert "claude-code-action" not in text and "ASHIGARU_APP_KEY" not in text, name
+    container = yaml.safe_load((ROOT / ".github" / "workflows" / "container.yml").read_text())
+    job = container["jobs"]["container"]
+    assert re.fullmatch(r".*/container-release\.yml@v\d+\.\d+\.\d+", job["uses"])
+    assert job["with"]["contract-test"] == "packaging/container-test.sh"
+    assert container["permissions"] == {}

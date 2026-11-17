@@ -8,8 +8,9 @@ from importlib.metadata import PackageNotFoundError
 from pathlib import Path
 
 import pytest
-from fastapi import Request
+from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
+from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 
 import ashigaru
 from ashigaru.desk import __main__ as desk_main
@@ -81,3 +82,23 @@ def test_version_comes_from_the_installed_package(monkeypatch: pytest.MonkeyPatc
     assert importlib.reload(ashigaru).__version__ == "0"
     monkeypatch.undo()
     importlib.reload(ashigaru)
+
+
+def test_serve_hands_the_settings_to_the_app_and_turns_off_uvicorns_proxy_trust(
+    db: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls: list[tuple[FastAPI, dict[str, object]]] = []
+    monkeypatch.setattr("uvicorn.run", lambda app, **options: calls.append((app, options)))
+    monkeypatch.setenv("ASHIGARU_TRUSTED_PROXIES", "10.88.0.1")
+    argv = ["serve", "--db", str(db), "--host", "10.8.0.1", "--port", "9000"]
+    assert desk_main.main(argv) == 0
+    [(app, options)] = calls
+    assert options == {"host": "10.8.0.1", "port": 9000, "proxy_headers": False, "server_header": False}
+    [middleware] = [entry for entry in app.user_middleware if entry.cls is ProxyHeadersMiddleware]
+    assert middleware.kwargs == {"trusted_hosts": ["10.88.0.1"]}
+    assert app.state.db_path == str(db)
+
+    calls.clear()
+    monkeypatch.delenv("ASHIGARU_TRUSTED_PROXIES")
+    assert desk_main.main(argv) == 0
+    assert not [entry for entry in calls[0][0].user_middleware if entry.cls is ProxyHeadersMiddleware]
