@@ -7,7 +7,7 @@ Everything runs from containers; the host needs only git, podman, pre-commit and
 
 # Layout
 
-- `.github/workflows/{triage,code,fix}.yml`: the reusable workflows, the product.
+- `.github/workflows/{triage,code,fix,release}.yml`: the reusable workflows, the product. `router.yml` is the only one a caller names; it picks among them per event. A new job goes in the router, not the caller.
 - `.github/workflows/sweep.yml`: scheduled here only.
 - `.github/workflows/ashigaru.yml`: this repo's own caller; must equal `examples/ashigaru.yml`.
 - `scripts/`: every decision and every write. Standard library and `gh` only. Pure functions are tested in `tests/`; `main()` does the I/O.

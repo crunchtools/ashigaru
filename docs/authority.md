@@ -54,7 +54,7 @@ Two agents read text a stranger wrote: triage (an outside issue) and review (an 
 | Release bump merged without a person | minor, and only with `ashigaru-release-auto` | topics `ashigaru-release-max-patch`, `-minor`, `-major`; `configured` in `scripts/release.py` |
 | Quiet time on the default branch before a release | 20 minutes | `SETTLE` in `scripts/sweep.py` |
 | Outside pull requests reviewed per sweep | 5 | `MAX_REVIEWS` in `scripts/inbox.py` |
-| Runs at a time per issue or pull request branch | 1 | caller `concurrency` |
+| Runs at a time per issue or pull request branch | 1 | caller `concurrency`, per event kind |
 
 Each is covered in `tests/test_workflows.py`, `tests/test_findings.py`, `tests/test_sweep.py`, `tests/test_inbox.py` or `tests/test_release.py`.
 

@@ -11,7 +11,10 @@ WORKFLOWS = ROOT / ".github" / "workflows"
 VERSION = (ROOT / "VERSION").read_text().strip()
 # The tag callers use. Each release moves it, so no caller is edited to get a release.
 MAJOR = f"v{VERSION.split('.')[0]}"
-PRODUCT = ("triage.yml", "code.yml", "fix.yml", "sweep.yml", "review.yml", "major-tag.yml", "release.yml")
+PRODUCT = (
+    "triage.yml", "code.yml", "fix.yml", "sweep.yml", "review.yml", "major-tag.yml", "release.yml",
+    "router.yml",
+)  # fmt: skip
 REUSABLE = PRODUCT[:3]
 AGENTS = (*REUSABLE, "review.yml")
 """Workflows that run a model. Each fetches its scripts at the major tag."""
@@ -104,7 +107,9 @@ def test_the_caller_uses_the_major_tag_and_matches_the_example():
     example = (ROOT / "examples" / "ashigaru.yml").read_text()
     assert (WORKFLOWS / "ashigaru.yml").read_text() == example
     calls = {name: job["uses"] for name, job in yaml.safe_load(example)["jobs"].items()}
-    assert calls == {
+    assert calls == {"ashigaru": f"crunchtools/ashigaru/.github/workflows/router.yml@{MAJOR}"}
+    routes = {name: job["uses"] for name, job in jobs("router.yml") if "uses" in job}
+    assert routes == {
         name: f"crunchtools/ashigaru/.github/workflows/{name}.yml@{MAJOR}"
         for name in ("triage", "code", "fix", "release")
     }
@@ -113,8 +118,8 @@ def test_the_caller_uses_the_major_tag_and_matches_the_example():
 def test_a_merged_release_pull_request_is_published_then_not_at_the_next_sweep():
     """#166: in auto mode the release pull request merged and nothing tagged it for up to an hour."""
     caller = yaml.safe_load((ROOT / "examples" / "ashigaru.yml").read_text())
-    assert caller[True]["pull_request_target"] == {"types": ["closed"]}
-    job = caller["jobs"]["release"]
+    assert "closed" in caller[True]["pull_request_target"]["types"]
+    job = load("router.yml")["jobs"]["release"]
     for clause in (
         "github.event_name == 'pull_request_target'",
         "github.event.pull_request.merged == true",
@@ -177,8 +182,8 @@ def test_changelog_has_this_version():
     assert f"## [{VERSION}]" in (ROOT / "CHANGELOG.md").read_text()
 
 
-def test_the_caller_passes_secrets_to_fix_only_for_this_repository():
-    condition = yaml.safe_load((ROOT / "examples" / "ashigaru.yml").read_text())["jobs"]["fix"]["if"]
+def test_the_router_passes_secrets_to_fix_only_for_this_repository():
+    condition = load("router.yml")["jobs"]["fix"]["if"]
     assert "head_repository.full_name == github.repository" in condition
 
 

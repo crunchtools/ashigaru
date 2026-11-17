@@ -4,7 +4,9 @@ Setting up an organization, enrolling a repository, and releasing Ashigaru itsel
 
 ## Why it matters
 
-The supported wiring is one caller file, copied unchanged. Everything a repository might tune is an input, so the file stays identical across a fleet. It calls the workflows at the major tag (`@v2`), which the newest release moves, so a release reaches every repository without a change there.
+The supported wiring is one caller file, copied unchanged, so it stays identical across a fleet. It names one workflow, `router.yml`, at the major tag (`@v2`), which the newest release moves, so a release reaches every repository without a change there.
+
+Only a caller can declare triggers and jobs; a called workflow can add neither. So the caller subscribes to a deliberate superset of the events Ashigaru acts on (issues opened, labeled, reopened; comments; Gatehouse completing; pull requests opened, pushed, closed; a run by hand), grants the most any routed job needs, and passes its secrets with `secrets: inherit`, which GitHub allows within one organization. `router.yml` decides from the event which of triage, code, fix and release runs, narrows the token and hands each only the secrets it declares. An event nothing acts on ends in one `Nothing to do` step with no permissions and no secrets. A new job is a router change, so it needs no re-copy unless it needs an event or a token permission the caller does not already carry.
 
 ## How it works
 
@@ -43,7 +45,7 @@ gh repo edit crunchtools/mcp-pcloud --add-topic ashigaru-observe
 
 While the topic is there, the triage and code agents still run and every step that would write instead records what it would have done in one issue in that repository, labeled `ashigaru-observe` and titled "Ashigaru is watching". The record is rewritten as things change, and the inbox lists it under `## Watching`. Nothing else is written: no label on any other issue, no comment, no branch, no pull request, no review, no fix round, no release. The sweep queues no triage or fix there, and nothing there counts against `code_per_hour`. Removing the topic ends it: the next sweep closes the issue with a comment, and Ashigaru acts normally with no other change. Ashigaru never triages or fixes its own observe issue.
 
-**Inputs**
+**Inputs.** The router passes none, so every repository runs the defaults below. A repository that must tune one calls the workflow directly from its own caller, as callers did before the router, and gives up automatic new jobs.
 
 | Workflow | Input | Default |
 |----------|-------|---------|
