@@ -77,6 +77,7 @@ PR, the issue it closes and its findings land on one story.
   stop) to report seat state and turn activity, replacing today's
   `seat-state.json` hooks. Seats, Josui and scripts all use the same
   command.
+- **The CLI, the `/ashigaru` skill and the MCP tools share one command set** (see the `/ashigaru` section below), so moving between them means nothing new to learn.
 - **API keys for the client (Scott, 2026-11-17).** Each identity (a seat,
   Josui, Scott, a CI job) has its own API key, minted and revoked through
   the service. The CLI reads the service URL and key from
@@ -132,6 +133,40 @@ PR, the issue it closes and its findings land on one story.
 - **Policy file.** One YAML file: lane defaults by repo and the child cap.
   Dependabot auto-merge stays in the constitution's reusable workflow; the
   Desk records the PR and its outcome.
+
+### The `/ashigaru` skill and the `ashigaru` CLI (Scott, 2026-11-17)
+
+The `/agents` skill becomes `/ashigaru`, a thin skill over the `ashigaru` CLI.
+The CLI, the skill and the MCP tools share one command set with the same names
+and arguments, so moving between a terminal, a Claude session and an MCP
+client means nothing new to learn.
+
+Views:
+
+| Command | Shows |
+|---|---|
+| `ashigaru usage` | One row per seat: context used, tokens this session, time in the current turn, model. Spend by billing source (Max, Vertex, OpenRouter), today and this month, against the limits. |
+| `ashigaru agents` | One row per connected seat (Dolza 1 - Max, Dolza 2 - Vertex, Exedore 3 - Max, ...): free or busy, the item it holds, how long it has been at it. |
+| `ashigaru work` | One row per item (a204, a203, ...): seat, auto or manual, task, state, result, next. Newest first, with items blocked on Scott at the top. |
+| `ashigaru queue` | Queued items and what each waits on, plus agent-filed children in `proposed` and their expiry. |
+| `ashigaru outcomes` | Each RT ticket or GitHub issue with its stories and their done, blocked and open counts. |
+
+Actions:
+
+| Command | Does |
+|---|---|
+| `ashigaru assign` | Picks a seat by lane, sends the brief and records the item. |
+| `ashigaru auto` / `ashigaru manual` | Hands an item to Josui or to Scott. |
+| `ashigaru wait` | Waits on a commit's CI through the webhook callback, without polling. |
+| `ashigaru wrap` | Saves the seat's learnings, confirms it is idle, clears it, and closes the item. |
+
+Seats report usage and turn state by calling the same CLI from their Claude
+Code hooks and status line.
+
+The skill uses whichever is available. It calls the MCP tools when the session
+has them (claude.ai, the phone, any client without a shell), and the `ashigaru`
+CLI otherwise. Because both share one command set, the skill's instructions are
+the same either way.
 
 ### 2. Josui Prime, the dispatcher
 
