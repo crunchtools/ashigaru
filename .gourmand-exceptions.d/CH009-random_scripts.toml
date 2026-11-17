@@ -1,0 +1,21 @@
+check = "CH009-random_scripts"
+
+[[locations]]
+path = "packaging/build.sh"
+justification = "Run by .github/workflows/rpm.yml to build the RPMs, and by hand per CLAUDE.md; the repo rule keeps workflow logic in scripts rather than in run: blocks."
+classification = "by_design"
+
+[[locations]]
+path = "packaging/rpmbuild-in-container.sh"
+justification = "Run by packaging/build.sh inside the build container; it is the rpmbuild half of that script."
+classification = "by_design"
+
+[[locations]]
+path = "packaging/smoke.sh"
+justification = "Run by .github/workflows/rpm.yml after each build to install the RPMs in a fresh container and run every command with --help."
+classification = "by_design"
+
+[[locations]]
+path = "packaging/container-test.sh"
+justification = "The image's contract test: .github/workflows/container.yml passes it to the constitution's container-release.yml as contract-test, which runs it against the pushed digest."
+classification = "by_design"
