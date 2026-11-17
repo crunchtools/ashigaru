@@ -1,11 +1,12 @@
 """The hosted MCP: codes as credentials, and the same authority as the REST API, identity by identity."""
 
 import sqlite3
+import sys
 import threading
 import time
 from collections.abc import Iterator
 from contextlib import contextmanager
-from http.client import CREATED, FORBIDDEN, NOT_FOUND, OK
+from http.client import CONFLICT, CREATED, FORBIDDEN, NOT_FOUND, OK
 from pathlib import Path
 from typing import Any
 
@@ -15,6 +16,7 @@ import uvicorn
 from conftest import Keys
 from fastapi.testclient import TestClient
 
+from ashigaru.desk import mcp as mcp_package
 from ashigaru.desk import store
 from ashigaru.desk.api import create_app
 from ashigaru.desk.mcp import codes
@@ -259,3 +261,21 @@ def test_no_log_and_no_header_carries_a_code(
     assert secret not in server_log
     for response in responses:
         assert secret not in str(response.headers)
+
+
+def test_without_fastmcp_there_is_no_mcp(
+    db: Path, keys: Keys, conn: sqlite3.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The RPM Desk: no `mcp` extra, so no /mcp route, and minting a code says why instead of
+    handing out a dead URL. Listing and revoking still work for codes minted elsewhere."""
+    monkeypatch.setitem(sys.modules, "fastmcp", None)
+    monkeypatch.delitem(sys.modules, "ashigaru.desk.mcp.server", raising=False)
+    monkeypatch.delattr(mcp_package, "server", raising=False)
+    code_id, code = codes.mint(conn, SEAT)
+    with TestClient(create_app(db)) as bare:
+        minted = bare.post(f"/v1/identities/{SEAT}/mcp", headers=keys[JOSUI], json={})
+        assert minted.status_code == CONFLICT and "mcp" in minted.json()["detail"]
+        assert bare.post(f"/mcp/{code}", headers=MCP_HEADERS, json={}).status_code == NOT_FOUND
+        assert [
+            row["code_id"] for row in bare.get(f"/v1/identities/{SEAT}/mcp", headers=keys[SEAT]).json()
+        ] == [code_id]

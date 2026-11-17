@@ -115,6 +115,8 @@ The service ships two ways, both built on GitHub:
   volume. Its HEALTHCHECK is `ashigaru-desk health`.
 - **RPMs:** `ashigaru` (the CLI) and `ashigaru-desk` (the service), for Fedora
   and EL10, attached to each 3.x GitHub release (`.github/workflows/rpm.yml`).
+  The RPM Desk has no hosted MCP: fastmcp is the image's `mcp` extra, so there
+  `/mcp` is not served and minting an MCP code is a 409.
 
 Settings are flags on `ashigaru-desk serve`, else these environment variables:
 

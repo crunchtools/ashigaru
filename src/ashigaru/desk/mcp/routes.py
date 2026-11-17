@@ -50,10 +50,15 @@ def list_codes(conn: Conn, who: Who, name: str) -> list[McpCode]:
 
 
 @router.post(
-    "/v1/identities/{name}/mcp", status_code=status.HTTP_201_CREATED, responses=errors(401, 403, 404)
+    "/v1/identities/{name}/mcp", status_code=status.HTTP_201_CREATED, responses=errors(401, 403, 404, 409)
 )
 def mint_code(conn: Conn, who: Admin, request: Request, name: str, body: McpCodeCreate) -> MintedMcpCode:
-    """Admin only. Whoever holds the URL acts as `name`, through the same authority as its API key."""
+    """Admin only. Whoever holds the URL acts as `name`, through the same authority as its API key.
+    409 where the Desk serves no MCP (installed without the `mcp` extra, as the RPM is)."""
+    if not request.app.state.mcp:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT, "this Desk serves no MCP: it was installed without the `mcp` extra"
+        )
     _found(store.get_identity(conn, name), "identity")
     code_id, code = codes.mint(conn, name, body.label)
     row: dict[str, Any] = _found(codes.get(conn, code_id), "code")

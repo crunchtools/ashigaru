@@ -60,13 +60,15 @@ dependencies = [
 [package.optional-dependencies]
 desk = [
     { name = "fastapi" },
-    { name = "fastmcp" },
     { name = "uvicorn" },
+]
+mcp = [
+    { name = "fastmcp" },
 ]
 
 [package.dev-dependencies]
 dev = [
-    { name = "ashigaru", extra = ["desk"] },
+    { name = "ashigaru", extra = ["desk", "mcp"] },
     { name = "httpx" },
     { name = "mypy" },
     { name = "pytest" },
@@ -76,15 +78,15 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "fastapi", marker = "extra == 'desk'", specifier = ">=0.115" },
-    { name = "fastmcp", marker = "extra == 'desk'", specifier = ">=4.2" },
+    { name = "fastmcp", marker = "extra == 'mcp'", specifier = ">=4.2" },
     { name = "pydantic", specifier = ">=2.9" },
     { name = "uvicorn", marker = "extra == 'desk'", specifier = ">=0.32" },
 ]
-provides-extras = ["desk"]
+provides-extras = ["desk", "mcp"]
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "ashigaru", extras = ["desk"] },
+    { name = "ashigaru", extras = ["desk", "mcp"] },
     { name = "httpx", specifier = ">=0.28" },
     { name = "mypy", specifier = ">=1.14" },
     { name = "pytest", specifier = ">=8.3" },

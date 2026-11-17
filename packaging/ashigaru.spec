@@ -52,7 +52,8 @@ for bin in %{buildroot}%{_bindir}/*; do
 done
 
 %check
-%pyproject_check_import
+# The hosted MCP needs fastmcp, the `mcp` extra, which the RPMs leave out.
+%pyproject_check_import -e ashigaru.desk.mcp.server
 
 %files -f %{pyproject_files}
 %license LICENSE
