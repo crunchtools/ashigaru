@@ -45,7 +45,8 @@ def test_subject_key_and_id_are_unique(client: TestClient, keys: Keys) -> None:
     assert (
         client.post("/v1/items", headers=keys[JOSUI], json={"task": "t", "id": "a1"}).status_code == CONFLICT
     )
-    client.post("/v1/items", headers=keys[JOSUI], json={"task": "t", "id": "a99x"})
+    odd = client.post("/v1/items", headers=keys[JOSUI], json={"task": "t", "id": "a99x"})
+    assert odd.status_code == CREATED and odd.json()["id"] == "a99x"
     assert client.post("/v1/items", headers=keys[JOSUI], json={"task": "t"}).json()["id"] == "a2"
     assert (
         client.post("/v1/items", headers=keys[JOSUI], json={"task": "t", "bogus": 1}).status_code
