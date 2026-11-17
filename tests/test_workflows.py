@@ -1,6 +1,7 @@
 """The workflow files hold the limits and the authority split the profile requires."""
 
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -13,11 +14,15 @@ VERSION = (ROOT / "VERSION").read_text().strip()
 MAJOR = f"v{VERSION.split('.')[0]}"
 PRODUCT = (
     "triage.yml", "code.yml", "fix.yml", "sweep.yml", "review.yml", "major-tag.yml", "release.yml",
-    "router.yml",
+    "router.yml", "release-tag.yml",
 )  # fmt: skip
 REUSABLE = PRODUCT[:3]
 AGENTS = (*REUSABLE, "review.yml")
 """Workflows that run a model. Each fetches its scripts at the major tag."""
+UNSWITCHED = ("release-tag.yml", "release.yml", "major-tag.yml")
+"""Workflows that run no model and must keep tagging releases while ASHIGARU_ENABLED is false."""
+SWITCHED = tuple(name for name in PRODUCT if name not in UNSWITCHED)
+COMMIT = re.compile(r"[0-9a-f]{40}")
 BASE_ACTION = "anthropics/claude-code-action/base-action@"
 WRITE = {"write"}
 
@@ -43,16 +48,51 @@ def test_workflows_start_from_no_permissions(name):
     assert load(name)["permissions"] == {}
 
 
-@pytest.mark.parametrize("name", PRODUCT)
+@pytest.mark.parametrize("name", SWITCHED)
 def test_the_switch_gates_the_first_job_and_every_job_has_a_timeout(name):
     gated = False
     for _, job in jobs(name):
         # A job that calls a workflow cannot set a timeout; the called jobs set their own.
         assert "uses" in job or isinstance(job.get("timeout-minutes"), int)
-        if "needs" not in job:
+        # The router's release route is the one exception (test_the_router_tags_releases_with_the_switch_off).
+        if "needs" not in job and not (
+            name == "router.yml" and job.get("uses", "").endswith(f"release-tag.yml@{MAJOR}")
+        ):
             assert "vars.ASHIGARU_ENABLED == 'true'" in job["if"]
             gated = True
     assert gated
+
+
+@pytest.mark.parametrize("name", UNSWITCHED)
+def test_release_tagging_ignores_the_switch_and_runs_no_model(name):
+    """ASHIGARU_ENABLED=false must not stop a merged release from being tagged, nor v2 from moving."""
+    for _, job in jobs(name):
+        assert "uses" in job or isinstance(job.get("timeout-minutes"), int)
+        assert "ASHIGARU_ENABLED" not in str(job)
+        assert not runs_llm(job)
+
+
+def test_the_router_tags_releases_with_the_switch_off():
+    routes = load("router.yml")["jobs"]
+    assert "ASHIGARU_ENABLED" not in routes["release"]["if"]
+    for name, job in routes.items():
+        if name != "release":
+            assert "vars.ASHIGARU_ENABLED == 'true'" in job["if"]
+
+
+def test_a_caller_copied_at_2_13_1_reaches_the_same_release_tag():
+    job = load("release.yml")["jobs"]["publish"]
+    assert job["uses"] == f"crunchtools/ashigaru/.github/workflows/release-tag.yml@{MAJOR}"
+    assert job["secrets"] == {"ASHIGARU_APP_KEY": "${{ secrets.ASHIGARU_APP_KEY }}"}
+    assert job["permissions"] == {"contents": "read"}
+
+
+def test_the_release_tag_pins_its_actions_by_commit():
+    """The step holding the app token runs only code whose owner cannot move it under us."""
+    uses = [step["uses"] for _, job in jobs("release-tag.yml") for step in steps_of(job) if "uses" in step]
+    assert uses
+    for ref in uses:
+        assert COMMIT.fullmatch(ref.partition("@")[2]), ref
 
 
 @pytest.mark.parametrize("name", AGENTS)
@@ -91,7 +131,7 @@ def test_an_agent_that_reads_outside_text_cannot_edit(name):
     assert args and all('--allowedTools "Read,Glob,Grep"' in value for value in args)
 
 
-@pytest.mark.parametrize("name", (*AGENTS, "release.yml"))
+@pytest.mark.parametrize("name", (*AGENTS, "release-tag.yml"))
 def test_reusable_workflows_fetch_their_scripts_at_the_major_tag(name):
     """A called workflow cannot name its own ref, so the tag is a literal: the one callers use."""
     fetches = [
@@ -110,8 +150,13 @@ def test_the_caller_uses_the_major_tag_and_matches_the_example():
     assert calls == {"ashigaru": f"crunchtools/ashigaru/.github/workflows/router.yml@{MAJOR}"}
     routes = {name: job["uses"] for name, job in jobs("router.yml") if "uses" in job}
     assert routes == {
-        name: f"crunchtools/ashigaru/.github/workflows/{name}.yml@{MAJOR}"
-        for name in ("triage", "code", "fix", "release")
+        name: f"crunchtools/ashigaru/.github/workflows/{called}.yml@{MAJOR}"
+        for name, called in (
+            ("triage", "triage"),
+            ("code", "code"),
+            ("fix", "fix"),
+            ("release", "release-tag"),
+        )
     }
 
 
@@ -127,14 +172,14 @@ def test_a_merged_release_pull_request_is_published_then_not_at_the_next_sweep()
         "startsWith(github.event.pull_request.head.ref, 'ashigaru/release-')",
     ):
         assert clause in job["if"]
-        assert clause in load("release.yml")["jobs"]["publish"]["if"]
+        assert clause in load("release-tag.yml")["jobs"]["publish"]["if"]
     assert job["secrets"] == {"ASHIGARU_APP_KEY": "${{ secrets.ASHIGARU_APP_KEY }}"}
     assert "github.event.pull_request.head.ref" in caller["concurrency"]["group"]
 
 
 def test_the_release_on_merge_tags_with_the_app_token_for_this_repository_only():
     """A tag made with GITHUB_TOKEN starts no workflow, so container.yml would never run."""
-    job = load("release.yml")["jobs"]["publish"]
+    job = load("release-tag.yml")["jobs"]["publish"]
     mint = tokens(job)["app"]
     assert grants(mint) == {"permission-contents": "write", "permission-pull-requests": "read"}
     assert mint["with"]["repositories"] == "${{ github.event.repository.name }}"

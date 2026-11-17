@@ -59,11 +59,11 @@ While the topic is there, the triage and code agents still run and every step th
 | | `reviewer`, `bot` | `github-actions[bot]`, `ashigaru-crunchtools` |
 | | `allowed_tools`, `max_turns` | as `code.yml` |
 
-**Turning it off.** Set `ASHIGARU_ENABLED` to `false` to stop every repository at once. Delete the caller file to remove one repository.
+**Turning it off.** Set `ASHIGARU_ENABLED` to `false` to stop every repository at once. Release tagging keeps running: a release pull request that has merged is still tagged and published (docs/release.md). Delete the caller file to remove one repository.
 
 ## Releasing
 
-Callers use the major tag, `@v2`, and each reusable workflow fetches its scripts at the same tag: a called workflow cannot name its own ref, so it is a literal. To release `X.Y.Z`: set `VERSION`, add the CHANGELOG entry, merge, then tag `vX.Y.Z` and publish the GitHub Release. Publishing runs `major-tag.yml`, which moves `v2` to the release when it is the newest of its major, and from that moment every enrolled repository runs it. A late patch to an older minor is published without moving `v2`. Like every workflow here it stops when `ASHIGARU_ENABLED` is not `true`; re-run it once the switch is back on. No file in any other repository changes. `tests/test_workflows.py` fails if a workflow, the example or this repository's caller names anything but the major tag.
+Callers use the major tag, `@v2`, and each reusable workflow fetches its scripts at the same tag: a called workflow cannot name its own ref, so it is a literal. To release `X.Y.Z`: set `VERSION`, add the CHANGELOG entry, merge, then tag `vX.Y.Z` and publish the GitHub Release. Publishing runs `major-tag.yml`, which moves `v2` to the release when it is the newest of its major, and from that moment every enrolled repository runs it. A late patch to an older minor is published without moving `v2`. Unlike the agents it runs while `ASHIGARU_ENABLED` is `false`, so a release still reaches the callers. No file in any other repository changes. `tests/test_workflows.py` fails if a workflow, the example or this repository's caller names anything but the major tag.
 
 **Rolling back.** Every release keeps its own tag. To undo one, move the major tag back: `git tag -f v2 vX.Y.Z && git push -f origin v2`. A repository that needs to stay on one release can call `@vX.Y.Z`, but the scripts are still fetched at `v2`, so this holds only the workflow files.
 

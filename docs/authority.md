@@ -44,7 +44,7 @@ Two agents read text a stranger wrote: triage (an outside issue) and review (an 
 
 | Limit | Default | Where |
 |-------|---------|-------|
-| Switch: every workflow stops at its first job unless it is `true` | n/a | organization variable `ASHIGARU_ENABLED` |
+| Switch: every workflow that runs a model, and the sweep, stops at its first job unless it is `true`; release tagging (`release-tag.yml`, `major-tag.yml`) does not | n/a | organization variable `ASHIGARU_ENABLED` |
 | Turns per agent step | 40 triage, 80 code and fix | input `max_turns` |
 | Job timeout | 20, 60 and 75 minutes | workflow files |
 | Hook passes fed back to the code agent | 2 | `code.yml` |

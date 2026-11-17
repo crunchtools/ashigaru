@@ -4,6 +4,9 @@
 # that is the whole rollout: no caller file changes anywhere. The tag moves
 # forward only: a release older than the newest of its major leaves it alone.
 # To undo a release, move the tag back by hand (docs/enrollment.md).
+#
+# Not stopped by ASHIGARU_ENABLED: it runs no model, and a release of Ashigaru
+# made while it is off (release-tag.yml, say) must still reach the callers.
 
 name: Major tag
 
@@ -22,7 +25,7 @@ concurrency:
 jobs:
   move:
     name: Move the major tag
-    if: vars.ASHIGARU_ENABLED == 'true' && !github.event.release.prerelease
+    if: ${{ !github.event.release.prerelease }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
