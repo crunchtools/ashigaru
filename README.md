@@ -45,6 +45,7 @@ Details and the full list of inputs are in [docs/enrollment.md](docs/enrollment.
 | [docs/review.md](docs/review.md) | First-pass review of outside pull requests, and the inbox issue |
 | [docs/authority.md](docs/authority.md) | Who holds which credential, untrusted input, the switch and the caps |
 | [docs/enrollment.md](docs/enrollment.md) | Organization setup, enrolling a repository, inputs, releasing |
+| [docs/design/ashigaru-3.md](docs/design/ashigaru-3.md) | The Ashigaru 3.x design: the Desk, Josui dispatch, Exedore runners (#178) |
 
 ## Development
 
