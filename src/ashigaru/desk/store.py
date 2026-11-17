@@ -375,7 +375,9 @@ def update_item(
     except sqlite3.IntegrityError as error:
         raise Conflict(str(error)) from error
     _record(conn, item_id, actor, source, fields)
-    if fields.get("state") in CLOSED or fields.get("wrap") == Wrap.CLEARED:
+    closed = fields.get("state") in CLOSED or fields.get("wrap") == Wrap.CLEARED
+    reassigned = "seat" in fields and fields["seat"] != current["seat"]
+    if closed or reassigned:
         conn.execute(RELEASE_SEAT, {"at": at, "item": item_id})
 
 
@@ -456,7 +458,7 @@ def get_seat(conn: sqlite3.Connection, name: str) -> dict[str, Any] | None:
 def write_seat(conn: sqlite3.Connection, name: str, fields: dict[str, Any]) -> dict[str, Any]:
     """Create or patch a seat row; the caller holds the transaction.
 
-    `since` moves when `status` does, unless the caller sets it; `turn_started_at` when the turn goes active.
+    `since` moves when `status` does, `turn_started_at` when the turn goes active; callers set neither.
     """
     at = now()
     current = get_seat(conn, name) or {**SEAT_DEFAULTS, "status": None, "since": at}
@@ -465,7 +467,7 @@ def write_seat(conn: sqlite3.Connection, name: str, fields: dict[str, Any]) -> d
         stamps["since"] = at
     if fields.get("turn") == "active" and current["turn"] != "active":
         stamps["turn_started_at"] = at
-    seat = {**SEAT_DEFAULTS, **current, **stamps, **fields, "name": name, "updated_at": at}
+    seat = {**SEAT_DEFAULTS, **current, **fields, **stamps, "name": name, "updated_at": at}
     seat["status"] = seat["status"] or SEAT_DEFAULTS["status"]
     conn.execute(UPSERT_SEAT, seat)
     return seat

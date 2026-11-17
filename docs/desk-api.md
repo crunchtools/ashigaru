@@ -19,7 +19,7 @@ returned once, by the mint call. Keys never travel in a URL or a query string.
 | Role | Who | Reads | Writes |
 |---|---|---|---|
 | `admin` | Josui, Scott | everything | every item, seat, identity and key |
-| `seat` | one worker; its identity name is its seat name | everything | open items whose `seat` is its name, claims, `turn`/`task`/`since` and usage on its own seat row, its own keys (revoke) |
+| `seat` | one worker; its identity name is its seat name | everything | open items whose `seat` is its name, claims, `turn`/`task` and usage on its own seat row, its own keys (revoke) |
 | `ci` | a job | everything | its own keys (revoke) |
 
 A seat may set only `state`, `result`, `next`, `learned`, `note`,
@@ -50,11 +50,11 @@ can return.
 | `POST /items/{id}/report` | the report contract: `DONE` to `review` with `text` as the result, `BLOCKED` to `blocked` with `text` as the reason, `WORKING` to `working`, `CC-DONE` sets `memorized`; a `learned` of `none` is not recorded |
 | `POST /items/{id}/file` | `desk_file`: a `proposed` child under the story's outcome; one per assignment (409 on the second); abandoned 14 days later unless Josui promotes it |
 | `POST /items/{id}/assign` | admin: `{seat}` names one; `{}` or `{lane}` picks the seat in the lane (default: the item's) free longest and not held by Scott. 409 when the item is closed or waits on an `after` item not done, or the seat is busy, held or unknown |
-| `POST /items/{id}/claim` | `desk_claim`, seats only: take a `queued`, seatless, `auto` item in the seat's lane whose `after` items are done. Atomic; the loser of a race gets 409. The seat must be free and unheld |
+| `POST /items/{id}/claim` | `desk_claim`, seats only: take a `queued`, seatless, `auto` item in the seat's lane whose `after` items are done. Atomic; the loser of a race gets 409. The seat must be free, unheld and have a lane: a seat with no lane claims nothing |
 | `GET /items/{id}/events` | the item's history, ledger lines included, oldest first; pages of `limit` (200, at most 1000) after `after` (a seq) |
 | `GET /check` | the `/agents check` table: id, seat, mode, task, state, wrap, result or blocker, next. Blocked first, then newest; `?all=true` includes cleared, wontdo and abandoned |
 | `GET /seats`, `GET /seats/{name}` | seat state: free/busy, owner, turn, task, item, since, and the last usage report |
-| `PATCH /seats/{name}` | created on first call; a seat sends `turn`, `task`, `since`; `since` moves when `status` does, `turn_started_at` when the turn goes active |
+| `PATCH /seats/{name}` | created on first call; a seat sends `turn` and `task`. `since` is server-set when `status` changes, `turn_started_at` when the turn goes active |
 | `POST /seats/{name}/usage` | the seat or an admin: `session_id`, `model`, `billing` (max / vertex / openrouter), `context_used`, `context_window`, `session_tokens`, `cost_usd` (the session's running total; the increase since the last report is booked to today's spend) |
 | `GET /usage` | `ashigaru usage`: per seat model, context, session tokens and cost, turn and seconds in it; spend by billing source today and this month (UTC) with limits |
 | `PUT /billing/{billing}` | admin: `daily_usd`, `monthly_usd` limits |
@@ -70,7 +70,8 @@ States: `proposed`, `queued`, `assigned`, `working`, `review`, `done`,
 `blocked`, `wontdo`, `abandoned`. Wrap-up is separate, in `wrap`: `wrapping`
 when `/cc seat` has been sent, `cleared` once the seat is cleared. Setting a
 state stamps `assigned_at`, `queued_at` or `closed_at`; `wrap: cleared` stamps
-`cleared_at`. Closing an item or clearing it frees the seat that holds it.
+`cleared_at`. Closing an item, clearing it, or moving it to another seat frees
+the seat that held it.
 Times are UTC, `YYYY-MM-DDTHH:MM:SSZ`.
 
 ## Ledger import

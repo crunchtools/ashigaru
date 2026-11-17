@@ -258,8 +258,8 @@ def get_seat(conn: Conn, who: Who, name: str) -> Seat:
 
 @router.patch("/v1/seats/{name}", tags=["seats"], responses=errors(401, 403))
 def patch_seat(conn: Conn, who: Who, name: str, body: SeatPatch) -> Seat:
-    """Created on first report. A seat writes only turn, task and since on its own row; lane, status,
-    owner (Scott's manual hold) and item are Josui's. `since` moves when status does."""
+    """Created on first report. A seat writes only turn and task on its own row; lane, status, owner
+    (Scott's manual hold) and item are Josui's. `since` is the Desk's: it moves when status does."""
     own_seat(who, name)
     fields = body.model_dump(exclude_unset=True)
     refused = sorted(set(fields) - SEAT_ROW_FIELDS)

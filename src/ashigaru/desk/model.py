@@ -254,7 +254,7 @@ class Seat(BaseModel):
 
 class SeatPatch(BaseModel):
     """A seat may send SEAT_ROW_FIELDS for its own row. The rest are Josui's: lane, status, the owner
-    that is Scott's manual hold, and the item it holds."""
+    that is Scott's manual hold, and the item it holds. `since` is server-set."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -264,10 +264,10 @@ class SeatPatch(BaseModel):
     turn: Turn | None = None
     task: str | None = None
     item: str | None = None
-    since: str | None = None
 
 
-SEAT_ROW_FIELDS = frozenset({"turn", "task", "since"})
+SEAT_ROW_FIELDS = frozenset({"turn", "task"})
+"""`since` is in neither: the Desk stamps it when status changes, so no one can jump the pick queue."""
 
 
 class UsageReport(BaseModel):

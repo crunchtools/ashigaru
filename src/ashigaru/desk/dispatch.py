@@ -111,7 +111,8 @@ def assign(conn: sqlite3.Connection, item_id: str, seat: str | None, lane: str |
 
 
 def claim(conn: sqlite3.Connection, item_id: str, seat: str) -> None:
-    """desk_claim: a free seat takes a queued, unowned, auto item in its lane."""
+    """desk_claim: a free seat takes a queued, unowned, auto item in its lane. Fails closed: a seat
+    with no lane claims nothing, and an item with a lane goes only to a seat in it."""
     with store.transaction(conn):
         item = store.get_item(conn, item_id)
         if item is None:
@@ -124,7 +125,9 @@ def claim(conn: sqlite3.Connection, item_id: str, seat: str) -> None:
         if item["mode"] != "auto":
             raise store.Conflict(f"{item_id} is manual: Scott's to hand out")
         row = _free(store.get_seat(conn, seat), seat)
-        if item["lane"] and row["lane"] and item["lane"] != row["lane"]:
+        if row["lane"] is None:
+            raise store.Conflict(f"seat {seat!r} has no lane; Josui sets it before it can claim")
+        if item["lane"] and item["lane"] != row["lane"]:
             raise store.Conflict(f"{item_id} is in lane {item['lane']}, seat {seat!r} in {row['lane']}")
         _take(conn, item, row, seat)
 

@@ -1,7 +1,7 @@
 """Assign with seat-pick, desk_claim, usage and spend, and the outcomes rollup."""
 
 import sqlite3
-from http.client import CONFLICT, FORBIDDEN, NOT_FOUND, OK
+from http.client import CONFLICT, FORBIDDEN, NOT_FOUND, OK, UNPROCESSABLE_ENTITY
 
 import pytest
 from conftest import Keys
@@ -160,3 +160,46 @@ def test_outcomes_roll_up_their_stories(client: TestClient, keys: Keys) -> None:
     counts = rows[outcome]
     assert (counts["total"], counts["done"], counts["blocked"], counts["open"]) == (6, 2, 1, 2)
     assert (rows[empty]["total"], rows[empty]["open"]) == (0, 0)
+
+
+def test_a_seat_with_no_lane_claims_nothing(client: TestClient, keys: Keys) -> None:
+    client.patch(f"/v1/seats/{MINE}", headers=keys[MINE], json={"turn": "idle"})
+    assert client.get(f"/v1/seats/{MINE}", headers=keys[CI]).json()["lane"] is None
+    for lane in ("prime", "exedore-max", None):
+        target = item(client, keys, lane=lane)
+        assert client.post(f"/v1/items/{target}/claim", headers=keys[MINE]).status_code == CONFLICT, lane
+        assert client.get(f"/v1/items/{target}", headers=keys[CI]).json()["seat"] is None
+
+
+def test_reassigning_frees_the_previous_holder(client: TestClient, keys: Keys) -> None:
+    seat(client, keys, MINE)
+    seat(client, keys, OTHER)
+    seat(client, keys, "Exedore 3 - Max")
+    work = item(client, keys)
+    client.post(f"/v1/items/{work}/assign", headers=keys[JOSUI], json={"seat": MINE})
+    moved = client.post(f"/v1/items/{work}/assign", headers=keys[JOSUI], json={"seat": OTHER})
+    assert moved.status_code == OK and moved.json()["seat"] == OTHER
+    seats = {row["name"]: row for row in client.get("/v1/seats", headers=keys[CI]).json()}
+    assert (seats[MINE]["status"], seats[MINE]["item"]) == ("free", None)
+    assert (seats[OTHER]["status"], seats[OTHER]["item"]) == ("busy", work)
+    client.patch(f"/v1/items/{work}", headers=keys[JOSUI], json={"seat": "Exedore 3 - Max"})
+    freed = client.get(f"/v1/seats/{OTHER}", headers=keys[CI]).json()
+    assert (freed["status"], freed["item"]) == ("free", None)
+
+
+def test_since_is_server_set_so_no_seat_jumps_the_pick_queue(
+    client: TestClient, keys: Keys, conn: sqlite3.Connection
+) -> None:
+    seat(client, keys, MINE)
+    seat(client, keys, OTHER)
+    backdate(conn, OTHER, "2000-01-01T00:00:00Z")
+    for who in (MINE, JOSUI):
+        jump = client.patch(f"/v1/seats/{MINE}", headers=keys[who], json={"since": "1970-01-01T00:00:00Z"})
+        assert jump.status_code == UNPROCESSABLE_ENTITY, who
+    picked = client.post(
+        f"/v1/items/{item(client, keys, lane='exedore-max')}/assign", headers=keys[JOSUI], json={}
+    )
+    assert picked.json()["seat"] == OTHER
+    before = client.get(f"/v1/seats/{MINE}", headers=keys[CI]).json()["since"]
+    client.patch(f"/v1/seats/{MINE}", headers=keys[MINE], json={"turn": "active", "task": "x"})
+    assert client.get(f"/v1/seats/{MINE}", headers=keys[CI]).json()["since"] == before

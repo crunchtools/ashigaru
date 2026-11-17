@@ -1570,7 +1570,7 @@
       },
       "SeatPatch": {
         "additionalProperties": false,
-        "description": "A seat may send SEAT_ROW_FIELDS for its own row. The rest are Josui's: lane, status, the owner\nthat is Scott's manual hold, and the item it holds.",
+        "description": "A seat may send SEAT_ROW_FIELDS for its own row. The rest are Josui's: lane, status, the owner\nthat is Scott's manual hold, and the item it holds. `since` is server-set.",
         "properties": {
           "item": {
             "anyOf": [
@@ -1603,17 +1603,6 @@
               }
             ],
             "title": "Owner"
-          },
-          "since": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Since"
           },
           "status": {
             "anyOf": [
@@ -3614,7 +3603,7 @@
         ]
       },
       "patch": {
-        "description": "Created on first report. A seat writes only turn, task and since on its own row; lane, status,\nowner (Scott's manual hold) and item are Josui's. `since` moves when status does.",
+        "description": "Created on first report. A seat writes only turn and task on its own row; lane, status, owner\n(Scott's manual hold) and item are Josui's. `since` is the Desk's: it moves when status does.",
         "operationId": "patch_seat_v1_seats__name__patch",
         "parameters": [
           {
