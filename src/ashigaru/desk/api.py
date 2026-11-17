@@ -6,12 +6,13 @@ SEAT_STATES; Josui verifies and closes. A ci identity reads.
 """
 
 import sqlite3
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from pathlib import Path
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 
 from . import auth, dispatch, store
 from .model import (
@@ -384,8 +385,12 @@ def revoke_key(conn: Conn, who: Who, name: str, key_id: str) -> ApiKey:
     return ApiKey.model_validate(store.get_key(conn, key_id))
 
 
-def create_app(db_path: str | Path) -> FastAPI:
-    """The service over one SQLite file, migrated before the first request."""
+def create_app(db_path: str | Path, trusted_proxies: Sequence[str] = ()) -> FastAPI:
+    """The service over one SQLite file, migrated before the first request.
+
+    The client address and scheme come from X-Forwarded-For and X-Forwarded-Proto only when the
+    request arrives from one of `trusted_proxies` (addresses or CIDRs); with none, never.
+    """
     conn = store.connect(db_path)
     store.migrate(conn)
     conn.close()
@@ -396,4 +401,6 @@ def create_app(db_path: str | Path) -> FastAPI:
     )
     app.state.db_path = str(db_path)
     app.include_router(router)
+    if trusted_proxies:
+        app.add_middleware(ProxyHeadersMiddleware, trusted_hosts=list(trusted_proxies))
     return app

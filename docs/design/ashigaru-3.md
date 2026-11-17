@@ -116,6 +116,24 @@ PR, the issue it closes and its findings land on one story.
   background if it has other work) and never sleeps or polls GitHub. The
   same events update the story's state.
 
+- **Forge-neutral CI (Scott, 2026-11-17).** GitHub Actions today, Forgejo or
+  another build system tomorrow. The Desk stores one normalized CI result per
+  repo and commit (status, and each check with its name and verdict), and
+  `desk_wait` / `ashigaru wait` read only that. Each forge has a small
+  adapter that verifies its own signature and maps its own events into that
+  shape: GitHub first (`workflow_run`, `check_suite`, `X-Hub-Signature-256`),
+  then Forgejo (`X-Forgejo-Signature`, near-identical payloads). The adapter is
+  chosen by the webhook secret that verified the delivery, so one Desk can
+  serve several forges. Nothing outside an adapter names a forge.
+
+- **Intake is plugins too (Scott, 2026-11-17).** Every source of work (GitHub
+  issues, Forgejo issues, RT, Nagios) is an intake adapter that turns its own
+  events or polls into one normalized intake item: ref URL, title, source,
+  lane hint, and dedupe key. The queue never names a source. Today Josui wires
+  RT by hand through the gateway; as an adapter, the Desk takes in an RT
+  ticket without Josui in the loop. A new source means a new adapter, not
+  changes to the core.
+
 - **Intake.** One org-level GitHub webhook in the MVP. The Desk verifies
   `X-Hub-Signature-256` and dedupes on `X-GitHub-Delivery`. RT and Nagios
   intake follow in phase 4b. Gloval has a public IP behind Cloudflare.

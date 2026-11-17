@@ -1,0 +1,9 @@
+# Gatehouse findings judged by hand; each carries its reason.
+
+[[findings]]
+agent = "performance"
+category = "performance"
+file = "src/ashigaru/cli/commands.py"
+evidence = "for after in sorted({after for item in queued for after in item.get(\"after\") or []} - set(states)):\n    try:\n        states[after] = desk.get(_item(after))[\"state\"]"
+status = "not-a-bug"
+reason = "The Desk API has no batch-by-id route; one list call resolves every dependency among the newest 1000 items, and a per-id GET runs only for an older one, which a live queue rarely has."
