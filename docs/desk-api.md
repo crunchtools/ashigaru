@@ -72,7 +72,9 @@ can return.
 The service serves MCP (Streamable HTTP, stateless) at `/mcp/<code>`. The code
 is `<code_id>_<secret>`, minted like a key and stored the same way, as a
 digest compared timing-safe; it names the one identity calling, and nothing
-in a tool's arguments does. An unknown, revoked or disabled code is a 404.
+in a tool's arguments does. An unknown, revoked or disabled code is a 404. The
+service's access log records `/mcp/<code>` in its place; a proxy in front must
+redact the path the same way.
 
 The tools are the shared command set: `usage`, `agents`, `work`, `queue`,
 `outcomes`, `assign`, `auto`, `manual`, `wrap`, plus `desk_list`, `desk_get`,
