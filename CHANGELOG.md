@@ -6,6 +6,10 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- `ci.yml`'s `sdlc ci` job no longer stops at `ASHIGARU_ENABLED`. It runs no model, and as a required check a skipped run counted as passed, which constitution v1.46.0 rejects. Its step now runs `.sdlc/bin/sdlc ci` alone.
+
 ## [2.15.0] - 2026-11-17
 
 ### Changed
