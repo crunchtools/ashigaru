@@ -218,6 +218,8 @@ def test_work_all(desk: FakeDesk, capsys: pytest.CaptureFixture[str]) -> None:
 
 def test_queue_shows_what_each_item_waits_on(desk: FakeDesk, capsys: pytest.CaptureFixture[str]) -> None:
     def items(seen: Seen) -> tuple[int, Any]:
+        if "state" not in seen.query:
+            return 200, [item(state="working"), item(id="a3")]
         if seen.query["state"] == ["queued"]:
             return 200, [item(id="a3", after=["a1", "a9"], lane="vertex")]
         return 200, [
@@ -225,15 +227,25 @@ def test_queue_shows_what_each_item_waits_on(desk: FakeDesk, capsys: pytest.Capt
         ]
 
     desk.on("GET", "/v1/items", items)
-    desk.on("GET", "/v1/items/a1", (200, item(state="working")))
     data = commands.queue(Desk(config.load()))
     assert data["queued"][0]["waits_on"] == [
         {"id": "a1", "state": "working"},
         {"id": "a9", "state": "unknown"},
     ]
+    assert [s.path for s in desk.seen if s.path.startswith("/v1/items/")] == ["/v1/items/a9"]
     assert main(["queue"]) == 0
     out = capsys.readouterr().out
     assert "a1 working, a9 unknown" in out and "2026-12-01" in out
+
+
+def test_queue_does_not_hide_a_refusal_as_unknown(desk: FakeDesk) -> None:
+    def items(seen: Seen) -> tuple[int, Any]:
+        return 200, [item(id="a3", after=["a9"])] if seen.query.get("state") == ["queued"] else []
+
+    desk.on("GET", "/v1/items", items)
+    desk.on("GET", "/v1/items/a9", (403, {"detail": "no"}))
+    with pytest.raises(DeskError, match="403"):
+        commands.queue(Desk(config.load()))
 
 
 def test_outcomes(desk: FakeDesk, capsys: pytest.CaptureFixture[str]) -> None:
@@ -412,6 +424,13 @@ def test_the_first_typed_prompt_is_the_task(seat: FakeDesk, capsys: pytest.Captu
         {"turn": "active", "task": "x" * 120},
     ]
     assert capsys.readouterr().out == ""
+
+
+def test_clear_lets_the_next_typed_prompt_be_the_task(seat: FakeDesk) -> None:
+    hook("prompt-submit", {"session_id": "s1", "prompt": "first"})
+    hook("session-start", {"session_id": "s1", "source": "clear"})
+    hook("prompt-submit", {"session_id": "s1", "prompt": "second"})
+    assert patches(seat)[-1] == {"turn": "active", "task": "second"}
 
 
 def test_stop(seat: FakeDesk) -> None:

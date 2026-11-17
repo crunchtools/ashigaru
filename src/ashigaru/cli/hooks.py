@@ -68,6 +68,8 @@ def _start(event: dict[str, Any], desk: Desk, path: str) -> None:
     source = event.get("source")
     if source == "compact":
         return
+    if source == "clear":
+        task_marker().unlink(missing_ok=True)
     desk.request(
         "PATCH", path, body={"turn": "idle", "task": None} if source == "clear" else {"turn": "idle"}
     )

@@ -50,8 +50,9 @@ def queue(desk: Desk) -> dict[str, list[dict[str, Any]]]:
     with their expiry."""
     queued: list[dict[str, Any]] = desk.get("/v1/items", state="queued", limit=1000)
     proposed: list[dict[str, Any]] = desk.get("/v1/items", state="proposed", limit=1000)
-    states = {}
-    for after in sorted({after for item in queued for after in item.get("after") or []}):
+    # One page of recent items answers most; only an older dependency costs a request of its own.
+    states = {row["id"]: row["state"] for row in desk.get("/v1/items", limit=1000)}
+    for after in sorted({after for item in queued for after in item.get("after") or []} - set(states)):
         try:
             states[after] = desk.get(_item(after))["state"]
         except DeskError as exc:
