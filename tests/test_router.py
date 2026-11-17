@@ -18,6 +18,7 @@ ROUTER = yaml.safe_load((WORKFLOWS / "router.yml").read_text())
 JOBS = ROUTER["jobs"]
 LEVEL = {"none": 0, "read": 1, "write": 2}
 
+PLACEHOLDER = re.compile(r"\$\{\{ (.*?) \}\}")
 TOKEN = re.compile(r"\s*(?:('(?:[^']|'')*')|(==|!=|&&|\|\||[!(),])|([A-Za-z_][\w.\-]*))")
 
 
@@ -244,7 +245,23 @@ def test_the_caller_is_thin_and_grants_what_every_route_needs():
             assert LEVEL[caller_job["permissions"].get(scope, "none")] >= LEVEL[level], (name, scope)
 
 
+def group(event_name: str, event: dict, run_id: str = "1") -> str:
+    context = {"github": {"event_name": event_name, "event": event, "run_id": run_id}}
+    return PLACEHOLDER.sub(lambda match: str(Expression(match.group(1), context).value()),
+                           CALLER["concurrency"]["group"])  # fmt: skip
+
+
+def test_events_of_one_kind_for_one_issue_or_branch_wait_for_each_other():
+    labeled = issue("labeled", "ready-to-code")
+    assert group("issues", issue("opened")) == group("issues", labeled) == "ashigaru-issues-7"
+    assert group("workflow_run", gatehouse("ashigaru/issue-7")) == "ashigaru-workflow_run-ashigaru/issue-7"
+    closed = pull("closed", "ashigaru/release-1.2.0", True)
+    assert group("pull_request_target", closed) == "ashigaru-pull_request_target-ashigaru/release-1.2.0"
+    assert CALLER["concurrency"]["cancel-in-progress"] is False
+
+
 def test_ignored_events_do_not_share_a_concurrency_group_with_routed_ones():
     """A waiting run is replaced by the next one in its group; a comment must not replace a code run."""
-    assert CALLER["concurrency"]["group"].startswith("ashigaru-${{ github.event_name }}-")
-    assert CALLER["concurrency"]["cancel-in-progress"] is False
+    comment = {"action": "created", "issue": {"number": 7}}
+    assert group("issue_comment", comment) != group("issues", issue("labeled", "ready-to-code"))
+    assert group("workflow_dispatch", {}, "41") != group("workflow_dispatch", {}, "42")
