@@ -1,0 +1,73 @@
+# Ashigaru release (reusable) — publish a release the moment its pull request merges.
+#
+# Called on `pull_request_target: closed` of an `ashigaru/release-*` branch. The
+# hourly sweep opens the release pull request; in auto mode GitHub merges it
+# minutes later. Before this, the tag waited for the next sweep, up to an hour,
+# and a repository whose workflows already pinned the new version pointed at an
+# image that did not exist yet (#166).
+#
+# No LLM, and nothing from the pull request is checked out. scripts/release.py
+# reads the pull request from the API, publishes only Ashigaru's own release
+# pull request merged into the default branch, and tags the merge commit. The
+# token is the app's, not GITHUB_TOKEN: a tag made with GITHUB_TOKEN starts no
+# workflow, so container.yml and publish.yml would never run.
+
+name: Ashigaru release
+
+on:
+  workflow_call:
+    inputs:
+      bot:
+        description: "Slug of the app that opens Ashigaru pull requests."
+        type: string
+        default: "ashigaru-crunchtools"
+    secrets:
+      ASHIGARU_APP_KEY:
+        required: true
+
+permissions: {}
+
+jobs:
+  publish:
+    name: Publish the release
+    if: >-
+      vars.ASHIGARU_ENABLED == 'true' &&
+      github.event_name == 'pull_request_target' &&
+      github.event.pull_request.merged == true &&
+      startsWith(github.event.pull_request.head.ref, 'ashigaru/release-') &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Fetch Ashigaru
+        uses: actions/checkout@v7
+        with:
+          repository: crunchtools/ashigaru
+          ref: v2
+          path: .ashigaru-src
+          persist-credentials: false
+
+      - name: Move Ashigaru out of the workspace
+        run: mv .ashigaru-src "$RUNNER_TEMP/ashigaru"
+
+      - name: Mint the Ashigaru app token
+        id: app
+        uses: actions/create-github-app-token@v3
+        with:
+          client-id: ${{ vars.ASHIGARU_CLIENT_ID }}
+          private-key: ${{ secrets.ASHIGARU_APP_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+          permission-contents: write
+          permission-pull-requests: read
+
+      - name: Tag the merge commit and publish the release
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          PULL: ${{ github.event.pull_request.number }}
+          BOT: app/${{ inputs.bot }}
+        run: |
+          python3 "$RUNNER_TEMP/ashigaru/scripts/release_publish.py" --repo "$GITHUB_REPOSITORY" \
+            --pull "$PULL" --bot "$BOT"
