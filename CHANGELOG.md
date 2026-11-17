@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [2.13.1] - 2026-11-17
+
 ### Fixed
 
 - A release pull request is published the moment it merges, not at the next hourly sweep. Only the sweep published, so in auto mode the release pull request merged itself minutes after the sweep opened it and the tag waited up to an hour. Gatehouse 0.26.0 merged at 09:07 and was tagged by hand at 09:35 (developer 1.14.0 the same), and in between every Gatehouse review failed because master already pinned the 0.26.0 image (#166). The caller now runs a new reusable `release.yml` on `pull_request_target: closed`; it tags the merge commit with the app token, so `container.yml` and `publish.yml` start. Re-copy `examples/ashigaru.yml` to get it; until then the sweep still publishes.
