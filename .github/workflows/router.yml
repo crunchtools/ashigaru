@@ -111,7 +111,7 @@ jobs:
         github.event.pull_request.head.repo.full_name == github.repository &&
         startsWith(github.event.pull_request.head.ref, 'ashigaru/release-'))
     runs-on: ubuntu-latest
-    timeout-minutes: 1
+    timeout-minutes: 5
     permissions: {}
     steps:
       - name: Nothing to do

@@ -18,6 +18,8 @@ CALLER = yaml.safe_load((ROOT / "examples" / "ashigaru.yml").read_text())
 ROUTER = yaml.safe_load((WORKFLOWS / "router.yml").read_text())
 JOBS = ROUTER["jobs"]
 LEVEL = {"none": 0, "read": 1, "write": 2}
+NO_OP_MINUTES = 5
+"""The shortest timeout the constitution reviewer accepts; the step itself takes seconds."""
 
 PLACEHOLDER = re.compile(r"\$\{\{ (.*?) \}\}")
 TOKEN = re.compile(r"\s*(?:('(?:[^']|'')*')|(==|!=|&&|\|\||[!(),])|([A-Za-z_][\w.\-]*))")
@@ -216,7 +218,7 @@ def test_every_event_the_caller_subscribes_to_has_a_case():
 def test_the_no_op_reads_nothing_and_runs_one_step():
     job = JOBS["ignore"]
     assert job["permissions"] == {}
-    assert job["timeout-minutes"] == 1
+    assert job["timeout-minutes"] <= NO_OP_MINUTES
     assert "secrets." not in yaml.safe_dump(job)
     assert [set(step) & {"uses", "run"} for step in job["steps"]] == [{"run"}]
 
