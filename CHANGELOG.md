@@ -10,6 +10,10 @@ All notable changes to this project are documented here. The format follows
 
 - The Desk core (3.x, `src/ashigaru/desk`): the item and seat models with every ledger field and state plus wrap-up, SQLite with numbered migrations, a REST API over items, the report contract, `desk_file`, seats, the `/agents check` view and identities, per-identity API keys (bearer header, SHA-256 at rest, minted by an admin, revoked by an admin or the owner) scoped so a seat writes only its own items, and an idempotent import of Josui's JSONL ledger. Dispatch: `assign` with seat-pick by lane, an atomic `claim` (desk_claim), seat usage and spend by billing source against limits, and the outcomes rollup. A seat cannot reopen or file under a closed item, nor change its seat row's lane, status, owner or item. Contract: `docs/desk-api.md` and `docs/desk-api.json` (a218).
 
+### Changed
+
+- `ci.yml`'s `sdlc ci` job no longer stops at `ASHIGARU_ENABLED`. It runs no model, and as a required check a skipped run counted as passed, which constitution v1.46.0 rejects. Its step now runs `.sdlc/bin/sdlc ci` alone.
+
 ## [2.15.0] - 2026-11-17
 
 ### Changed

@@ -12,10 +12,9 @@ permissions:
 jobs:
   sdlc:
     name: sdlc ci
-    # The kill switch, on the FIRST job of the workflow, as every other
-    # workflow here does it. The job this replaced carried it; dropping it
-    # would have left one workflow that ASHIGARU_ENABLED=false does not stop.
-    if: vars.ASHIGARU_ENABLED == 'true'
+    # No ASHIGARU_ENABLED switch: this job runs no model, and it is a required
+    # check, so a skipped run would count as passed (constitution XII). The
+    # switch stops the workflows that run a model (docs/authority.md).
     runs-on: ubuntu-latest
     # The replaced job had `timeout-minutes: 10`. Without one a hung check
     # holds a runner until GitHub's six-hour default.
@@ -25,16 +24,13 @@ jobs:
         with:
           persist-credentials: false
 
-      # The release is read from .pre-commit-config.yaml, so one line pins the
-      # launcher, the image and every tool in it, for the laptop and CI both.
+      # .sdlc/bin/sdlc asks the image for its own launcher, so the launcher, the
+      # image and every tool float together. SDLC_IMAGE comes only from the
+      # repository variable (latest when unset; main, X.Y.Z or @sha256:<digest>).
       - name: sdlc ci
-        run: |
-          set -eu
-          rev=$(awk '/repo: https:\/\/github.com\/crunchtools\/python-sdlc/ {f=1; next}
-                     f && /rev:/ {print $2; exit}' .pre-commit-config.yaml)
-          [ -n "$rev" ] || { echo "no python-sdlc rev in .pre-commit-config.yaml" >&2; exit 2; }
-          git clone -q --depth 1 --branch "$rev" https://github.com/crunchtools/python-sdlc "$RUNNER_TEMP/sdlc"
-          $RUNNER_TEMP/sdlc/bin/sdlc ci
+        env:
+          SDLC_IMAGE: ${{ vars.SDLC_IMAGE }}
+        run: .sdlc/bin/sdlc ci
 
   gourmand:
     name: Code Quality (Gourmand)
