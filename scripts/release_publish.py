@@ -11,6 +11,7 @@ missed; whichever comes first makes the tag, and the other finds it there.
 from __future__ import annotations
 
 import argparse
+import subprocess
 import sys
 from datetime import UTC, datetime
 
@@ -48,7 +49,13 @@ def publish(repo: str, version: str, sha: str) -> int:
         print(f"release: {repo} v{version} is already tagged")
         return 0
     item = {"action": "publish", "repo": repo, "current": version, "sha": sha, "notes": notes(text, version)}
-    act(item, datetime.now(UTC).strftime("%Y-%m-%d"))
+    try:
+        act(item, datetime.now(UTC).strftime("%Y-%m-%d"))
+    except subprocess.CalledProcessError:
+        # The sweep may have published it in the same minute; only a tag nobody made is a failure.
+        if not tagged(repo, version):
+            raise
+        print(f"release: {repo} v{version} was published by the sweep meanwhile")
     return 0
 
 

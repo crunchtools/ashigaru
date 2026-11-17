@@ -1,5 +1,7 @@
 """A release pull request Ashigaru opened is published the moment it merges, and nothing else is."""
 
+import subprocess
+
 import pytest
 
 import release
@@ -85,3 +87,26 @@ def test_a_release_whose_changelog_names_another_version_fails_instead_of_taggin
     pull = merged_pull(login="bot[bot]", ref="ashigaru/release-2.7.0")
     written, _ = publishing(monkeypatch, pull)
     assert release_publish.main() == 1 and written == []
+
+
+def test_a_release_the_sweep_published_in_the_same_minute_is_not_a_failure(monkeypatch):
+    publishing(monkeypatch, merged_pull(login="bot[bot]"))
+    answers = iter((False, True))
+    monkeypatch.setattr(release_publish, "tagged", lambda repo, version: next(answers))
+
+    def taken(*args):
+        raise subprocess.CalledProcessError(1, "gh", stderr="HTTP 422: tag_name already exists")
+
+    monkeypatch.setattr(release, "gh", taken)
+    assert release_publish.main() == 0
+
+
+def test_a_publish_that_fails_with_no_tag_made_fails_the_run(monkeypatch):
+    publishing(monkeypatch, merged_pull(login="bot[bot]"))
+
+    def refused(*args):
+        raise subprocess.CalledProcessError(1, "gh", stderr="HTTP 403")
+
+    monkeypatch.setattr(release, "gh", refused)
+    with pytest.raises(subprocess.CalledProcessError):
+        release_publish.main()
