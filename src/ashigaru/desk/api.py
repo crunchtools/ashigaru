@@ -260,13 +260,15 @@ def get_seat(conn: Conn, who: Who, name: str) -> Seat:
 @router.patch("/v1/seats/{name}", tags=["seats"], responses=errors(401, 403))
 def patch_seat(conn: Conn, who: Who, name: str, body: SeatPatch) -> Seat:
     """Created on first report. A seat writes only turn and task on its own row; lane, status, owner
-    (Scott's manual hold) and item are Josui's. `since` is the Desk's: it moves when status does."""
+    (Scott's manual hold) and item are Josui's. `since` is the Desk's: it moves when status does.
+    The Desk infers Scott's hold from the report: a first typed prompt (turn active with a task) on a
+    seat holding no item opens a manual item and holds the seat; a /clear (task null) releases it."""
     own_seat(who, name)
     fields = body.model_dump(exclude_unset=True)
     refused = sorted(set(fields) - SEAT_ROW_FIELDS)
     if refused and not who.admin:
         raise HTTPException(status.HTTP_403_FORBIDDEN, f"a seat may not set: {', '.join(refused)}")
-    return Seat.model_validate(store.upsert_seat(conn, name, fields))
+    return Seat.model_validate(dispatch.report_seat(conn, name, fields, who.name))
 
 
 @router.post("/v1/seats/{name}/usage", tags=["seats"], responses=errors(401, 403))

@@ -53,8 +53,8 @@ can return.
 | `POST /items/{id}/claim` | `desk_claim`, seats only: take a `queued`, seatless, `auto` item in the seat's lane whose `after` items are done. Atomic; the loser of a race gets 409. The seat must be free, unheld and have a lane: a seat with no lane claims nothing |
 | `GET /items/{id}/events` | the item's history, ledger lines included, oldest first; pages of `limit` (200, at most 1000) after `after` (a seq) |
 | `GET /check` | the `/agents check` table: id, seat, mode, task, state, wrap, result or blocker, next. Blocked first, then newest; `?all=true` includes cleared, wontdo and abandoned |
-| `GET /seats`, `GET /seats/{name}` | seat state: free/busy, owner, turn, task, item, since, and the last usage report |
-| `PATCH /seats/{name}` | created on first call; a seat sends `turn` and `task`. `since` is server-set when `status` changes, `turn_started_at` when the turn goes active |
+| `GET /seats`, `GET /seats/{name}` | seat state: free/busy, owner, `hold` (`free`, `busy-auto` or `busy-manual`), turn, task, item, since, and the last usage report |
+| `PATCH /seats/{name}` | created on first call; a seat sends `turn` and `task`. `since` is server-set when `status` changes, `turn_started_at` when the turn goes active. The Desk infers Scott's hold (below) |
 | `POST /seats/{name}/usage` | the seat or an admin: `session_id`, `model`, `billing` (max / vertex / openrouter), `context_used`, `context_window`, `session_tokens`, `cost_usd` (the session's running total; the increase since the last report is booked to today's spend) |
 | `GET /usage` | `ashigaru usage`: per seat model, context, session tokens and cost, turn and seconds in it; spend by billing source today and this month (UTC) with limits |
 | `PUT /billing/{billing}` | admin: `daily_usd`, `monthly_usd` limits |
@@ -63,6 +63,17 @@ can return.
 | `GET /identities/{name}/keys` | admin or the owner; metadata only |
 | `POST /identities/{name}/keys` | admin: mint; the token is in this response only |
 | `DELETE /identities/{name}/keys/{key_id}` | admin or the owner: revoke, effective on the next request |
+
+## Scott's hold
+
+The Desk infers it from a seat's own reports, so no seat can claim or drop one.
+A seat holding no item that reports `turn: active` with a `task` (its
+session's first typed prompt) becomes busy, `owner: Scott`, holding a new
+`manual` item in `working` with that task and the seat's lane. Turns without a
+task (an assignment arriving, a background task's result) start nothing, and a
+seat on an assigned item stays on it. A `/clear` (`task: null`) clears the held
+item; a wrap or close of it does too; either frees the seat. The hold follows
+the held item's mode: `auto` hands it to Josui, `manual` back to Scott.
 
 ## Item
 

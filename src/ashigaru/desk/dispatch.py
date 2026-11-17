@@ -10,7 +10,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from . import store
-from .model import CLOSED, State, Wrap
+from .model import CLOSED, SEAT_ROW_FIELDS, SeatStatus, State, Turn, Wrap
 
 PICK_SEAT = """
     SELECT name FROM seats
@@ -130,6 +130,32 @@ def claim(conn: sqlite3.Connection, item_id: str, seat: str) -> None:
         if item["lane"] and item["lane"] != row["lane"]:
             raise store.Conflict(f"{item_id} is in lane {item['lane']}, seat {seat!r} in {row['lane']}")
         _take(conn, item, row, seat)
+
+
+def report_seat(conn: sqlite3.Connection, name: str, fields: dict[str, Any], actor: str) -> dict[str, Any]:
+    """PATCH /seats/{name}, and how the Desk sees Scott's hand on a seat, which no seat can claim or drop.
+
+    A seat's report of its session's first typed prompt (turn active with a task) while it holds no
+    item makes it busy and manual, holding a new manual item with that task, the way /agents ledgered
+    untracked manual work. A /clear (task back to null) clears that item, which frees the seat; a wrap
+    does the same. A seat holding an item stays on it. Turn changes without a task (Claude Code's own
+    turns: an assignment arriving, a background task's result) never start a hold.
+    """
+    with store.transaction(conn):
+        before = store.get_seat(conn, name)
+        seat = store.write_seat(conn, name, fields)
+        if not set(fields) <= SEAT_ROW_FIELDS:
+            return seat
+        held = before is not None and before["owner"] and before["item"]
+        if held and "task" in fields and fields["task"] is None:
+            store.update_item(conn, before["item"], {"wrap": Wrap.CLEARED}, actor, source="clear")
+        elif fields.get("turn") == Turn.ACTIVE and fields.get("task") and seat["status"] == SeatStatus.FREE:
+            work = {"task": fields["task"], "mode": "manual", "state": State.WORKING, "seat": name}
+            item_id = store.insert_item(conn, {**work, "lane": seat["lane"]}, actor, source="prompt")
+            store.write_seat(
+                conn, name, {"status": SeatStatus.BUSY, "owner": store.MANUAL_OWNER, "item": item_id}
+            )
+        return store.get_seat(conn, name) or seat
 
 
 def report_usage(conn: sqlite3.Connection, seat: str, report: dict[str, Any]) -> dict[str, Any]:

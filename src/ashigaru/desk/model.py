@@ -6,9 +6,9 @@ repo, priority).
 """
 
 from enum import StrEnum
-from typing import Any
+from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, computed_field
 
 
 class State(StrEnum):
@@ -250,6 +250,12 @@ class Seat(BaseModel):
     session_tokens: int | None = Field(None, description="Tokens used this session.")
     session_cost_usd: float = 0.0
     turn_started_at: str | None = Field(None, description="When the turn last went active.")
+
+    @computed_field(description="free, busy-auto (Josui's item) or busy-manual (Scott's hold).")
+    @property
+    def hold(self) -> Literal["free", "busy-auto", "busy-manual"]:
+        busy: Literal["busy-auto", "busy-manual"] = "busy-manual" if self.owner else "busy-auto"
+        return busy if self.status == SeatStatus.BUSY else "free"
 
 
 class SeatPatch(BaseModel):
