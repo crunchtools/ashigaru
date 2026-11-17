@@ -10,3 +10,29 @@ path = ".pre-commit-config.yaml"
 pattern = "ruff-check"
 justification = "ruff runs inside the sdlc-commit hook from python-sdlc (constitution XII v1.30.0), configured by [tool.ruff] in pyproject.toml; Gourmand looks for a literal ruff hook id"
 classification = "by_design"
+
+# A Claude Code hook must never stand between a person and their prompt: every
+# failure is reported on stderr and the hook exits 0 (the seat-state.json hooks
+# it replaces did the same). Printing IS the handling.
+[[exceptions]]
+check = "redundant_error_handling"
+path = "src/ashigaru/cli/hooks.py"
+pattern = "run"
+justification = "a Claude Code hook reports every failure on stderr and exits 0 so it never blocks a prompt; the catch is the contract, not a just-in-case"
+classification = "by_design"
+
+# The seam for the CI callback: today it returns the poller, and once the Desk
+# serves desk_wait it picks the callback waiter without commands.wait changing.
+[[exceptions]]
+check = "over_abstraction"
+path = "src/ashigaru/cli/wait.py"
+pattern = "waiter_for"
+justification = "the seam the brief asked for: it picks the poller until the Desk's CI callback (desk_wait) exists, then the callback waiter, so commands.wait never changes"
+classification = "by_design"
+
+[[exceptions]]
+check = "single_use_helpers"
+path = "src/ashigaru/cli/wait.py"
+pattern = "_poll"
+justification = "isolates the retry-on-blip policy (no answer or a 5xx means poll again) from the backoff loop; inlined, the loop needs an empty except to swallow the blip"
+classification = "by_design"

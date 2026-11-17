@@ -41,6 +41,7 @@ wheels = [
 name = "ashigaru"
 source = { editable = "." }
 dependencies = [
+    { name = "httpx" },
     { name = "pydantic" },
 ]
 
@@ -53,7 +54,6 @@ desk = [
 [package.dev-dependencies]
 dev = [
     { name = "ashigaru", extra = ["desk"] },
-    { name = "httpx" },
     { name = "mypy" },
     { name = "pytest" },
     { name = "pyyaml" },
@@ -62,6 +62,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "fastapi", marker = "extra == 'desk'", specifier = ">=0.115" },
+    { name = "httpx", specifier = ">=0.28" },
     { name = "pydantic", specifier = ">=2.9" },
     { name = "uvicorn", marker = "extra == 'desk'", specifier = ">=0.32" },
 ]
@@ -70,7 +71,6 @@ provides-extras = ["desk"]
 [package.metadata.requires-dev]
 dev = [
     { name = "ashigaru", extras = ["desk"] },
-    { name = "httpx", specifier = ">=0.28" },
     { name = "mypy", specifier = ">=1.14" },
     { name = "pytest", specifier = ">=8.3" },
     { name = "pyyaml", specifier = ">=6.0.3" },
