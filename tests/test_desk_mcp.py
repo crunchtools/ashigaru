@@ -1,15 +1,22 @@
 """The hosted MCP: codes as credentials, and the same authority as the REST API, identity by identity."""
 
-import logging
 import sqlite3
+import threading
+import time
+from collections.abc import Iterator
+from contextlib import contextmanager
 from http.client import CREATED, FORBIDDEN, NOT_FOUND, OK
+from pathlib import Path
 from typing import Any
 
+import httpx
 import pytest
+import uvicorn
 from conftest import Keys
 from fastapi.testclient import TestClient
 
 from ashigaru.desk import store
+from ashigaru.desk.api import create_app
 from ashigaru.desk.mcp import codes
 
 JOSUI = "Josui Prime"
@@ -87,7 +94,7 @@ def test_codes_are_stored_hashed(client: TestClient, keys: Keys, conn: sqlite3.C
     assert who is not None and who.name == SEAT
 
 
-@pytest.mark.parametrize("path", ["/mcp/nope", "/mcp/abc_def", "/mcp/_", "/mcp/"])
+@pytest.mark.parametrize("path", ["/mcp/nope", "/mcp/abc_def", "/mcp/_", "/mcp/", "/mcp"])
 def test_an_unknown_code_is_not_found(client: TestClient, urls: dict[str, str], path: str) -> None:
     assert client.post(path, headers=MCP_HEADERS, json={}).status_code == NOT_FOUND
 
@@ -210,10 +217,45 @@ def test_queue_lists_queued_then_proposed(
     assert [(row["id"], row["after"]) for row in rows] == [("a1", ["a2"]), ("a2", [])]
 
 
-def test_the_access_log_never_carries_a_code(client: TestClient, urls: dict[str, str]) -> None:
-    record = logging.LogRecord(
-        "uvicorn.access", logging.INFO, __file__, 0, '%s - "%s %s HTTP/%s" %d',
-        ("127.0.0.1:1", "POST", f"{urls[SEAT]}?x=1", "1.1", 200), None,
-    )  # fmt: skip
-    assert logging.getLogger("uvicorn.access").filter(record)
-    assert urls[SEAT] not in record.getMessage() and "/mcp/<code>?x=1" in record.getMessage()
+CLIENT_LOGS = ("httpx", "httpcore")
+"""The test's own client, which logs the URL it was asked to fetch."""
+
+
+def serve(db: Path) -> Iterator[str]:
+    """The Desk under a real uvicorn at TRACE, access log on, on a free port; yields its base URL."""
+    config = uvicorn.Config(create_app(db), port=0, log_level="trace", access_log=True, log_config=None)
+    server = uvicorn.Server(config)
+    thread = threading.Thread(target=server.run, daemon=True)
+    thread.start()
+    while not server.started:
+        time.sleep(0.01)
+    port = server.servers[0].sockets[0].getsockname()[1]
+    yield f"http://127.0.0.1:{port}"
+    server.should_exit = True
+    thread.join(5)
+
+
+def test_no_log_and_no_header_carries_a_code(
+    db: Path, client: TestClient, urls: dict[str, str], caplog: pytest.LogCaptureFixture
+) -> None:
+    """Every request shape under /mcp/<code>, through uvicorn's own logging at its most verbose."""
+    secret = urls[SEAT].removeprefix("/mcp/")
+    init = {"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "agents", "arguments": {}}}
+    caplog.set_level(1)
+    with contextmanager(serve)(db) as base, httpx.Client(base_url=base) as http:
+        responses = [
+            http.post(f"/mcp/{secret}", headers=MCP_HEADERS, json=init),
+            http.post(f"/mcp/{secret}/", headers=MCP_HEADERS, json=init),
+            http.post(f"/mcp/{secret}?x=1", headers=MCP_HEADERS, json=init),
+            http.get(f"/mcp/{secret}/deeper/"),
+            http.get(f"/mcp/{secret}x/"),
+        ]
+    assert [response.status_code for response in responses[:3]] == [OK, OK, OK]
+    assert [response.status_code for response in responses[3:]] == [NOT_FOUND, NOT_FOUND]
+    server_log = "\n".join(
+        record.getMessage() for record in caplog.records if not record.name.startswith(CLIENT_LOGS)
+    )
+    assert "/mcp/<code>" in server_log and "ASGI [" in server_log, "the probe logged nothing"
+    assert secret not in server_log
+    for response in responses:
+        assert secret not in str(response.headers)

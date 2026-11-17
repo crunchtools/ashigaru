@@ -144,6 +144,7 @@ MIGRATIONS: tuple[str, ...] = (
         revoked_at TEXT,
         last_used_at TEXT
     );
+    CREATE INDEX mcp_codes_identity ON mcp_codes(identity);
     """,
 )
 

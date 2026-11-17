@@ -73,7 +73,9 @@ The service serves MCP (Streamable HTTP, stateless) at `/mcp/<code>`. The code
 is `<code_id>_<secret>`, minted like a key and stored the same way, as a
 digest compared timing-safe; it names the one identity calling, and nothing
 in a tool's arguments does. An unknown, revoked or disabled code is a 404. The
-service's access log records `/mcp/<code>` in its place; a proxy in front must
+service's logs (uvicorn's access log, and its ASGI scope at TRACE) record
+`/mcp/<code>` in its place, the code is gone from the scope before MCP sees the
+request, and no path under a code answers with a redirect. A proxy in front must
 redact the path the same way.
 
 The tools are the shared command set: `usage`, `agents`, `work`, `queue`,

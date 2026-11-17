@@ -48,7 +48,8 @@ from ..model import (
 from . import codes
 
 CALLER = "desk_caller"
-SECRET_PATH = re.compile(r"/mcp/[^/?\s]+")
+SECRET_PATH = re.compile(r"/mcp/[A-Za-z0-9_-]+")
+REDACTED = "/mcp/<code>"
 DB = "desk_db"
 ItemId = Annotated[str, Field(description="An item id, e.g. a204.")]
 
@@ -214,8 +215,10 @@ def desk_file(item_id: ItemId, task: str, done_when: str | None = None, note: st
 
 
 class Endpoint:
-    """/mcp/{code}: the code names the caller, then the request goes to MCP as if at its root.
-    An unknown or revoked code is a 404 that says no more than an unknown path would."""
+    """/mcp/{code}, with or without anything after it: the code names the caller, then the request
+    goes to MCP as if at its root, with the code gone from the scope. An unknown or revoked code,
+    or a path under it, is a 404 that says no more than an unknown path would. The route takes
+    every path under the code so the router never answers one with a redirect that echoes it."""
 
     def __init__(self, db_path: str | Path, app: ASGIApp) -> None:
         self.db_path = str(db_path)
@@ -229,40 +232,52 @@ class Endpoint:
             conn.close()
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-        who = await run_in_threadpool(self.authenticate, scope["path_params"]["code"])
+        params = scope["path_params"]
+        who = None
+        if params["rest"] in ("", "/"):
+            who = await run_in_threadpool(self.authenticate, params["code"])
         if who is None:
             await JSONResponse({"detail": "Not Found"}, status_code=404)(scope, receive, send)
             return
         state = {**scope.get("state", {}), CALLER: who, DB: self.db_path}
-        await self.app(
-            {**scope, "path": "/", "raw_path": b"/", "root_path": "", "state": state}, receive, send
-        )
+        inner = {**scope, "path": "/", "raw_path": b"/", "root_path": "", "path_params": {}, "state": state}
+        await self.app(inner, receive, send)
 
 
 class RedactCodes(logging.Filter):
-    """The code is the credential, so the access log gets /mcp/<code> instead of it."""
+    """The code is the credential: any log argument that would print /mcp/<secret> prints
+    /mcp/<code> instead, whether it is the access log's path or the ASGI scope at TRACE."""
 
     def filter(self, record: logging.LogRecord) -> bool:
         if isinstance(record.args, tuple):
-            record.args = tuple(
-                SECRET_PATH.sub("/mcp/<code>", arg) if isinstance(arg, str) else arg for arg in record.args
-            )
+            record.args = tuple(redact(arg) for arg in record.args)
+        if isinstance(record.msg, str):
+            record.msg = SECRET_PATH.sub(REDACTED, record.msg)
         return True
 
 
-ACCESS_LOG = logging.getLogger("uvicorn.access")
+def redact(arg: object) -> object:
+    """The argument, or its text with codes replaced if it would print one; numbers stay numbers."""
+    text = arg if isinstance(arg, str) else str(arg)
+    return SECRET_PATH.sub(REDACTED, text) if SECRET_PATH.search(text) else arg
+
+
+SERVER_LOGS = tuple(logging.getLogger(name) for name in ("uvicorn.access", "uvicorn.asgi", "uvicorn.error"))
+"""Every logger uvicorn writes a request's path or scope to."""
 
 
 def install(db_path: str | Path) -> tuple[Lifespan[Any], Route]:
     """A fresh MCP app for one Desk app: the lifespan the Desk must run, which starts the session
-    manager (once per app) and redacts codes from the access log, and the /mcp/{code} route."""
+    manager (once per app) and redacts codes from uvicorn's logs, and the /mcp/{code} route."""
     hosted = mcp.http_app(path="/", stateless_http=True, json_response=True)
 
     @asynccontextmanager
     async def lifespan(app: Any) -> AsyncIterator[None]:
-        if not any(isinstance(existing, RedactCodes) for existing in ACCESS_LOG.filters):
-            ACCESS_LOG.addFilter(RedactCodes())  # after uvicorn has configured its loggers
+        for log in SERVER_LOGS:  # here, after uvicorn has configured its loggers
+            if not any(isinstance(existing, RedactCodes) for existing in log.filters):
+                log.addFilter(RedactCodes())
         async with hosted.lifespan(app):
             yield
 
-    return lifespan, Route("/mcp/{code}", Endpoint(db_path, hosted), include_in_schema=False)
+    route = Route("/mcp/{code}{rest:path}", Endpoint(db_path, hosted), include_in_schema=False)
+    return lifespan, route
