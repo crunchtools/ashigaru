@@ -9,6 +9,7 @@ All notable changes to this project are documented here. The format follows
 ### Added
 
 - The Desk core (3.x, `src/ashigaru/desk`): the item and seat models with every ledger field and state plus wrap-up, SQLite with numbered migrations, a REST API over items, the report contract, `desk_file`, seats, the `/agents check` view and identities, per-identity API keys (bearer header, SHA-256 at rest, minted by an admin, revoked by an admin or the owner) scoped so a seat writes only its own items, and an idempotent import of Josui's JSONL ledger. Dispatch: `assign` with seat-pick by lane, an atomic `claim` (desk_claim), seat usage and spend by billing source against limits, and the outcomes rollup. A seat cannot reopen or file under a closed item, nor change its seat row's lane, status, owner or item. Contract: `docs/desk-api.md` and `docs/desk-api.json` (a218).
+- RPMs, built on GitHub (a231): `ashigaru` (the CLI and the Python package, no web stack) and `ashigaru-desk` (the service, with FastAPI and uvicorn), for Fedora 43 and EL10 (EPEL). `.github/workflows/rpm.yml` builds each target in a fresh container from `packaging/ashigaru.spec`, installs the RPMs in another and runs every command with `--help`, then attaches them to the release; pull requests that touch the package build and test without publishing. The service's web stack moved to the `desk` extra, and the package version is now `VERSION`'s.
 
 ## [2.15.0] - 2026-11-17
 
