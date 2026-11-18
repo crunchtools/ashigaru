@@ -66,8 +66,10 @@ def digest(source: str, event: str, body: bytes) -> str:
 
 
 def _judge(adapter: Forge, token: str, item: IntakeItem, existing: dict[str, Any] | None) -> IntakeItem:
-    """Ask the forge only what can change how the item is queued: a new open subject's author, then,
-    for a new or still-held subject, whether an event that adds a lane comes from a writer."""
+    """Ask the forge only what can change how the item is queued: for a new or still-held subject,
+    whether its author writes (asked again while held, so a failed check is retried on the next
+    delivery), then whether an event that adds a lane comes from a writer; for an approved one,
+    whether the sender of an event that moves its head, or removes its lane, writes."""
     asked: dict[str, bool] = {}
 
     def writes(account: str | None) -> bool:
@@ -79,10 +81,19 @@ def _judge(adapter: Forge, token: str, item: IntakeItem, existing: dict[str, Any
 
     if existing is None and item.closed:
         return item
-    if existing is None and writes(item.author):
-        return dataclasses.replace(item, author_writes=True)
-    approval = intake.lane(item.approves_lane) and (existing is None or intake.held(existing))
-    return dataclasses.replace(item, approved=True) if approval and writes(item.sender) else item
+    if existing is None or intake.held(existing):
+        if (existing is None or not intake.approved(existing)) and writes(item.author):
+            return dataclasses.replace(item, author_writes=True)
+        approval = intake.lane(item.approves_lane)
+        return dataclasses.replace(item, approved=True) if approval and writes(item.sender) else item
+    if not intake.approved(existing):
+        return item
+    extra = existing["extra"]
+    unlabeled = item.revokes_lane is not None and item.revokes_lane == extra.get("approved_lane")
+    moved = item.head is not None and extra.get("approved_head") not in (None, item.head)
+    if unlabeled and writes(item.sender):
+        return dataclasses.replace(item, revoked=True)
+    return dataclasses.replace(item, revoked=True) if moved and not writes(item.sender) else item
 
 
 def _judged(db_path: str, adapter: Forge, token: str, signed: str, delivery: Delivery) -> Delivery:

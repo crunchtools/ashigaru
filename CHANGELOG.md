@@ -6,6 +6,10 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- Desk intake approval (#196): a PR's approval is tied to its head commit, and a push from anyone who may not write holds it again; a writer removing the approved `lane:` label holds it again; a held item's author is asked about again on each delivery, so a timed-out permission check is retried; and a hold or lane Josui set wins over a maintainer's label, which is then recorded only. Withdrawals are recorded under `extra` as `held_by`, `held_at` and `held_for`.
+
 ## [3.2.0] - 2026-11-18
 
 ### Added

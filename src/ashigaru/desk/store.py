@@ -516,11 +516,23 @@ def expire_proposed(conn: sqlite3.Connection) -> list[str]:
     return [row[0] for row in rows]
 
 
+STEERED_BY_OTHER = """
+SELECT 1 FROM events WHERE item_id = ? AND actor != ?
+AND (json_type(patch, '$.lane') IS NOT NULL OR json_type(patch, '$.mode') IS NOT NULL) LIMIT 1
+"""
+
+
 def events(conn: sqlite3.Connection, item_id: str, after: int = 0, limit: int = 200) -> list[dict[str, Any]]:
     rows = conn.execute(
         "SELECT * FROM events WHERE item_id = ? AND seq > ? ORDER BY seq LIMIT ?", (item_id, after, limit)
     )
     return [{**dict(row), "patch": json.loads(row["patch"])} for row in rows]
+
+
+def steered_by_other(conn: sqlite3.Connection, item_id: str, actor: str) -> bool:
+    """Whether anyone but `actor` ever set the item's lane or mode, null included."""
+    row = conn.execute(STEERED_BY_OTHER, (item_id, actor)).fetchone()
+    return row is not None
 
 
 def check(conn: sqlite3.Connection, show_all: bool = False) -> list[dict[str, Any]]:

@@ -143,7 +143,9 @@ def _intake(payload: Mapping[str, Any], subject: str, kind: Kind) -> tuple[Intak
             labels=labels,
             author=author if isinstance(author := payload_get(thing, "user", "login"), str) else None,
             sender=sender if isinstance(sender := payload_get(payload, "sender", "login"), str) else None,
-            approves_lane=_lane_added(payload),
+            approves_lane=_lane_label(payload, "labeled"),
+            revokes_lane=_lane_label(payload, "unlabeled"),
+            head=head.lower() if isinstance(head := payload_get(thing, "head", "sha"), str) else None,
         ),
     )
 
@@ -156,11 +158,11 @@ def _subject_key(repo: str, number: str) -> str:
     return key
 
 
-def _lane_added(payload: Mapping[str, Any]) -> str | None:
-    """The lane a `labeled` event adds, when the label it adds is `lane:<lane>`."""
+def _lane_label(payload: Mapping[str, Any], action: str) -> str | None:
+    """The lane a `labeled` event adds or an `unlabeled` one removes, when its label is `lane:<lane>`."""
     label = payload_get(payload, "label", "name")
-    labeled = payload.get("action") == "labeled" and isinstance(label, str) and label.startswith(LANE_LABEL)
-    return label[len(LANE_LABEL) :] if labeled else None
+    matched = payload.get("action") == action and isinstance(label, str) and label.startswith(LANE_LABEL)
+    return label[len(LANE_LABEL) :] if matched else None
 
 
 class GitHub:

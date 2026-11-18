@@ -156,11 +156,20 @@ repo (GitHub: write, maintain or admin), with a `lane:<lane>` label as its lane,
 or once a maintainer approves it: a `labeled` event adding a `lane:<lane>`
 label, from a sender who may write. Anything else (an outsider, a bot, a
 failed check, a missing token, or a writer editing, reopening or commenting on
-an outsider's issue) leaves it held, no lane and mode `manual`, for Josui. An
-approval sets the lane and mode only while the item is still queued and
-seatless; it is recorded either way under `extra` as `approved_by`,
-`approved_at` and `approved_lane`. `extra` also records the `author` and
-whether the item is `trusted`. Later deliveries refresh `ref` and, under
+an outsider's issue) leaves it held, no lane and mode `manual`, for Josui.
+While it is held, each delivery asks about the author again, so a check that
+failed is retried. An approval is recorded under `extra` as `approved_by`,
+`approved_at`, `approved_lane` and, for a PR, `approved_head`: approval is tied
+to that commit. It is withdrawn (held again, `trusted` false, with `held_by`,
+`held_at` and `held_for`: `lane removed` or `head moved`) when a writer removes
+the approved `lane:` label, or when a delivery from anyone who may not write
+carries another head (a fork's push; a stale redelivery errs the same safe
+way). A writer's push moves `approved_head` with it. An outsider editing the
+title or body withdraws nothing: seats read it as data. Approval, retry and
+withdrawal set lane and mode only while the item is queued, seatless, and
+nobody but intake has set its lane or mode; once Josui has (a manual hold, a
+lane), Josui's choice wins and the change is recorded only. `extra` also
+records the `author` and whether the item is `trusted`. Later deliveries refresh `ref` and, under
 `extra`, the source's `title`, `labels` and `source_state` (open or closed);
 nothing else changes task, lane, mode, state or seat. A subject first seen
 closed is not queued.

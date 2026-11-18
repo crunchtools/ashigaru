@@ -602,6 +602,115 @@ def test_an_approval_after_josui_assigned_the_item_is_recorded_only(
     assert after["extra"]["approved_by"] == "maintainer"
 
 
+FORK_HEAD = "1" * 40
+PUSHED = "2" * 40
+
+
+def fork_pr(
+    action: str = "opened", by: str = "stranger", head: str = FORK_HEAD, **extra: Any
+) -> dict[str, Any]:
+    """An outsider's PR at `head`, as delivered for `action` by `by`."""
+    body = payload("pull_request", user={"login": "stranger"}, head={"sha": head})
+    return {**body, "action": action, "sender": {"login": by}, **extra}
+
+
+def pr_item(conn: sqlite3.Connection) -> dict[str, Any]:
+    return store.item_by_subject(conn, f"{REPO}#191") or {}
+
+
+def approved_pr(trusting: TestClient, conn: sqlite3.Connection) -> dict[str, Any]:
+    deliver(trusting, "pull_request", fork_pr(), "d-1")
+    deliver(trusting, "pull_request", fork_pr("labeled", "maintainer", label={"name": "lane:vertex"}), "d-2")
+    item = pr_item(conn)
+    assert (item["lane"], item["mode"], item["extra"]["approved_head"]) == ("vertex", "auto", FORK_HEAD)
+    return item
+
+
+def test_an_outsiders_push_after_approval_holds_the_pr_again(
+    trusting: TestClient, conn: sqlite3.Connection
+) -> None:
+    approved_pr(trusting, conn)
+    deliver(trusting, "pull_request", fork_pr("synchronize", head=PUSHED), "d-3")
+    item = pr_item(conn)
+    assert (item["lane"], item["mode"], item["extra"]["trusted"]) == (None, "manual", False)
+    assert (item["extra"]["held_by"], item["extra"]["held_for"]) == ("stranger", "head moved")
+    deliver(
+        trusting,
+        "pull_request",
+        fork_pr("labeled", "maintainer", PUSHED, label={"name": "lane:vertex"}),
+        "d-4",
+    )
+    again = pr_item(conn)
+    assert (again["lane"], again["mode"], again["extra"]["approved_head"]) == ("vertex", "auto", PUSHED)
+
+
+def test_a_writers_push_moves_the_approval_with_it(trusting: TestClient, conn: sqlite3.Connection) -> None:
+    approved_pr(trusting, conn)
+    deliver(trusting, "pull_request", fork_pr("synchronize", "maintainer", PUSHED), "d-3")
+    deliver(trusting, "pull_request", fork_pr("edited", head=PUSHED), "d-4")
+    item = pr_item(conn)
+    assert (item["mode"], item["extra"]["trusted"], item["extra"]["approved_head"]) == ("auto", True, PUSHED)
+
+
+def test_an_outsider_editing_an_approved_pr_keeps_it_approved(
+    trusting: TestClient, conn: sqlite3.Connection
+) -> None:
+    approved_pr(trusting, conn)
+    deliver(trusting, "pull_request", fork_pr("edited"), "d-3")
+    assert (pr_item(conn)["mode"], pr_item(conn)["extra"]["trusted"]) == ("auto", True)
+
+
+def test_a_writer_removing_the_approved_lane_holds_it_again(
+    trusting: TestClient, conn: sqlite3.Connection
+) -> None:
+    approved_pr(trusting, conn)
+    deliver(trusting, "pull_request", fork_pr("unlabeled", "reader", label={"name": "lane:vertex"}), "d-3")
+    deliver(trusting, "pull_request", fork_pr("unlabeled", "maintainer", label={"name": "lane:other"}), "d-4")
+    assert pr_item(conn)["extra"]["trusted"] is True
+    deliver(
+        trusting, "pull_request", fork_pr("unlabeled", "maintainer", label={"name": "lane:vertex"}), "d-5"
+    )
+    item = pr_item(conn)
+    assert (item["lane"], item["mode"], item["extra"]["held_for"]) == (None, "manual", "lane removed")
+
+
+def test_a_withdrawal_after_josui_assigned_the_item_is_recorded_only(
+    trusting: TestClient, conn: sqlite3.Connection
+) -> None:
+    item = approved_pr(trusting, conn)
+    with store.transaction(conn):
+        store.update_item(conn, item["id"], {"state": "assigned", "seat": "Exedore 1 - Max"}, "Josui Prime")
+    deliver(trusting, "pull_request", fork_pr("synchronize", head=PUSHED), "d-3")
+    after = pr_item(conn)
+    assert (after["lane"], after["mode"], after["extra"]["trusted"]) == ("vertex", "auto", False)
+
+
+def test_josuis_manual_hold_wins_over_an_approval(trusting: TestClient, conn: sqlite3.Connection) -> None:
+    deliver(trusting, "issues", outsider(), "d-1")
+    item = held_item(conn)
+    with store.transaction(conn):
+        store.update_item(conn, item["id"], {"mode": "manual"}, "Josui Prime")
+        store.update_item(conn, item["id"], {"lane": "dolza-max"}, "Josui Prime")
+    approve = {**outsider("labeled", by="maintainer"), "label": {"name": "lane:vertex"}}
+    deliver(trusting, "issues", approve, "d-2")
+    after = store.item_by_subject(conn, f"{REPO}#190") or {}
+    assert (after["lane"], after["mode"], after["extra"]["trusted"]) == ("dolza-max", "manual", True)
+    assert after["extra"]["approved_by"] == "maintainer"
+
+
+def test_a_failed_author_check_is_retried_on_the_next_delivery(
+    trusting: TestClient, conn: sqlite3.Connection, permissions: Permissions
+) -> None:
+    del permissions.by_account["fatherlinux"]
+    deliver(trusting, "issues", payload("issues"), "d-1")
+    held_item(conn)
+    permissions.by_account["fatherlinux"] = "write"
+    deliver(trusting, "issues", {**payload("issues", title="Edited"), "action": "edited"}, "d-2")
+    item = store.item_by_subject(conn, f"{REPO}#190") or {}
+    assert (item["lane"], item["mode"], item["extra"]["trusted"]) == ("dolza-max", "auto", True)
+    assert "approved_by" not in item["extra"]
+
+
 def test_without_a_forge_token_all_intake_is_held(
     hooked: TestClient, conn: sqlite3.Connection, permissions: Permissions
 ) -> None:

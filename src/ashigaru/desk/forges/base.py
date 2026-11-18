@@ -47,10 +47,18 @@ class IntakeItem:
     approves_lane: str | None = None
     """The lane this event explicitly gives the subject (on a forge with labels, adding a lane label). From
     a sender who may write, that is a maintainer's approval and makes a held item claimable."""
+    revokes_lane: str | None = None
+    """The lane this event explicitly takes away (removing a lane label). From a sender who may write,
+    removing the approved lane withdraws the approval."""
+    head: str | None = None
+    """The content the subject stands at, where the forge versions it (a PR's head commit). Approval is
+    tied to it: a sender who may not write moving it withdraws the approval."""
     author_writes: bool = False
     """Set by the Desk, never by an adapter's parse: the author may write to the repo."""
     approved: bool = False
     """Set by the Desk, never by an adapter's parse: the sender may write and this is an approval."""
+    revoked: bool = False
+    """Set by the Desk, never by an adapter's parse: this event withdraws an approval."""
 
 
 @dataclass(frozen=True)
