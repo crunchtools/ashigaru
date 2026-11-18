@@ -27,8 +27,9 @@ from .base import CIUpdate, Delivery, IntakeItem, payload_get
 SIGNATURE = "x-hub-signature-256"
 EVENT = "x-github-event"
 API = "https://api.github.com"
-WRITERS = frozenset({"admin", "write"})
-"""Collaborator permissions that may write; `maintain` reports as write, `triage` as read."""
+WRITERS = frozenset({"admin", "maintain", "write"})
+"""Collaborator permissions that may write. GitHub reports `maintain` as write and `triage` as read
+in this field; `maintain` is named so the rule does not depend on that mapping."""
 ACCOUNT = re.compile(r"^[A-Za-z0-9][A-Za-z0-9-]{0,38}$")
 """A person's login. A bot's (`name[bot]`) never matches, so a bot's intake is always held."""
 REPO = re.compile(r"^[a-z0-9_.-]+/[a-z0-9_.-]+$")

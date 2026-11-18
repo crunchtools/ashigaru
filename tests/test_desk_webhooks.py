@@ -619,6 +619,24 @@ def test_a_held_item_cannot_be_claimed(hooked: TestClient, conn: sqlite3.Connect
     assert claim.status_code == CONFLICT
 
 
+@pytest.mark.parametrize(
+    ("permission", "writes"),
+    [
+        ("admin", True),
+        ("maintain", True),
+        ("write", True),
+        ("triage", False),
+        ("read", False),
+        ("none", False),
+    ],
+)
+def test_which_permission_levels_may_write(
+    monkeypatch: pytest.MonkeyPatch, permission: str, writes: bool
+) -> None:
+    monkeypatch.setattr(github.urllib.request, "urlopen", Permissions(someone=permission))
+    assert github.FORGE.may_write(REPO, "someone", "token") is writes
+
+
 def test_a_bot_author_is_held_without_asking(
     trusting: TestClient, conn: sqlite3.Connection, permissions: Permissions
 ) -> None:
