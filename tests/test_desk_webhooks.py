@@ -1048,6 +1048,18 @@ def test_the_apps_record_issues_are_never_queued(
     assert store.item_by_subject(conn, f"{REPO}#190") is None
 
 
+def test_a_record_issue_queued_before_is_held_on_its_next_delivery(
+    trusting_the_bot: TestClient, conn: sqlite3.Connection
+) -> None:
+    deliver(trusting_the_bot, "issues", payload("issues", user={"login": BOT}), "d-1")
+    labels = [{"name": "ashigaru-inbox"}, {"name": "lane:dolza-max"}]
+    deliver(trusting_the_bot, "issues", payload("issues", user={"login": BOT}, labels=labels), "d-2")
+    item = held_item(conn)
+    assert (item["lane"], item["mode"], item["extra"]["held_for"]) == (None, "manual", "record issue")
+    deliver(trusting_the_bot, "issues", payload("issues", user={"login": BOT}, labels=labels), "d-3")
+    assert held_item(conn)["extra"]["held_at"] == item["extra"]["held_at"]
+
+
 def test_trusted_authors_come_from_their_variable(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("ASHIGARU_FORGE_AUTHORS_GITHUB", f" {BOT}, ,other ")
     assert desk_main.forge_authors() == {"github": [BOT, "other"]}

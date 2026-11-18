@@ -5562,7 +5562,7 @@
         ]
       },
       "post": {
-        "description": "`ashigaru work --advance`, admin: the same round, then the sweep mark moves to its catch-up's\n`until`, the last event it covered, so the next round starts after it and nothing is lost or\nrepeated, even when this one was truncated. Only forward: when a concurrent round already moved\nit further, it stays and `advanced` is false. `since` is 422: a round read from a time could\nmove the mark past events it never read.",
+        "description": "`ashigaru work --advance`, admin: the same round, then the sweep mark moves to its catch-up's\n`until`, the last event it covered, so the next round starts after it and nothing is lost or\nrepeated, even when this one was truncated. Only forward: when it is already there, or a concurrent\nround moved it further, it stays and `advanced` is false. `since` is 422: a round read from a time could\nmove the mark past events it never read.",
         "operationId": "advance_v1_work_post",
         "parameters": [
           {

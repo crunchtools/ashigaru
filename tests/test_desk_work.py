@@ -252,7 +252,8 @@ def test_a_stale_advance_never_moves_the_mark_back(
     assert fresh["until"] > stale["until"]
     assert store.advance_mark(conn, dispatch.SWEEP, stale["until"], JOSUI) is False
     assert client.get("/v1/marks/sweep", headers=keys[JOSUI]).json()["value"] == str(fresh["until"])
-    assert store.advance_mark(conn, dispatch.SWEEP, fresh["until"], JOSUI) is True
+    assert store.advance_mark(conn, dispatch.SWEEP, fresh["until"], JOSUI) is False
+    assert advance(client, keys)["advanced"] is False
     client.put("/v1/marks/sweep", headers=keys[JOSUI], json={"value": ago(days=2)})
     assert store.advance_mark(conn, dispatch.SWEEP, stale["until"], JOSUI) is True
 

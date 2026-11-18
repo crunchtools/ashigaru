@@ -284,8 +284,8 @@ def advance(
 ) -> Round:
     """`ashigaru work --advance`, admin: the same round, then the sweep mark moves to its catch-up's
     `until`, the last event it covered, so the next round starts after it and nothing is lost or
-    repeated, even when this one was truncated. Only forward: when a concurrent round already moved
-    it further, it stays and `advanced` is false. `since` is 422: a round read from a time could
+    repeated, even when this one was truncated. Only forward: when it is already there, or a concurrent
+    round moved it further, it stays and `advanced` is false. `since` is 422: a round read from a time could
     move the mark past events it never read."""
     if since is not None:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "since cannot be used with advance")

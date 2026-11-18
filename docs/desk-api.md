@@ -56,7 +56,7 @@ can return.
 | `GET /items/{id}/events` | the item's history, ledger lines included, oldest first; pages of `limit` (200, at most 1000) after `after` (a seq) |
 | `GET /ci/wait` | `desk_wait`: `repo` (owner/name) and full `sha`; the commit's CI result as soon as it is not `pending`, else as it stands after `timeout` seconds (default and most 90; 0 reads now). A client waits again on `pending` |
 | `GET /work` | `ashigaru work`, the whole check round: `items`, the check table (id, seat, mode, task, state, wrap, result or blocker, next) of open items, blocked first, then newest, with `?all=true` adding done, wontdo, abandoned and cleared ones, at most 1000 (`truncated`); `seats` as `GET /seats`; `summary` (`up`: seats not missing, `seats`, `open` items); `queue` as `GET /queue`; and `catch_up`, the issues and PRs intake recorded from the org webhook after a cursor: `new`, first seen, with title, `filed_by` (the author), lane, mode and `held`, and `reopened`, the delivery that took the source from closed to open while the item is closed, each item once. The cursor is an event seq (`after`): the `sweep` mark, or with `?since=` (or a mark that is a time) the event before the first stamped then; with neither, a day back; 422 for a time that is not one. `until` is the last event covered: the last committed when the round began, or the 1000th read when `truncated`. Events are numbered in commit order, so nothing is lost or repeated between rounds. It leaves the mark alone, though like `GET /queue` it abandons proposed children past their expiry |
-| `POST /work` | admin: the same round, then the `sweep` mark becomes its `until` (`advanced` is true), so the next round reads on from there. Only forward: when a concurrent round already moved it further it stays, and `advanced` is false. `?since=` is 422 here, since a round read from a time could move the mark past events it never read |
+| `POST /work` | admin: the same round, then the `sweep` mark becomes its `until` (`advanced` is true), so the next round reads on from there. Only forward: when it is already there, or a concurrent round moved it further, it stays and `advanced` is false. `?since=` is 422 here, since a round read from a time could move the mark past events it never read |
 | `GET /check` | `items` of `GET /work` alone, for clients older than 3.5 |
 | `GET /marks/{name}` | a named watermark (`sweep`: the event `GET /work`'s catch-up starts after; a time is read too): value, updated_at, updated_by; 404 until first set |
 | `PUT /marks/{name}` | admin: `{value}` sets it; names are `[a-z][a-z0-9-]*` |
@@ -141,7 +141,7 @@ PRs, so listing an account makes its own subjects auto-claimable: a `lane:*`
 label on one sets its lane and mode `auto`, as for any writer's. Their lane
 labels on anyone else's subject approve nothing. The record issues the sweep
 keeps (labeled `ashigaru-inbox`, `ashigaru-releases` or `ashigaru-observe`) are
-never queued.
+never queued, and one queued before is held on its next delivery.
 
 **CI.** One result per (repo, commit): each check's name and verdict
 (`pending`, `success`, `failure`, `cancelled`, `skipped`, `neutral`), and a
