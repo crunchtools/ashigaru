@@ -85,8 +85,8 @@ def items(
 def get(
     desk: Desk, item: str | None = None, subject_key: str | None = None, ref: str | None = None
 ) -> dict[str, Any]:
-    """One item: by id, by subject_key (unique), or the newest with this ref. The MCP tool is desk_get,
-    and desk_list finds one by subject_key or ref."""
+    """One item: by id, by subject_key (unique), or the most recently updated with this ref. The MCP
+    tool is desk_get, and desk_list finds one by subject_key or ref."""
     if sum(x is not None for x in (item, subject_key, ref)) != 1:
         raise CommandError("name one of: an item, --subject-key, --ref")
     if item is not None:
@@ -110,12 +110,17 @@ def create(desk: Desk, **fields: Any) -> dict[str, Any]:
     except DeskError as exc:
         if exc.status != HTTPStatus.CONFLICT:
             raise
-        # A create's only conflicts: the subject_key is taken, else the id is.
-        found = (
-            desk.get("/v1/items", subject_key=body["subject_key"], limit=1) if body.get("subject_key") else []
-        )
-        if not found and body.get("id"):
-            found = [desk.get(_item(body["id"]))]
+        # A create's only conflicts, in the order the Desk checks them: the id is taken, else the
+        # subject_key is.
+        found = []
+        if body.get("id"):
+            try:
+                found = [desk.get(_item(body["id"]))]
+            except DeskError as missing:
+                if missing.status != HTTPStatus.NOT_FOUND:
+                    raise
+        if not found and body.get("subject_key"):
+            found = desk.get("/v1/items", subject_key=body["subject_key"], limit=1)
         if not found:
             raise
         raise Refused(f"{found[0]['id']} exists: {exc.detail}", found[0]) from exc

@@ -1522,6 +1522,12 @@
             },
             "title": "Queued",
             "type": "array"
+          },
+          "truncated": {
+            "default": false,
+            "description": "True when either list stopped at its limit of 1000.",
+            "title": "Truncated",
+            "type": "boolean"
           }
         },
         "required": [
@@ -2560,7 +2566,7 @@
                 "type": "null"
               }
             ],
-            "description": "The report's Learned: line.",
+            "description": "The report's Learned: line; none is no line.",
             "title": "Learned"
           },
           "stage": {

@@ -192,7 +192,7 @@ LIST_ITEMS = """
       AND (:lane IS NULL OR lane = :lane) AND (:kind IS NULL OR kind = :kind)
       AND (:mode IS NULL OR mode = :mode) AND (:parent IS NULL OR parent = :parent)
       AND (:subject_key IS NULL OR subject_key = :subject_key) AND (:ref IS NULL OR ref = :ref)
-      AND (:learned IS NULL OR (coalesce(learned, '') != '') = :learned)
+      AND (:learned IS NULL OR (lower(trim(coalesce(learned, ''))) NOT IN ('', 'none')) = :learned)
       AND (:memorized IS NULL OR memorized = :memorized)
     ORDER BY updated_at DESC, id DESC
     LIMIT :limit OFFSET :offset

@@ -233,6 +233,8 @@ def wrap(conn: sqlite3.Connection, item_id: str, request: dict[str, Any], actor:
                 if not (item["memorized"] or request.get("learned")):
                     raise Refused(f"{item_id}: no CC-DONE yet; send /cc seat first, or force")
                 seat = store.get_seat(conn, item["seat"]) if item["seat"] else None
+                if item["seat"] and seat is None:
+                    raise Refused(f"{item['seat']} never reported, so it cannot be seen idle; force to clear")
                 if seat and seat["turn"] == Turn.ACTIVE:
                     raise Refused(f"{item['seat']} is mid-turn; wrap it once it is idle")
             if item["state"] not in CLOSED:
@@ -242,10 +244,13 @@ def wrap(conn: sqlite3.Connection, item_id: str, request: dict[str, Any], actor:
 
 def queue(conn: sqlite3.Connection) -> dict[str, Any]:
     """`ashigaru queue`: the newest QUEUE_LIMIT queued items, each with the state of every item it
-    waits on (`unknown` for an id with no item), then as many proposed children with their expiry."""
+    waits on (`unknown` for an id with no item), then as many proposed children with their expiry;
+    `truncated` when either list was cut."""
     store.expire_proposed(conn)
-    queued = store.list_items(conn, limit=QUEUE_LIMIT, state=State.QUEUED)
-    proposed = store.list_items(conn, limit=QUEUE_LIMIT, state=State.PROPOSED)
+    queued = store.list_items(conn, limit=QUEUE_LIMIT + 1, state=State.QUEUED)
+    proposed = store.list_items(conn, limit=QUEUE_LIMIT + 1, state=State.PROPOSED)
+    truncated = len(queued) > QUEUE_LIMIT or len(proposed) > QUEUE_LIMIT
+    queued, proposed = queued[:QUEUE_LIMIT], proposed[:QUEUE_LIMIT]
     wanted = sorted({after for item in queued for after in item["after"]})
     states = {
         row[0]: row[1]
@@ -255,7 +260,7 @@ def queue(conn: sqlite3.Connection) -> dict[str, Any]:
     }
     for item in queued:
         item["waits_on"] = [{"id": after, "state": states.get(after, "unknown")} for after in item["after"]]
-    return {"queued": queued, "proposed": proposed}
+    return {"queued": queued, "proposed": proposed, "truncated": truncated}
 
 
 def seats(conn: sqlite3.Connection) -> list[dict[str, Any]]:

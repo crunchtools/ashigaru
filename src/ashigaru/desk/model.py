@@ -7,9 +7,9 @@ repo, priority).
 
 from datetime import timedelta
 from enum import StrEnum
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, computed_field
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field, computed_field
 
 
 class State(StrEnum):
@@ -127,6 +127,14 @@ class Item(BaseModel):
     extra: dict[str, Any] = Field(default_factory=dict, description="Imported ledger fields with no column.")
 
 
+def _no_learned_line(value: str | None) -> str | None:
+    """The report contract's `Learned: none` records nothing, whichever route carries it."""
+    return None if value is not None and value.strip().lower() in {"", "none"} else value
+
+
+NoneIsNull = Annotated[str | None, AfterValidator(_no_learned_line)]
+
+
 class _Fields(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -145,7 +153,7 @@ class _Fields(BaseModel):
     check_after: str | None = None
     result: str | None = None
     next: str | None = None
-    learned: str | None = None
+    learned: NoneIsNull = None
     note: str | None = None
     blocked_reason: str | None = None
     memorized: bool | None = None
@@ -202,6 +210,7 @@ class Queue(BaseModel):
 
     queued: list[QueuedItem]
     proposed: list[Item]
+    truncated: bool = Field(False, description="True when either list stopped at its limit of 1000.")
 
 
 class WrapUp(BaseModel):
@@ -212,7 +221,7 @@ class WrapUp(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     stage: Wrap = Wrap.CLEARED
-    learned: str | None = Field(None, description="The report's Learned: line.")
+    learned: NoneIsNull = Field(None, description="The report's Learned: line; none is no line.")
     state: Literal["done", "wontdo", "abandoned"] = Field(
         "done", description="The closed state for an open item; a closed one keeps its own."
     )

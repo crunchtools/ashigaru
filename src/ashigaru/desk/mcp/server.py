@@ -184,7 +184,8 @@ def desk_create(
         dict[str, Any],
         Field(
             description="The item: `task` and any of id, kind, parent, subject_key, done_when, ref, repo, "
-            "lane, mode, state (default queued), after, priority, note, filed_by. No seat is assigned."
+            "lane, mode, state (default queued), after, priority, note, filed_by. A `seat` given here is "
+            "recorded without assign's checks; use assign to give an item to a seat."
         ),
     ],
 ) -> Item:

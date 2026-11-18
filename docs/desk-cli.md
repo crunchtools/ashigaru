@@ -35,8 +35,8 @@ Every view and action prints a table, or the Desk's JSON with `--json`.
 | `work [--all]` | the check table: blocked first, then newest; `--all` adds cleared and closed |
 | `queue` | queued items and the state of each item they wait on; `proposed` children and their expiry |
 | `outcomes` | each outcome's stories: done of total, blocked, open |
-| `list [--state S]... [--seat] [--lane] [--kind] [--mode] [--parent] [--subject-key K] [--ref URL] [--[no-]learned] [--[no-]memorized] [--limit N] [--offset N]` | items, newest first; `--state` repeats for any of several; `--learned` means a Learned line is recorded |
-| `get <item> \| --subject-key K \| --ref URL` | one item: by id, by `subject_key`, or the newest with that ref |
+| `list [--state S]... [--seat] [--lane] [--kind] [--mode] [--parent] [--subject-key K] [--ref URL] [--[no-]learned] [--[no-]memorized] [--limit N] [--offset N]` | items, newest first; `--state` repeats for any of several; `--learned` means a Learned line other than `none` is recorded |
+| `get <item> \| --subject-key K \| --ref URL` | one item: by id, by `subject_key`, or the most recently updated with that ref |
 | `create --task T [--id] [--subject-key K] [--kind] [--parent] [--done-when] [--ref] [--repo] [--lane] [--mode] [--state] [--after A]... [--priority] [--note] [--filed-by]` | admin: record an item without assigning it, `queued` unless `--state` says otherwise. A taken `subject_key` or id prints the item that holds it and exits 1 |
 | `update <item> [--state] [--result] [--next] [--note] [--learned] [--blocked-reason] [--check-after] [--[no-]memorized] [...] [--clear FIELD]...` | set an item's fields (`create`'s too, admin only); `--clear` sets one to null. A seat sets only its own open item's `state` (working, review, blocked), `result`, `next`, `learned`, `note`, `blocked_reason`, `memorized`, `check_after` |
 | `report <item> DONE\|BLOCKED\|WORKING\|CC-DONE [--text T] [--next N] [--learned L]` | the report contract: DONE to review with the text as result, BLOCKED to blocked with it as reason, WORKING to working; CC-DONE marks the learnings memorized; a Learned of `none` records nothing |
@@ -44,7 +44,7 @@ Every view and action prints a table, or the Desk's JSON with `--json`.
 | `auto <item>`, `manual <item>` | hand an item to Josui or to Scott |
 | `wait <item> [--timeout S]` | block until the item reaches review or closes; exit 1 unless review or done |
 | `wait <repo> <sha> [--timeout S]` | block until the commit's CI is no longer pending; print its status and checks; exit 1 unless `success` |
-| `wrap <item> [--stage wrapping\|cleared] [--learned T] [--state done\|wontdo\|abandoned] [--force]` | admin. `--stage wrapping` records that `/cc seat` was sent. `cleared` (the default) refuses until CC-DONE (or `--learned`) and an idle turn, unless `--force`, then clears the wrap and closes the item, which frees the seat |
+| `wrap <item> [--stage wrapping\|cleared] [--learned T] [--state done\|wontdo\|abandoned] [--force]` | admin. `--stage wrapping` records that `/cc seat` was sent. `cleared` (the default) refuses until CC-DONE (or a `--learned` other than `none`) and an idle turn (a seat that never reported counts as not idle), unless `--force`, then clears the wrap and closes the item, which frees the seat |
 | `mcp mint <identity> [--label L] [--out FILE]` | admin: a new hosted MCP URL, `https://<host>/mcp/<code>`. The URL is the credential and the Desk shows it once: printed alone, or with `--out` written only to that new file (mode 0600) while stdout names the code id. A Desk without the `mcp` extra (the RPM) refuses with 409 |
 | `mcp list [identity]` | codes by id, identity, label, created, last used, revoked; never the code. No identity: every one's for an admin, else your own |
 | `mcp revoke <id> [--identity NAME]` | revoke a code that `mcp list` shows; its URL stops on the next request |

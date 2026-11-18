@@ -358,6 +358,19 @@ def test_create_prints_the_item_holding_an_id(desk: FakeDesk, capsys: pytest.Cap
     assert capsys.readouterr().out.splitlines()[1].startswith("a3")
 
 
+def test_create_looks_up_a_taken_id_before_the_subject_key(
+    desk: FakeDesk, capsys: pytest.CaptureFixture[str]
+) -> None:
+    desk.on("POST", "/v1/items", (409, {"detail": "id a3 is taken"}))
+    desk.on("GET", "/v1/items/a3", (200, item(id="a3")))
+    desk.on("GET", "/v1/items", (200, [item(id="a5", subject_key="RT#9")]))
+    assert main(["create", "--task", "t", "--id", "a3", "--subject-key", "RT#9"]) == 1
+    assert capsys.readouterr().out.splitlines()[1].startswith("a3")
+    desk.on("GET", "/v1/items/a3", (404, {"detail": "no such item"}))
+    assert main(["create", "--task", "t", "--id", "a3", "--subject-key", "RT#9"]) == 1
+    assert capsys.readouterr().out.splitlines()[1].startswith("a5")
+
+
 def test_assign_task_keeps_the_id_when_the_assign_is_refused(
     desk: FakeDesk, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -403,6 +416,8 @@ def test_update_sets_and_clears(desk: FakeDesk) -> None:
         "state": "review", "check_after": "2026-11-19T00:00:00Z", "memorized": True, "filed_by": "Max 1",
         "next": None,
     }  # fmt: skip
+    assert main(["update", "a1", "--clear", "after"]) == 0
+    assert desk.seen[-1].body == {"after": None}
     assert main(["update", "a1"]) == 1
 
 

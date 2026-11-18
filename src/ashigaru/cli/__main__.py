@@ -41,7 +41,7 @@ UPDATE_ONLY = (
 )
 CLEARABLE = (
     "kind", "parent", "subject_key", "done_when", "ref", "repo", "lane", "note", "filed_by", "result",
-    "next", "learned", "blocked_reason", "check_after", "verified_by", "wrap",
+    "next", "learned", "blocked_reason", "check_after", "verified_by", "wrap", "after",
 )  # fmt: skip
 
 
@@ -70,7 +70,7 @@ def _item_commands(
     get.add_argument("item", nargs="?")
     key = get.add_mutually_exclusive_group()
     key.add_argument("--subject-key", help="the item with this subject_key")
-    key.add_argument("--ref", help="the newest item with this ref")
+    key.add_argument("--ref", help="the most recently updated item with this ref")
 
     create = sub.add_parser(
         "create", parents=[common], help="admin: record an item without assigning it (queued by default)"

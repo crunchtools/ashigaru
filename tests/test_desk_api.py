@@ -188,6 +188,27 @@ def test_the_queue_shows_the_newest_up_to_its_limit(
     view = client.get("/v1/queue", headers=keys["ci"]).json()
     assert [row["id"] for row in view["queued"]] == ["a2"]
     assert [row["id"] for row in view["proposed"]] == ["a4"]
+    assert view["truncated"] is True
+    monkeypatch.setattr(dispatch, "QUEUE_LIMIT", 2)
+    assert client.get("/v1/queue", headers=keys["ci"]).json()["truncated"] is False
+
+
+def test_wrap_fails_closed_on_a_seat_that_never_reported(client: TestClient, keys: Keys) -> None:
+    body = {"task": "t", "seat": "Ghost 1", "state": "review", "memorized": True}
+    item = client.post("/v1/items", headers=keys[JOSUI], json=body).json()
+    path = f"/v1/items/{item['id']}/wrap"
+    refused = client.post(path, headers=keys[JOSUI], json={})
+    assert refused.status_code == CONFLICT and "never reported" in refused.json()["detail"]
+    assert client.post(path, headers=keys[JOSUI], json={"force": True}).json()["wrap"] == "cleared"
+
+
+def test_a_learned_line_of_none_is_no_line(client: TestClient, keys: Keys, conn: sqlite3.Connection) -> None:
+    item = client.post("/v1/items", headers=keys[JOSUI], json={"task": "t", "learned": "x"}).json()
+    path = f"/v1/items/{item['id']}"
+    assert client.patch(path, headers=keys[JOSUI], json={"learned": "None"}).json()["learned"] is None
+    assert client.post(f"{path}/wrap", headers=keys[JOSUI], json={"learned": "none"}).status_code == CONFLICT
+    store.insert_item(conn, {"id": "imported", "task": "t", "learned": "none"}, JOSUI)
+    assert client.get("/v1/items?learned=true", headers=keys["ci"]).json() == []
 
 
 def test_wrap_force_keeps_a_closed_state(client: TestClient, keys: Keys) -> None:
