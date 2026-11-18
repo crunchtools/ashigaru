@@ -464,6 +464,40 @@ def test_a_required_check_that_never_started_is_not_success(
     assert found["status"] == "success" and found["pending"] == []
 
 
+@pytest.mark.parametrize("sdlc", [Verdict.SUCCESS, Verdict.FAILURE])
+def test_a_wait_held_for_a_required_check_ends_on_the_delivery_that_reports_it(
+    db: Path,
+    keys: Keys,
+    monkeypatch: pytest.MonkeyPatch,
+    required_checks: RequiredChecks,
+    sdlc: Verdict,
+) -> None:
+    """Gatehouse passes first and wakes the waiter, which holds for "sdlc ci"; the CI workflow's
+    delivery wakes it again, and only then does it return."""
+    monkeypatch.setattr(ci, "RECHECK", 60.0)
+    required_checks.rules["main"] = ("sdlc ci",)
+    app = create_app(db, webhook_secrets={"github": [SECRET]})
+
+    async def scenario() -> dict[str, Any]:
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://desk") as client:
+            params: dict[str, str | int] = {"repo": REPO, "sha": SHA, "timeout": 60}
+            waiting = asyncio.create_task(client.get("/v1/ci/wait", headers=keys["ci"], params=params))
+            await asyncio.sleep(0.2)
+            await deliver(client, "check_suite", payload("check_suite", conclusion="success"), "d-1")
+            await asyncio.sleep(0.3)
+            assert not waiting.done()
+            required_checks.reported["sdlc ci"] = sdlc
+            await deliver(client, "workflow_run", payload("workflow_run"), "d-2")
+            response = await asyncio.wait_for(waiting, PROMPTLY)
+            found: dict[str, Any] = response.json()
+            return found
+
+    found = asyncio.run(scenario())
+    assert found["status"] == sdlc.value and found["required"] == ["sdlc ci"]
+    assert required_checks.asked == [(REPO, SHA, None), (REPO, SHA, None)]
+
+
 def test_a_required_check_that_failed_fails_the_commit(
     hooked: TestClient, keys: Keys, required_checks: RequiredChecks
 ) -> None:
