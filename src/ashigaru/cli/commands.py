@@ -163,13 +163,19 @@ def mcp_mint(desk: Desk, identity: str, label: str | None = None, out: str | Non
             file.flush()
             os.fsync(file.fileno())
         except OSError as exc:
-            # A URL nobody holds is still a live credential: revoke it before reporting.
-            desk.request("DELETE", f"{_codes_of(identity)}/{quote(minted['code_id'], safe='')}")
             os.unlink(out)
-            raise CommandError(
-                f"could not write {out} ({exc}); code {minted['code_id']} was revoked"
-            ) from exc
+            raise CommandError(f"could not write {out} ({exc}); {_revoke_unheld(desk, minted)}") from exc
     return {key: value for key, value in minted.items() if key != "url"} | {"out": out}
+
+
+def _revoke_unheld(desk: Desk, minted: dict[str, Any]) -> str:
+    """A URL nobody holds is still a live credential: revoke it, and say whether that worked."""
+    code_id = minted["code_id"]
+    try:
+        desk.request("DELETE", f"{_codes_of(minted['identity'])}/{quote(code_id, safe='')}")
+    except (DeskError, Unreachable) as exc:
+        return f"revoking code {code_id} failed too ({exc}); run: ashigaru mcp revoke {code_id}"
+    return f"code {code_id} was revoked"
 
 
 def mcp_list(desk: Desk, identity: str | None = None) -> list[dict[str, Any]]:

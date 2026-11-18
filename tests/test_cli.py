@@ -575,3 +575,16 @@ def test_mcp_mint_revokes_a_url_it_could_not_write(
     assert main(["mcp", "mint", "Vertex 1", "--out", str(out)]) == 1
     assert "c0de01 was revoked" in capsys.readouterr().err
     assert len(desk.calls("DELETE", f"{MCP_OF_VERTEX}/c0de01")) == 1 and not out.exists()
+
+
+def test_mcp_mint_says_when_the_rollback_fails_too(
+    desk: FakeDesk, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    def full(descriptor: int) -> None:
+        raise OSError(28, "No space left on device")
+
+    desk.on("POST", MCP_OF_VERTEX, (201, CODE | {"url": URL}))
+    monkeypatch.setattr(commands.os, "fsync", full)
+    out = tmp_path / "vertex1.mcp"
+    assert main(["mcp", "mint", "Vertex 1", "--out", str(out)]) == 1
+    assert "ashigaru mcp revoke c0de01" in capsys.readouterr().err and not out.exists()

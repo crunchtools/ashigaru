@@ -34,6 +34,9 @@ Every view and action prints a table, or the Desk's JSON with `--json`.
 | `auto <item>`, `manual <item>` | hand an item to Josui or to Scott |
 | `wait <item> [--timeout S]` | block until the item reaches review or closes; exit 1 unless review or done |
 | `wrap <item> [--learned T] [--state done\|wontdo\|abandoned] [--force]` | refuse until CC-DONE and an idle turn (unless `--force`), then clear the wrap and close the item, which frees the seat |
+| `mcp mint <identity> [--label L] [--out FILE]` | admin: a new hosted MCP URL, `https://<host>/mcp/<code>`. The URL is the credential and the Desk shows it once: printed alone, or with `--out` written only to that new file (mode 0600) while stdout names the code id. A Desk without the `mcp` extra (the RPM) refuses with 409 |
+| `mcp list [identity]` | codes by id, identity, label, created, last used, revoked; never the code. No identity: every one's for an admin, else your own |
+| `mcp revoke <id> [--identity NAME]` | revoke a code that `mcp list` shows; its URL stops on the next request |
 
 Exit 0 on success, 1 when the Desk or a command refuses, 2 on a usage or
 config error.
