@@ -313,7 +313,8 @@ def assign(conn: Conn, who: Admin, item_id: str, body: Assign) -> Item:
 @router.post("/v1/items/{item_id}/claim", tags=["items"], responses=errors(401, 403, 404, 409))
 def claim(conn: Conn, who: Who, item_id: str) -> Item:
     """desk_claim: the calling seat takes a queued, unowned, auto item in its lane whose `after` items
-    are done. Atomic: of two seats claiming one item, one gets 409. The seat must be free and unheld."""
+    are done. Atomic: of two seats claiming one item, one gets 409. The seat must be free, unheld and
+    in a lane; an item with no lane is never claimed, only assigned."""
     if who.role != Role.SEAT:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "only a seat claims; an admin assigns")
     try:
