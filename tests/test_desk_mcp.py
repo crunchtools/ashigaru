@@ -169,7 +169,8 @@ def arrange(conn: sqlite3.Connection, tool: str, item_id: str) -> None:
     else:
         store.insert_item(conn, {"id": item_id, "task": "t", "seat": SEAT, "state": "working"}, JOSUI)
     for seat in (SEAT, OTHER):
-        store.upsert_seat(conn, seat, {"lane": "exedore-max", "status": "free", "item": None})
+        with store.transaction(conn):
+            store.write_seat(conn, seat, {"lane": "exedore-max", "status": "free", "item": None})
 
 
 @pytest.mark.parametrize(
