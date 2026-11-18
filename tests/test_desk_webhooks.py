@@ -1056,8 +1056,17 @@ def test_a_record_issue_queued_before_is_held_on_its_next_delivery(
     deliver(trusting_the_bot, "issues", payload("issues", user={"login": BOT}, labels=labels), "d-2")
     item = held_item(conn)
     assert (item["lane"], item["mode"], item["extra"]["held_for"]) == (None, "manual", "record issue")
+    history = store.last_event(conn, item["id"])
     deliver(trusting_the_bot, "issues", payload("issues", user={"login": BOT}, labels=labels), "d-3")
-    assert held_item(conn)["extra"]["held_at"] == item["extra"]["held_at"]
+    approve = {
+        **payload("issues", user={"login": BOT}, labels=labels),
+        "action": "labeled",
+        "sender": {"login": "maintainer"},
+        "label": {"name": "lane:vertex"},
+    }
+    deliver(trusting_the_bot, "issues", approve, "d-4")
+    again = held_item(conn)
+    assert "approved_by" not in again["extra"] and store.last_event(conn, item["id"]) == history
 
 
 def test_trusted_authors_come_from_their_variable(monkeypatch: pytest.MonkeyPatch) -> None:
