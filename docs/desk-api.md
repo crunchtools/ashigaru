@@ -164,7 +164,8 @@ to that commit. It is withdrawn (held again, `trusted` false, with `held_by`,
 `held_at` and `held_for`: `lane removed` or `head moved`) when a writer removes
 the approved `lane:` label, or when a delivery from anyone who may not write
 carries another head (a fork's push; a stale redelivery errs the same safe
-way). A writer's push moves `approved_head` with it. An outsider editing the
+way; so does a PR approved before heads were recorded). A writer's delivery
+moves `approved_head` to its head. An outsider editing the
 title or body withdraws nothing: seats read it as data. Approval, retry and
 withdrawal set lane and mode only while the item is queued, seatless, and
 nobody but intake has set its lane or mode; once Josui has (a manual hold, a

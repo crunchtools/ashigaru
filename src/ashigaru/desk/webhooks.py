@@ -82,15 +82,15 @@ def _judge(adapter: Forge, token: str, item: IntakeItem, existing: dict[str, Any
     if existing is None and item.closed:
         return item
     if existing is None or intake.held(existing):
-        if (existing is None or not intake.approved(existing)) and writes(item.author):
+        if (existing is None or not intake.was_approved(existing)) and writes(item.author):
             return dataclasses.replace(item, author_writes=True)
         approval = intake.lane(item.approves_lane)
         return dataclasses.replace(item, approved=True) if approval and writes(item.sender) else item
-    if not intake.approved(existing):
+    if not intake.was_approved(existing):
         return item
     extra = existing["extra"]
     unlabeled = item.revokes_lane is not None and item.revokes_lane == extra.get("approved_lane")
-    moved = item.head is not None and extra.get("approved_head") not in (None, item.head)
+    moved = item.head is not None and extra.get("approved_head") != item.head
     if unlabeled and writes(item.sender):
         return dataclasses.replace(item, revoked=True)
     return dataclasses.replace(item, revoked=True) if moved and not writes(item.sender) else item

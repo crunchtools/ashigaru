@@ -34,7 +34,7 @@ def held(existing: dict[str, Any]) -> bool:
     return existing["extra"].get("trusted") is False
 
 
-def approved(existing: dict[str, Any]) -> bool:
+def was_approved(existing: dict[str, Any]) -> bool:
     """An intake item a maintainer has approved, whether or not the approval still stands."""
     return "approved_by" in existing["extra"]
 
@@ -89,12 +89,12 @@ def _trust(
         extra.update(trusted=True, **({} if item.author_writes else _approval(item)))
         hint = item.lane_hint if item.author_writes else item.approves_lane
         return {"lane": lane(hint), "mode": Mode.AUTO} if _ours(conn, existing) else {}
-    if not approved(existing) or held(existing):
+    if not was_approved(existing) or held(existing):
         return {}
     if item.revoked:
         extra.update(_withdrawal(item))
         return {"lane": None, "mode": Mode.MANUAL} if _ours(conn, existing) else {}
-    if item.head is not None and extra.get("approved_head") is not None:
+    if item.head is not None:
         extra["approved_head"] = item.head
     return {}
 
