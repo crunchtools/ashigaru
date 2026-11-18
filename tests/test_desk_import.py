@@ -184,24 +184,37 @@ def test_a_sweep_after_the_import_is_refused_as_a_duplicate(
     client: TestClient, keys: Keys, conn: sqlite3.Connection
 ) -> None:
     importer.import_ledger(conn, [f'{{"id":"a1","task":"t","ref":"{OPEN_ISSUE}"}}\n'])
+    josui = keys["Josui Prime"]
     body = {"task": "again", "ref": OPEN_ISSUE, "subject_key": OPEN_ISSUE}
-    assert client.post("/v1/items", headers=keys["Josui Prime"], json=body).status_code == CONFLICT
-    other = {"task": "new", "subject_key": " https://github.com/CrunchTools/Example/pull/8 "}
-    created = client.post("/v1/items", headers=keys["Josui Prime"], json=other).json()
-    assert created["subject_key"] == "crunchtools/example#8"
+    assert client.post("/v1/items", headers=josui, json=body).status_code == CONFLICT
+    for sent, stored in {
+        " https://github.com/crunchtools/example/pull/8/ ": "crunchtools/example#8",
+        "crunchtools/example#9": "crunchtools/example#9",
+        "example:disk-full": "example:disk-full",
+    }.items():
+        created = client.post("/v1/items", headers=josui, json={"task": "t", "subject_key": sent})
+        assert created.json()["subject_key"] == stored
 
 
 def test_subject_keys_have_one_form() -> None:
     same = {
         "crunchtools/ashigaru#5": [
             "https://github.com/crunchtools/ashigaru/issues/5",
-            "https://github.com/Crunchtools/Ashigaru/pull/5/files",
+            "https://github.com/crunchtools/ashigaru/issues/5/",
+            "https://github.com/crunchtools/ashigaru/pull/5",
+            "https://github.com/crunchtools/ashigaru/pull/5/files",
             "http://www.github.com/crunchtools/ashigaru/issues/5#issuecomment-1",
-            "crunchtools/ashigaru#5",
+            " crunchtools/ashigaru#5 ",
         ],
-        "RT#1500": ["RT#1500", "rt #1500", "https://rt.crunchtools.com/Ticket/Display.html?id=1500"],
-        "repo:alert": [" repo:alert "],
+        "RT#1500": [
+            "RT#1500",
+            "rt #1500",
+            "RT 1500",
+            "https://rt.crunchtools.com/Ticket/Display.html?id=1500",
+            "https://rt.crunchtools.com/Ticket/Display.html?id=1500#txn-9",
+        ],
     }
     for want, forms in same.items():
         assert {subject_key(form) for form in forms} == {want}
-    assert subject_key("  ") is None and subject_key(None) is None
+    for not_a_ref in ("example:disk-full", "https://example.com/issues/5", "a12", "  ", None):
+        assert subject_key(not_a_ref) is None

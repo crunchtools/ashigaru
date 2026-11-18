@@ -8,7 +8,7 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
-- `ashigaru-desk import` sets `subject_key` from each item's `ref`, so the Desk's 409 dedupe covers work the JSONL ledger already tracks and the first sweep after cutover does not queue it again. Only an open item gets the key, the newest where several share one ref; closed items stay unkeyed, and a key already set or held elsewhere is never touched. Every import runs this pass, so re-importing a Desk filled before this fix backfills it. The Desk now stores every `subject_key` in one form: a GitHub issue or PR URL and `owner/name#N` both become `owner/name#N`, an RT URL or `RT #N` becomes `RT#N`, so a sweep that sends the URL, a webhook that sends the key and the import all dedupe against each other.
+- `ashigaru-desk import` sets `subject_key` from each item's `ref`, so the Desk's 409 dedupe covers work the JSONL ledger already tracks and the first sweep after cutover does not queue it again. Only an open item gets the key, the newest where several share one ref; closed items stay unkeyed, and a key already set or held elsewhere is never touched. Every import runs this pass, so re-importing a Desk filled before this fix backfills it. `POST /v1/items` and `PATCH` store a ref sent as `subject_key` in the Desk's key form, through the same helper (`ashigaru.desk.model.subject_key`): a GitHub issue or PR URL becomes `owner/repo#N`, an RT URL or `RT #N` becomes `RT#N`. A key already in that form, or any other key, is stored as given.
 
 ## [3.0.0] - 2026-11-18
 
