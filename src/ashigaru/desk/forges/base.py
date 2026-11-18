@@ -52,13 +52,21 @@ class IntakeItem:
     removing the approved lane withdraws the approval."""
     head: str | None = None
     """The content the subject stands at, where the forge versions it (a PR's head commit). Approval is
-    tied to it: a sender who may not write moving it withdraws the approval."""
+    tied to it: any delivery at another head withdraws the approval, unless a writer's push moved it."""
+    head_before: str | None = None
+    """The head a push moved the subject from, where the forge says. Only a writer's push from the
+    approved head moves the approval with it."""
     author_writes: bool = False
     """Set by the Desk, never by an adapter's parse: the author may write to the repo."""
     approved: bool = False
     """Set by the Desk, never by an adapter's parse: the sender may write and this is an approval."""
     revoked: bool = False
-    """Set by the Desk, never by an adapter's parse: this event withdraws an approval."""
+    """Set by the Desk, never by an adapter's parse: a writer removed the approved lane."""
+    pushed_by_writer: bool = False
+    """Set by the Desk, never by an adapter's parse: a writer pushed from the approved head to `head`."""
+    judged_at: int | None = None
+    """Set by the Desk, never by an adapter's parse: the item's last event when it was judged, 0 when
+    there was no item. A row that changed since loses whatever the judging granted."""
 
 
 @dataclass(frozen=True)

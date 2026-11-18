@@ -162,11 +162,18 @@ failed is retried. An approval is recorded under `extra` as `approved_by`,
 `approved_at`, `approved_lane` and, for a PR, `approved_head`: approval is tied
 to that commit. It is withdrawn (held again, `trusted` false, with `held_by`,
 `held_at` and `held_for`: `lane removed` or `head moved`) when a writer removes
-the approved `lane:` label, or when a delivery from anyone who may not write
-carries another head (a fork's push; a stale redelivery errs the same safe
-way; so does a PR approved before heads were recorded). A writer's delivery
-moves `approved_head` to its head. An outsider editing the
-title or body withdraws nothing: seats read it as data. Approval, retry and
+the approved `lane:` label, or when any delivery, a writer's included, carries a
+head other than `approved_head` (a PR approved before heads were recorded has
+none, so it is held on its next delivery). The one exception is a writer's push
+whose `before` is `approved_head`: that moves `approved_head` to the new head.
+A lost or late delivery therefore errs toward holding. An outsider editing the
+title or body withdraws nothing: seats read it as data. Deliveries are judged
+against the row as it was before the transaction that applies them; if the row
+changed in between, whatever the judging granted (an approval, a writer's
+author, a writer's push) is dropped, and a maintainer labels it again. A
+writer's lane removal whose permission check fails is lost, since its delivery
+is already recorded: Josui holds the item by hand, or the writer re-adds and
+removes the label. Approval, retry and
 withdrawal set lane and mode only while the item is queued, seatless, and
 nobody but intake has set its lane or mode; once Josui has (a manual hold, a
 lane), Josui's choice wins and the change is recorded only. `extra` also

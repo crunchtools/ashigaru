@@ -146,6 +146,9 @@ def _intake(payload: Mapping[str, Any], subject: str, kind: Kind) -> tuple[Intak
             approves_lane=_lane_label(payload, "labeled"),
             revokes_lane=_lane_label(payload, "unlabeled"),
             head=head.lower() if isinstance(head := payload_get(thing, "head", "sha"), str) else None,
+            head_before=before.lower()
+            if payload.get("action") == "synchronize" and isinstance(before := payload.get("before"), str)
+            else None,
         ),
     )
 

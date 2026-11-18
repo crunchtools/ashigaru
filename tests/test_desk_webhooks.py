@@ -609,9 +609,10 @@ PUSHED = "2" * 40
 def fork_pr(
     action: str = "opened", by: str = "stranger", head: str = FORK_HEAD, **extra: Any
 ) -> dict[str, Any]:
-    """An outsider's PR at `head`, as delivered for `action` by `by`."""
+    """An outsider's PR at `head`, as delivered for `action` by `by`; a push comes from FORK_HEAD."""
     body = payload("pull_request", user={"login": "stranger"}, head={"sha": head})
-    return {**body, "action": action, "sender": {"login": by}, **extra}
+    pushed = {"before": FORK_HEAD, "after": head} if action == "synchronize" else {}
+    return {**body, "action": action, "sender": {"login": by}, **pushed, **extra}
 
 
 def pr_item(conn: sqlite3.Connection) -> dict[str, Any]:
@@ -655,7 +656,7 @@ def test_an_approval_recorded_without_a_head_is_held_on_an_outsiders_delivery(
     assert (pr_item(conn)["mode"], pr_item(conn)["extra"]["held_for"]) == ("manual", "head moved")
 
 
-def test_a_writers_delivery_binds_an_approval_recorded_without_a_head(
+def test_even_a_writers_push_holds_an_approval_recorded_without_a_head(
     trusting: TestClient, conn: sqlite3.Connection
 ) -> None:
     item = approved_pr(trusting, conn)
@@ -663,12 +664,68 @@ def test_a_writers_delivery_binds_an_approval_recorded_without_a_head(
         legacy = {key: value for key, value in item["extra"].items() if key != "approved_head"}
         store.update_item(conn, item["id"], {"extra": legacy}, "intake")
     deliver(trusting, "pull_request", fork_pr("synchronize", "maintainer", PUSHED), "d-3")
-    after = pr_item(conn)
-    assert (after["mode"], after["extra"]["trusted"], after["extra"]["approved_head"]) == (
-        "auto",
-        True,
-        PUSHED,
+    assert (pr_item(conn)["mode"], pr_item(conn)["extra"]["held_for"]) == ("manual", "head moved")
+
+
+def test_a_writers_event_at_an_unapproved_head_holds_it(
+    trusting: TestClient, conn: sqlite3.Connection
+) -> None:
+    """The outsider's push to PUSHED was lost or is late; a writer's label at PUSHED must not bless it."""
+    approved_pr(trusting, conn)
+    deliver(
+        trusting,
+        "pull_request",
+        fork_pr("labeled", "maintainer", PUSHED, label={"name": "enhancement"}),
+        "d-3",
     )
+    assert (pr_item(conn)["mode"], pr_item(conn)["extra"]["held_for"]) == ("manual", "head moved")
+    deliver(trusting, "pull_request", fork_pr("synchronize", head=PUSHED), "d-4")
+    assert (pr_item(conn)["mode"], pr_item(conn)["extra"]["trusted"]) == ("manual", False)
+
+
+def test_a_writers_push_from_another_head_holds_it(trusting: TestClient, conn: sqlite3.Connection) -> None:
+    approved_pr(trusting, conn)
+    later = {**fork_pr("synchronize", "maintainer", "3" * 40), "before": PUSHED}
+    deliver(trusting, "pull_request", later, "d-3")
+    assert (pr_item(conn)["mode"], pr_item(conn)["extra"]["held_for"]) == ("manual", "head moved")
+
+
+def judged_on_one_snapshot(db: Path, bodies: list[dict[str, Any]]) -> list[tuple[str, Any]]:
+    """Each PR body parsed and judged against the same row, before any is applied: concurrent deliveries."""
+    forge = FORGES["github"]
+    judged = []
+    for body in bodies:
+        raw = json.dumps(body).encode()
+        signed_as = webhooks.digest(forge.name, "pull_request", raw)
+        delivery = forge.parse({"x-github-event": "pull_request"}, raw)
+        judged.append((signed_as, webhooks._judged(str(db), forge, "token", signed_as, delivery)))
+    return judged
+
+
+def test_an_outsiders_push_judged_alongside_an_approval_is_held(
+    trusting: TestClient, conn: sqlite3.Connection, db: Path
+) -> None:
+    deliver(trusting, "pull_request", fork_pr(), "d-1")
+    approve = fork_pr("labeled", "maintainer", label={"name": "lane:vertex"})
+    push = fork_pr("synchronize", head=PUSHED)
+    for signed_as, delivery in judged_on_one_snapshot(db, [approve, push]):
+        webhooks._apply(str(db), "github", signed_as, delivery)
+    item = pr_item(conn)
+    assert (item["lane"], item["mode"], item["extra"]["held_for"]) == (None, "manual", "head moved")
+
+
+def test_an_approval_judged_against_a_row_that_since_changed_is_dropped(
+    trusting: TestClient, conn: sqlite3.Connection, db: Path
+) -> None:
+    deliver(trusting, "pull_request", fork_pr(), "d-1")
+    approve = fork_pr("labeled", "maintainer", label={"name": "lane:vertex"})
+    edited = fork_pr("edited")
+    edited["pull_request"] = {**edited["pull_request"], "title": "Edited"}
+    for signed_as, delivery in reversed(judged_on_one_snapshot(db, [approve, edited])):
+        webhooks._apply(str(db), "github", signed_as, delivery)
+    item = pr_item(conn)
+    assert (item["lane"], item["mode"], item["extra"]["trusted"]) == (None, "manual", False)
+    assert "approved_by" not in item["extra"]
 
 
 def test_a_writers_push_moves_the_approval_with_it(trusting: TestClient, conn: sqlite3.Connection) -> None:

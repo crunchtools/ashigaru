@@ -18,6 +18,7 @@ state, seat): they refresh the ref, and the source's title, labels and open or
 closed state under `extra`. A subject first seen closed is not queued.
 """
 
+import dataclasses
 import sqlite3
 from typing import Any
 
@@ -68,8 +69,7 @@ def _approval(item: IntakeItem) -> dict[str, Any]:
     }
 
 
-def _withdrawal(item: IntakeItem) -> dict[str, Any]:
-    why = "lane removed" if item.revokes_lane else "head moved"
+def _withdrawal(item: IntakeItem, why: str) -> dict[str, Any]:
     return {"trusted": False, "held_by": item.sender, "held_at": store.now(), "held_for": why}
 
 
@@ -92,11 +92,22 @@ def _trust(
     if not was_approved(existing) or held(existing):
         return {}
     if item.revoked:
-        extra.update(_withdrawal(item))
-        return {"lane": None, "mode": Mode.MANUAL} if _ours(conn, existing) else {}
-    if item.head is not None:
-        extra["approved_head"] = item.head
-    return {}
+        why = "lane removed"
+    elif item.head is not None and item.head != extra.get("approved_head") and not item.pushed_by_writer:
+        why = "head moved"
+    else:
+        if item.head is not None:
+            extra["approved_head"] = item.head
+        return {}
+    extra.update(_withdrawal(item, why))
+    return {"lane": None, "mode": Mode.MANUAL} if _ours(conn, existing) else {}
+
+
+def _unless_moved(conn: sqlite3.Connection, existing: dict[str, Any], item: IntakeItem) -> IntakeItem:
+    """The item, stripped of what its judging granted when the row has changed since it was judged."""
+    if item.judged_at == store.last_event(conn, existing["id"]):
+        return item
+    return dataclasses.replace(item, author_writes=False, approved=False, pushed_by_writer=False)
 
 
 def upsert(conn: sqlite3.Connection, item: IntakeItem) -> str | None:
@@ -130,6 +141,7 @@ def upsert(conn: sqlite3.Connection, item: IntakeItem) -> str | None:
             ACTOR,
             SOURCE,
         )
+    item = _unless_moved(conn, existing, item)
     patch: dict[str, Any] = {}
     extra = {**existing["extra"], **_seen(item)}
     patch.update(_trust(conn, existing, item, extra))

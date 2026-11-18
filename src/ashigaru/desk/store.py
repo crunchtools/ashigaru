@@ -522,6 +522,12 @@ AND (json_type(patch, '$.lane') IS NOT NULL OR json_type(patch, '$.mode') IS NOT
 """
 
 
+def last_event(conn: sqlite3.Connection, item_id: str) -> int:
+    """The item's newest event seq: a version that moves with every write to the row."""
+    row = conn.execute("SELECT MAX(seq) FROM events WHERE item_id = ?", (item_id,)).fetchone()
+    return int(row[0] or 0)
+
+
 def events(conn: sqlite3.Connection, item_id: str, after: int = 0, limit: int = 200) -> list[dict[str, Any]]:
     rows = conn.execute(
         "SELECT * FROM events WHERE item_id = ? AND seq > ? ORDER BY seq LIMIT ?", (item_id, after, limit)

@@ -69,7 +69,8 @@ def _judge(adapter: Forge, token: str, item: IntakeItem, existing: dict[str, Any
     """Ask the forge only what can change how the item is queued: for a new or still-held subject,
     whether its author writes (asked again while held, so a failed check is retried on the next
     delivery), then whether an event that adds a lane comes from a writer; for an approved one,
-    whether the sender of an event that moves its head, or removes its lane, writes."""
+    whether the sender of a push from the approved head, or of an event removing its lane, writes.
+    Whether a head withdraws an approval is upsert's call, against the row it writes."""
     asked: dict[str, bool] = {}
 
     def writes(account: str | None) -> bool:
@@ -90,23 +91,26 @@ def _judge(adapter: Forge, token: str, item: IntakeItem, existing: dict[str, Any
         return item
     extra = existing["extra"]
     unlabeled = item.revokes_lane is not None and item.revokes_lane == extra.get("approved_lane")
-    moved = item.head is not None and extra.get("approved_head") != item.head
     if unlabeled and writes(item.sender):
         return dataclasses.replace(item, revoked=True)
-    return dataclasses.replace(item, revoked=True) if moved and not writes(item.sender) else item
+    pushed = item.head_before is not None and item.head_before == extra.get("approved_head")
+    return dataclasses.replace(item, pushed_by_writer=True) if pushed and writes(item.sender) else item
 
 
 def _judged(db_path: str, adapter: Forge, token: str, signed: str, delivery: Delivery) -> Delivery:
-    """The delivery with its intake judged, unless it was already processed."""
+    """The delivery with its intake judged, unless it was already processed. Each item carries the
+    version of the row it was judged against, so upsert can tell when that row moved underneath."""
     conn = store.connect(db_path)
     try:
         if store.delivery_seen(conn, adapter.name, signed):
             return delivery
         existing = [store.item_by_subject(conn, item.subject_key) for item in delivery.intake]
+        versions = [store.last_event(conn, found["id"]) if found else 0 for found in existing]
     finally:
         conn.close()
     items = tuple(
-        _judge(adapter, token, item, found) for item, found in zip(delivery.intake, existing, strict=True)
+        dataclasses.replace(_judge(adapter, token, item, found), judged_at=version)
+        for item, found, version in zip(delivery.intake, existing, versions, strict=True)
     )
     return dataclasses.replace(delivery, intake=items)
 
