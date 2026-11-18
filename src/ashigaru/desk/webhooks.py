@@ -17,7 +17,7 @@ so no write lock waits on the forge's API.
 
 import dataclasses
 import hashlib
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from http import HTTPStatus
 from typing import Annotated, Any
 
@@ -28,7 +28,7 @@ from starlette.concurrency import run_in_threadpool
 from . import ci, intake, store
 from .api import Conn, Who, errors
 from .forges import FORGES, Delivery, Forge, IntakeItem
-from .model import CIResult, CIWait, Problem, WebhookAck
+from .model import CIResult, CIWait, Kind, Problem, WebhookAck
 
 MAX_BODY = 2 * 1024 * 1024
 """Issue, PR and CI payloads are tens of KB; nothing this Desk takes needs more."""
@@ -67,9 +67,11 @@ def digest(source: str, event: str, body: bytes) -> str:
 
 def _judge(adapter: Forge, token: str, item: IntakeItem, existing: dict[str, Any] | None) -> IntakeItem:
     """Ask the forge only what can change how the item is queued: for a new or still-held subject,
-    whether its author writes (asked again while held, so a failed check is retried on the next
-    delivery), then whether an event that adds a lane comes from a writer; for an approved one,
-    whether the sender of a push from the approved head, or of an event removing its lane, writes.
+    whether its author writes (asked again while held and never trusted, at the head it was held at,
+    so a failed check is retried on the next delivery), then whether an event that adds a lane, or
+    a push from the held head, comes from a writer; for
+    a trusted one, whether the sender of a push from the approved head, or of an event removing its
+    lane, writes.
     Whether a head withdraws an approval is upsert's call, against the row it writes."""
     asked: dict[str, bool] = {}
 
@@ -82,19 +84,46 @@ def _judge(adapter: Forge, token: str, item: IntakeItem, existing: dict[str, Any
 
     if existing is None and item.closed:
         return item
-    if existing is None or intake.held(existing):
-        if (existing is None or not intake.was_approved(existing)) and writes(item.author):
+    if existing is None:
+        if writes(item.author):
             return dataclasses.replace(item, author_writes=True)
         approval = intake.lane(item.approves_lane)
         return dataclasses.replace(item, approved=True) if approval and writes(item.sender) else item
-    if not intake.was_approved(existing):
-        return item
+    if intake.held(existing):
+        return _judge_held(item, existing, writes)
+    return _judge_trusted(item, existing, writes) if intake.trusted(existing) else item
+
+
+def _judge_trusted(
+    item: IntakeItem, existing: dict[str, Any], writes: Callable[[str | None], bool]
+) -> IntakeItem:
+    """A trusted item: a writer removing its approved lane, or pushing from its approved head."""
     extra = existing["extra"]
     unlabeled = item.revokes_lane is not None and item.revokes_lane == extra.get("approved_lane")
     if unlabeled and writes(item.sender):
         return dataclasses.replace(item, revoked=True)
     pushed = item.head_before is not None and item.head_before == extra.get("approved_head")
     return dataclasses.replace(item, pushed_by_writer=True) if pushed and writes(item.sender) else item
+
+
+def _judge_held(
+    item: IntakeItem, existing: dict[str, Any], writes: Callable[[str | None], bool]
+) -> IntakeItem:
+    """A held item: a writer's push from the head it was held at moves that head; the author check is
+    retried only at that head (a PR with no head on file, or a delivery with none, never qualifies;
+    an issue has no head), never after a withdrawal; else only a writer's lane label trusts it."""
+    held_head = existing["extra"].get("held_head")
+    pushed = item.head is not None and item.head_before is not None and item.head_before == held_head
+    pushed = pushed and writes(item.sender)
+    at_held_head = pushed or (item.head is not None and item.head == held_head)
+    if item.kind != Kind.STORY:
+        at_held_head = True
+    retry = not (intake.was_approved(existing) or intake.withdrawn(existing))
+    if retry and at_held_head and writes(item.author):
+        return dataclasses.replace(item, author_writes=True)
+    if intake.lane(item.approves_lane) and writes(item.sender):
+        return dataclasses.replace(item, approved=True)
+    return dataclasses.replace(item, pushed_by_writer=True) if pushed else item
 
 
 def _judged(db_path: str, adapter: Forge, token: str, signed: str, delivery: Delivery) -> Delivery:

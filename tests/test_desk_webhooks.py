@@ -690,6 +690,103 @@ def test_a_writers_push_from_another_head_holds_it(trusting: TestClient, conn: s
     assert (pr_item(conn)["mode"], pr_item(conn)["extra"]["held_for"]) == ("manual", "head moved")
 
 
+def writer_pr(action: str = "opened", by: str = "fatherlinux", head: str = FORK_HEAD) -> dict[str, Any]:
+    """A PR its writer author opened at FORK_HEAD, as delivered for `action` by `by` at `head`."""
+    body = fork_pr(action, by, head)
+    return {**body, "pull_request": {**body["pull_request"], "user": {"login": "fatherlinux"}}}
+
+
+def test_a_push_by_someone_else_holds_a_writers_pr_until_approved(
+    trusting: TestClient, conn: sqlite3.Connection
+) -> None:
+    deliver(trusting, "pull_request", writer_pr(), "d-1")
+    assert (pr_item(conn)["mode"], pr_item(conn)["extra"]["approved_head"]) == ("auto", FORK_HEAD)
+    deliver(trusting, "pull_request", writer_pr("synchronize", "stranger", PUSHED), "d-2")
+    deliver(trusting, "pull_request", writer_pr("edited", head=PUSHED), "d-3")  # the author's own event
+    item = pr_item(conn)
+    assert (item["mode"], item["extra"]["trusted"], item["extra"]["held_for"]) == (
+        "manual",
+        False,
+        "head moved",
+    )
+    deliver(
+        trusting,
+        "pull_request",
+        writer_pr("labeled", "maintainer", PUSHED) | {"label": {"name": "lane:vertex"}},
+        "d-4",
+    )
+    again = pr_item(conn)
+    assert (again["lane"], again["mode"], again["extra"]["approved_head"]) == ("vertex", "auto", PUSHED)
+
+
+def test_a_writers_push_to_their_own_pr_keeps_it_trusted(
+    trusting: TestClient, conn: sqlite3.Connection
+) -> None:
+    deliver(trusting, "pull_request", writer_pr(), "d-1")
+    deliver(trusting, "pull_request", writer_pr("synchronize", head=PUSHED), "d-2")
+    item = pr_item(conn)
+    assert (item["mode"], item["extra"]["trusted"], item["extra"]["approved_head"]) == ("auto", True, PUSHED)
+
+
+def held_writer_pr(trusting: TestClient, conn: sqlite3.Connection, permissions: Permissions) -> None:
+    """A writer's PR held at FORK_HEAD because the author check failed, the author since confirmed."""
+    del permissions.by_account["fatherlinux"]
+    deliver(trusting, "pull_request", writer_pr(), "d-1")
+    assert (pr_item(conn)["mode"], pr_item(conn)["extra"]["trusted"]) == ("manual", False)
+    permissions.by_account["fatherlinux"] = "write"
+
+
+def test_the_author_retry_does_not_trust_an_outsiders_push(
+    trusting: TestClient, conn: sqlite3.Connection, permissions: Permissions
+) -> None:
+    held_writer_pr(trusting, conn, permissions)
+    deliver(trusting, "pull_request", writer_pr("synchronize", "stranger", PUSHED), "d-2")
+    deliver(trusting, "pull_request", writer_pr("edited", head=PUSHED), "d-3")
+    item = pr_item(conn)
+    assert (item["mode"], item["extra"]["trusted"], item["extra"].get("held_head")) == (
+        "manual",
+        False,
+        FORK_HEAD,
+    )
+
+
+def test_the_author_retry_needs_a_head_on_a_pr(
+    trusting: TestClient, conn: sqlite3.Connection, permissions: Permissions
+) -> None:
+    held_writer_pr(trusting, conn, permissions)
+    headless = writer_pr("edited")
+    headless["pull_request"] = {
+        key: value for key, value in headless["pull_request"].items() if key != "head"
+    }
+    deliver(trusting, "pull_request", headless, "d-2")
+    assert (pr_item(conn)["mode"], pr_item(conn)["extra"]["trusted"]) == ("manual", False)
+
+
+def test_the_author_retry_needs_a_held_head_on_file(
+    trusting: TestClient, conn: sqlite3.Connection, permissions: Permissions
+) -> None:
+    held_writer_pr(trusting, conn, permissions)
+    item = pr_item(conn)
+    with store.transaction(conn):
+        legacy = {key: value for key, value in item["extra"].items() if key != "held_head"}
+        store.update_item(conn, item["id"], {"extra": legacy}, "intake")
+    headless = writer_pr("edited")
+    headless["pull_request"] = {
+        key: value for key, value in headless["pull_request"].items() if key != "head"
+    }
+    deliver(trusting, "pull_request", headless, "d-2")
+    assert (pr_item(conn)["mode"], pr_item(conn)["extra"]["trusted"]) == ("manual", False)
+
+
+def test_the_author_retry_trusts_a_head_a_writer_pushed(
+    trusting: TestClient, conn: sqlite3.Connection, permissions: Permissions
+) -> None:
+    held_writer_pr(trusting, conn, permissions)
+    deliver(trusting, "pull_request", writer_pr("synchronize", "maintainer", PUSHED), "d-2")
+    item = pr_item(conn)
+    assert (item["mode"], item["extra"]["trusted"], item["extra"]["approved_head"]) == ("auto", True, PUSHED)
+
+
 def judged_on_one_snapshot(db: Path, bodies: list[dict[str, Any]]) -> list[tuple[str, Any]]:
     """Each PR body parsed and judged against the same row, before any is applied: concurrent deliveries."""
     forge = FORGES["github"]
