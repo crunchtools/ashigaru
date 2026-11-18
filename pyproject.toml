@@ -14,13 +14,14 @@ name = "ashigaru"
 dynamic = ["version"]
 requires-python = ">=3.12"
 license = "AGPL-3.0-or-later"
-dependencies = ["pydantic>=2.9"]
+dependencies = ["httpx>=0.28", "pydantic>=2.9"]
 
 [project.optional-dependencies]
 desk = ["fastapi>=0.115", "uvicorn>=0.32"]
 mcp = ["fastmcp>=4.2"]
 
 [project.scripts]
+ashigaru = "ashigaru.cli.__main__:main"
 ashigaru-desk = "ashigaru.desk.__main__:main"
 
 [build-system]
@@ -35,7 +36,7 @@ pattern = "(?P<version>[^\\s]+)"
 packages = ["src/ashigaru"]
 
 [dependency-groups]
-dev = ["ashigaru[desk,mcp]", "httpx>=0.28", "mypy>=1.14", "pytest>=8.3", "pyyaml>=6.0.3"]
+dev = ["ashigaru[desk,mcp]", "mypy>=1.14", "pytest>=8.3", "pyyaml>=6.0.3"]
 
 [tool.ruff]
 line-length = 110

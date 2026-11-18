@@ -111,7 +111,7 @@ def test_a_second_claim_from_another_connection_loses(
 ) -> None:
     seat(client, keys, MINE)
     seat(client, keys, OTHER)
-    work = item(client, keys)
+    work = item(client, keys, lane="exedore-max")
     other = store.connect(str(db))
     dispatch.claim(conn, work, MINE)
     with pytest.raises(store.Conflict):
@@ -203,3 +203,13 @@ def test_since_is_server_set_so_no_seat_jumps_the_pick_queue(
     before = client.get(f"/v1/seats/{MINE}", headers=keys[CI]).json()["since"]
     client.patch(f"/v1/seats/{MINE}", headers=keys[MINE], json={"turn": "active", "task": "x"})
     assert client.get(f"/v1/seats/{MINE}", headers=keys[CI]).json()["since"] == before
+
+
+def test_an_item_with_no_lane_is_assigned_never_claimed(client: TestClient, keys: Keys) -> None:
+    seat(client, keys, MINE)
+    target = item(client, keys)
+    assert client.get(f"/v1/items/{target}", headers=keys[CI]).json()["lane"] is None
+    assert client.post(f"/v1/items/{target}/claim", headers=keys[MINE]).status_code == CONFLICT
+    assert client.get(f"/v1/items/{target}", headers=keys[CI]).json()["seat"] is None
+    given = client.post(f"/v1/items/{target}/assign", headers=keys[JOSUI], json={"seat": MINE})
+    assert given.status_code == OK and given.json()["seat"] == MINE

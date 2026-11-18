@@ -3433,7 +3433,7 @@
     },
     "/v1/items/{item_id}/claim": {
       "post": {
-        "description": "desk_claim: the calling seat takes a queued, unowned, auto item in its lane whose `after` items\nare done. Atomic: of two seats claiming one item, one gets 409. The seat must be free and unheld.",
+        "description": "desk_claim: the calling seat takes a queued, unowned, auto item in its lane whose `after` items\nare done. Atomic: of two seats claiming one item, one gets 409. The seat must be free, unheld and\nin a lane; an item with no lane is never claimed, only assigned.",
         "operationId": "claim_v1_items__item_id__claim_post",
         "parameters": [
           {
