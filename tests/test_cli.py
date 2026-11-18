@@ -781,6 +781,30 @@ def test_the_status_line_counts_session_tokens_from_the_transcript(
     assert [post["session_tokens"] for post in usage_posts(statusline_seat)] == [115, 140]
 
 
+def test_the_status_line_carries_a_line_across_the_read_limit(
+    statusline_seat: FakeDesk, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(hooks, "STATUSLINE_EVERY", 0.0)
+    first, second = assistant("m1", input_tokens=3), assistant("m2", output_tokens=4)
+    monkeypatch.setattr(hooks, "TRANSCRIPT_CHUNK", len(first) + 5)
+    transcript = tmp_path / "s1.jsonl"
+    transcript.write_text(first + second)
+    for _ in range(3):
+        hook("statusline", statusline(transcript_path=str(transcript)))
+    assert [post["session_tokens"] for post in usage_posts(statusline_seat)] == [3, 7, 7]
+
+
+def test_the_status_line_skips_a_state_directory_another_user_can_write(
+    statusline_seat: FakeDesk, tmp_path: Path
+) -> None:
+    shared = tmp_path / "run" / "ashigaru"
+    shared.mkdir(parents=True)
+    shared.chmod(0o777)
+    hook("statusline", statusline())
+    assert usage_posts(statusline_seat) == []
+    assert list(shared.iterdir()) == []
+
+
 @pytest.mark.parametrize(("lane", "billing"), [("vertex", "vertex"), ("dolza-max", "max"), ("prime", None)])
 def test_the_status_line_bills_by_lane(statusline_seat: FakeDesk, lane: str, billing: str | None) -> None:
     statusline_seat.on("GET", "/v1/seats/Max%201", (200, SEAT | {"lane": lane}))

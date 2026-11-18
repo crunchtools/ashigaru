@@ -27,6 +27,7 @@ import json
 import os
 import re
 import signal
+import stat
 import sys
 from collections.abc import Mapping
 from datetime import UTC, datetime, timedelta
@@ -116,8 +117,16 @@ def _stop(event: dict[str, Any], desk: Desk, path: str) -> None:
 def usage_state(session: str, env: Mapping[str, str]) -> Path:
     """Where the status line keeps its throttle and transcript offset: tmpfs, private to the user,
     since it is looked at on every refresh."""
-    runtime = env.get("XDG_RUNTIME_DIR") or f"/dev/shm/ashigaru-{os.getuid()}"
-    return Path(runtime) / "ashigaru" / f"usage-{re.sub(r'[^A-Za-z0-9_-]', '_', session)}.json"
+    runtime = env.get("XDG_RUNTIME_DIR")
+    directory = Path(runtime) / "ashigaru" if runtime else Path(f"/dev/shm/ashigaru-{os.getuid()}")
+    return directory / f"usage-{re.sub(r'[^A-Za-z0-9_-]', '_', session)}.json"
+
+
+def _private(directory: Path) -> bool:
+    """True when only this user can write the state directory. /dev/shm is shared, so another user
+    could have made it, or a symlink by its name, first."""
+    info = directory.lstat()
+    return stat.S_ISDIR(info.st_mode) and info.st_uid == os.getuid() and not info.st_mode & 0o022
 
 
 def _count_tokens(transcript: str, state: dict[str, Any]) -> None:
@@ -183,6 +192,9 @@ def _throttled(event: dict[str, Any], env: Mapping[str, str]) -> bool:
     if not session:
         return True
     state_path = usage_state(str(session), env)
+    state_path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    if not _private(state_path.parent):
+        return True
     try:
         state = json.loads(state_path.read_text())
     except (OSError, ValueError):
@@ -197,7 +209,6 @@ def _throttled(event: dict[str, Any], env: Mapping[str, str]) -> bool:
     if isinstance(transcript, str) and Path(transcript).is_file():
         _count_tokens(transcript, state)
         event["session_tokens"] = state["tokens"]
-    state_path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     partial = state_path.with_suffix(".tmp")
     partial.write_text(json.dumps(state))
     partial.replace(state_path)
