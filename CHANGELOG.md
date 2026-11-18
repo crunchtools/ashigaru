@@ -6,10 +6,13 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [3.0.0] - 2026-11-18
+
 ### Changed
 
-- BREAKING: Ashigaru 3.0 adds the Desk, Josui's system of record for seat work, and moves the service's web stack (FastAPI, uvicorn) out of the base package into the `desk` extra. Anything that imported the web stack through a plain `ashigaru` install now installs `ashigaru[desk]` or the `ashigaru-desk` RPM. The GitHub workflows (`router.yml@v2` and its callers) are unchanged; `v2` stays where it is.
+- BREAKING: Ashigaru 3.0 adds the Desk, Josui's system of record for seat work, and moves the service's web stack (FastAPI, uvicorn) out of the base package into the `desk` extra. Anything that imported the web stack through a plain `ashigaru` install now installs `ashigaru[desk]` or the `ashigaru-desk` RPM. The reusable workflows move to `@v3`: `router.yml` and the workflows it calls name each other at `v3` and fetch their scripts there, and publishing 3.0.0 moves `v3`. The `v2` tag stays at 2.15.0, so an existing caller keeps running 2.15.0 until it is re-copied; re-copy `examples/ashigaru.yml` to follow 3.x.
 - Desk `claim` fails closed on an item with no lane: no seat can claim it, and Josui sets its lane or assigns it directly (a232).
+- `ci.yml`'s `sdlc ci` job no longer stops at `ASHIGARU_ENABLED`. It runs no model, and as a required check a skipped run counted as passed, which constitution v1.46.0 rejects. Its step now runs `.sdlc/bin/sdlc ci` alone.
 
 ### Added
 
@@ -18,10 +21,6 @@ All notable changes to this project are documented here. The format follows
 - RPMs, built on GitHub (a231): `ashigaru` (the CLI and the Python package, no web stack) and `ashigaru-desk` (the service, with FastAPI and uvicorn), for Fedora 43 and EL10 (EPEL). `.github/workflows/rpm.yml` builds each target in a fresh container from `packaging/ashigaru.spec`, installs the RPMs in another and runs every command with `--help`, then attaches them to the release; pull requests that touch the package build and test without publishing. The service's web stack moved to the `desk` extra, and the package version is now `VERSION`'s.
 - The Desk image, `quay.io/crunchtools/ashigaru` (a231): a Hummingbird Python base, uid 65532, read-only root, the SQLite file on the `/data` volume, `ashigaru-desk health` as its HEALTHCHECK. `.github/workflows/container.yml` builds, gates and promotes it through the constitution's `container-release.yml` (`:main` on the default branch, `:latest` and `:X.Y.Z` on 3.x tags); `packaging/container-test.sh` is the contract test. `ashigaru-desk serve` reads `ASHIGARU_DESK_DB`, `ASHIGARU_BIND`, `ASHIGARU_PORT` and `ASHIGARU_TRUSTED_PROXIES`; forwarded client address and scheme are believed only from a trusted proxy.
 - The `ashigaru` CLI (`src/ashigaru/cli`), a client of the Desk API with the command set the `/ashigaru` skill and the MCP tools share: views `usage`, `agents`, `work`, `queue`, `outcomes`; actions `assign`, `auto`, `manual`, `wait`, `wrap`; tables by default, `--json`. Config from `~/.config/ashigaru/config.toml` (0600, refused when looser) or `ASHIGARU_URL` / `ASHIGARU_API_KEY` / `ASHIGARU_API_KEY_FILE`, which win; never a key in argv, https only (http to loopback), redirects not followed. `ashigaru hook session-start|prompt-submit|stop` replace the seat-state.json hooks: bounded at 2s, silent on stdout, exit 0 on any failure. `wait` polls the item with 30-60s backoff until the Desk has its CI callback. `httpx` is now a runtime dependency of the base package, so the `ashigaru` RPM carries it. Docs: `docs/desk-cli.md` (a229).
-
-### Changed
-
-- `ci.yml`'s `sdlc ci` job no longer stops at `ASHIGARU_ENABLED`. It runs no model, and as a required check a skipped run counted as passed, which constitution v1.46.0 rejects. Its step now runs `.sdlc/bin/sdlc ci` alone.
 
 ## [2.15.0] - 2026-11-17
 
