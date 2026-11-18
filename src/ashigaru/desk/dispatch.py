@@ -146,9 +146,9 @@ def report_seat(conn: sqlite3.Connection, name: str, fields: dict[str, Any], act
         seat = store.write_seat(conn, name, fields)
         if not set(fields) <= SEAT_ROW_FIELDS:
             return seat
-        held = before is not None and before["owner"] and before["item"]
+        held = before["item"] if before and before["owner"] else None
         if held and "task" in fields and fields["task"] is None:
-            store.update_item(conn, before["item"], {"wrap": Wrap.CLEARED}, actor, source="clear")
+            store.update_item(conn, held, {"wrap": Wrap.CLEARED}, actor, source="clear")
         elif fields.get("turn") == Turn.ACTIVE and fields.get("task") and seat["status"] == SeatStatus.FREE:
             work = {"task": fields["task"], "mode": "manual", "state": State.WORKING, "seat": name}
             item_id = store.insert_item(conn, {**work, "lane": seat["lane"]}, actor, source="prompt")

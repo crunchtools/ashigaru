@@ -252,7 +252,6 @@ class Seat(BaseModel):
     turn_started_at: str | None = Field(None, description="When the turn last went active.")
 
     @computed_field(description="free, busy-auto (Josui's item) or busy-manual (Scott's hold).")
-    @property
     def hold(self) -> Literal["free", "busy-auto", "busy-manual"]:
         busy: Literal["busy-auto", "busy-manual"] = "busy-manual" if self.owner else "busy-auto"
         return busy if self.status == SeatStatus.BUSY else "free"
