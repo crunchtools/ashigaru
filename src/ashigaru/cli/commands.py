@@ -158,7 +158,17 @@ def mcp_mint(desk: Desk, identity: str, label: str | None = None, out: str | Non
         except (DeskError, Unreachable):
             os.unlink(out)
             raise
-        file.write(minted["url"] + "\n")
+        try:
+            file.write(minted["url"] + "\n")
+            file.flush()
+            os.fsync(file.fileno())
+        except OSError as exc:
+            # A URL nobody holds is still a live credential: revoke it before reporting.
+            desk.request("DELETE", f"{_codes_of(identity)}/{quote(minted['code_id'], safe='')}")
+            os.unlink(out)
+            raise CommandError(
+                f"could not write {out} ({exc}); code {minted['code_id']} was revoked"
+            ) from exc
     return {key: value for key, value in minted.items() if key != "url"} | {"out": out}
 
 

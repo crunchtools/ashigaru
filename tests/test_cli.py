@@ -560,3 +560,18 @@ def test_mcp_revoke_finds_the_codes_identity(desk: FakeDesk, capsys: pytest.Capt
         "no MCP code nope" in capsys.readouterr().err
         and len(desk.calls("DELETE", f"{MCP_OF_VERTEX}/c0de01")) == 1
     )
+
+
+def test_mcp_mint_revokes_a_url_it_could_not_write(
+    desk: FakeDesk, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    def full(descriptor: int) -> None:
+        raise OSError(28, "No space left on device")
+
+    desk.on("POST", MCP_OF_VERTEX, (201, CODE | {"url": URL}))
+    desk.on("DELETE", f"{MCP_OF_VERTEX}/c0de01", (200, CODE | {"revoked_at": "2026-11-18T02:00:00Z"}))
+    monkeypatch.setattr(commands.os, "fsync", full)
+    out = tmp_path / "vertex1.mcp"
+    assert main(["mcp", "mint", "Vertex 1", "--out", str(out)]) == 1
+    assert "c0de01 was revoked" in capsys.readouterr().err
+    assert len(desk.calls("DELETE", f"{MCP_OF_VERTEX}/c0de01")) == 1 and not out.exists()
