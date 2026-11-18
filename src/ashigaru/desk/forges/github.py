@@ -139,17 +139,17 @@ def _ruleset_checks(base: str, quoted: str, token: str) -> set[Requirement]:
 
 
 def _classic_checks(base: str, quoted: str, token: str) -> set[Requirement]:
-    """The branch's classic protection: its `contexts` and `checks`; none when it is unprotected."""
-    found = _get(f"{base}/branches/{quoted}", token)
-    protection = found.get("protection") if isinstance(found, Mapping) else None
-    classic = protection.get("required_status_checks") if isinstance(protection, Mapping) else None
-    if not isinstance(classic, Mapping):
-        return set()
-    contexts = classic.get("contexts")
-    names: set[Requirement] = (
-        {(c, None) for c in contexts if isinstance(c, str)} if isinstance(contexts, list) else set()
-    )
-    return names | set(_contexts(classic.get("checks"), "app_id"))
+    """The branch's classic protection: its `checks`, and the legacy `contexts` GitHub mirrors them
+    into, kept only for a name `checks` does not carry; none when it is unprotected."""
+    classic = payload_get(_get(f"{base}/branches/{quoted}", token), "protection", "required_status_checks")
+    checks = set(_contexts(payload_get(classic, "checks"), "app_id"))
+    legacy = payload_get(classic, "contexts")
+    named = {check for check, _ in checks}
+    return checks | {
+        (c, None)
+        for c in (legacy if isinstance(legacy, list) else ())
+        if isinstance(c, str) and c not in named
+    }
 
 
 def required_checks(repo: str, branch: str | None, token: str) -> tuple[str, tuple[Requirement, ...]]:
@@ -388,10 +388,12 @@ class GitHub:
         Names match exactly, and a check required from an App counts only that App's check runs, as
         GitHub's merge gate does: a same-named status or another App's run does not satisfy it."""
         name, wanted = required_checks(repo, branch, token)
-        said = reported(repo, sha, token) if wanted else {}
+        by_name: dict[str, list[tuple[int | None, Verdict]]] = {}
+        for (check, app), verdict in (reported(repo, sha, token) if wanted else {}).items():
+            by_name.setdefault(check, []).append((app, verdict))
         verdicts: dict[str, list[Verdict]] = {}
         for check, app in wanted:
-            matched = [v for (n, a), v in said.items() if n == check and (app is None or a == app)]
+            matched = [v for a, v in by_name.get(check, []) if app is None or a == app]
             verdicts.setdefault(check, []).append(_combine(matched) if matched else Verdict.PENDING)
         return name, {check: _combine(found) for check, found in verdicts.items()}
 

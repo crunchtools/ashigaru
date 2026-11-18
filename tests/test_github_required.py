@@ -92,7 +92,6 @@ def test_union_is_sorted_and_deduped(monkeypatch: pytest.MonkeyPatch) -> None:
         branches__main=protected(["sdlc ci", "a"], ["a"]),
     )
     assert github.required_checks(REPO, "main", "token")[1] == (
-        ("a", None),
         ("a", 1),
         ("sdlc ci", None),
         ("z", None),
@@ -270,6 +269,48 @@ def test_any_source_satisfies_a_check_with_no_app(monkeypatch: pytest.MonkeyPatc
         "legacy": Verdict.SUCCESS,
         "sdlc ci": Verdict.SUCCESS,
     }
+
+
+def test_classic_contexts_mirror_checks_and_add_no_any_source_copy(monkeypatch: pytest.MonkeyPatch) -> None:
+    """GitHub lists a check in both `checks` and the legacy `contexts`; only the App-bound one counts,
+    so another App's failing run of that name does not fail it."""
+    classic = {"contexts": ["sdlc ci", "legacy"], "checks": [{"context": "sdlc ci", "app_id": ACTIONS}]}
+    install(
+        monkeypatch,
+        branches__main={"protection": {"required_status_checks": classic}},
+        **{
+            f"commits__{SHA}__check-runs": runs(
+                run("sdlc ci"), run("sdlc ci", conclusion="failure", app=GATEHOUSE)
+            ),
+            f"commits__{SHA}__status": {"statuses": [{"context": "legacy", "state": "success"}]},
+        },
+    )
+    assert github.required_checks(REPO, "main", "token")[1] == (("legacy", None), ("sdlc ci", ACTIONS))
+    assert github.GitHub().required(REPO, SHA, "main", "token")[1] == {
+        "legacy": Verdict.SUCCESS,
+        "sdlc ci": Verdict.SUCCESS,
+    }
+
+
+def test_one_name_required_twice_must_satisfy_both(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A ruleset binds "sdlc ci" to Actions while another asks for it from any source: Gatehouse's
+    run satisfies the second but not the first, so the check is still pending."""
+    install(
+        monkeypatch,
+        rules__branches__main=ruleset("sdlc ci", app=ACTIONS) + ruleset("sdlc ci"),
+        branches__main={},
+        **{f"commits__{SHA}__check-runs": runs(run("sdlc ci", app=GATEHOUSE))},
+    )
+    forge = github.GitHub()
+    assert forge.required(REPO, SHA, "main", "token")[1] == {"sdlc ci": Verdict.PENDING}
+    monkeypatch.setattr(github, "_rules", {})
+    install(
+        monkeypatch,
+        rules__branches__main=ruleset("sdlc ci", app=ACTIONS) + ruleset("sdlc ci"),
+        branches__main={},
+        **{f"commits__{SHA}__check-runs": runs(run("sdlc ci"))},
+    )
+    assert forge.required(REPO, SHA, "main", "token")[1] == {"sdlc ci": Verdict.SUCCESS}
 
 
 def test_names_match_exactly(monkeypatch: pytest.MonkeyPatch) -> None:
