@@ -1577,6 +1577,17 @@
             ],
             "title": "Context Window"
           },
+          "hold": {
+            "description": "free, busy-auto (Josui's item) or busy-manual (Scott's hold).",
+            "enum": [
+              "free",
+              "busy-auto",
+              "busy-manual"
+            ],
+            "readOnly": true,
+            "title": "Hold",
+            "type": "string"
+          },
           "item": {
             "anyOf": [
               {
@@ -1705,7 +1716,8 @@
         },
         "required": [
           "name",
-          "updated_at"
+          "updated_at",
+          "hold"
         ],
         "title": "Seat",
         "type": "object"
@@ -4000,7 +4012,7 @@
         ]
       },
       "patch": {
-        "description": "Created on first report. A seat writes only turn and task on its own row; lane, status, owner\n(Scott's manual hold) and item are Josui's. `since` is the Desk's: it moves when status does.",
+        "description": "Created on first report. A seat writes only turn and task on its own row; lane, status, owner\n(Scott's manual hold) and item are Josui's. `since` is the Desk's: it moves when status does.\nThe Desk infers Scott's hold from the report: a first typed prompt (turn active with a task) on a\nseat holding no item opens a manual item and holds the seat; a /clear (task null) releases it.",
         "operationId": "patch_seat_v1_seats__name__patch",
         "parameters": [
           {

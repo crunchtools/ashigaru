@@ -226,8 +226,13 @@ SEAT_DEFAULTS: dict[str, Any] = {
 }  # fmt: skip
 
 RELEASE_SEAT = """
-    UPDATE seats SET status = 'free', item = NULL, since = :at, updated_at = :at WHERE item = :item
+    UPDATE seats SET status = 'free', owner = NULL, item = NULL, since = :at, updated_at = :at
+    WHERE item = :item
 """
+
+# Scott's hold follows the mode of the item a seat holds: `manual` hands it to him, `auto` to Josui.
+MANUAL_OWNER = "Scott"
+HOLD_SEAT = "UPDATE seats SET owner = :owner, updated_at = :at WHERE item = :item"
 
 ITEM_FILTERS = ("state", "seat", "lane", "kind", "mode", "parent")
 ITEM_JSON = ("after", "extra")
@@ -391,6 +396,9 @@ def update_item(
     reassigned = "seat" in fields and fields["seat"] != current["seat"]
     if closed or reassigned:
         conn.execute(RELEASE_SEAT, {"at": at, "item": item_id})
+    elif fields.get("mode", current["mode"]) != current["mode"]:
+        owner = MANUAL_OWNER if fields["mode"] == "manual" else None
+        conn.execute(HOLD_SEAT, {"owner": owner, "at": at, "item": item_id})
 
 
 def file_child(conn: sqlite3.Connection, story: dict[str, Any], fields: dict[str, Any], actor: str) -> str:
@@ -483,11 +491,6 @@ def write_seat(conn: sqlite3.Connection, name: str, fields: dict[str, Any]) -> d
     seat["status"] = seat["status"] or SEAT_DEFAULTS["status"]
     conn.execute(UPSERT_SEAT, seat)
     return seat
-
-
-def upsert_seat(conn: sqlite3.Connection, name: str, fields: dict[str, Any]) -> dict[str, Any]:
-    with transaction(conn):
-        return write_seat(conn, name, fields)
 
 
 # Identities and keys

@@ -99,7 +99,7 @@ SPEND: list[Column] = [
 ]
 AGENTS: list[Column] = [
     ("SEAT", lambda s: s["name"]),
-    ("STATUS", lambda s: s["status"] + (f" ({s['owner']})" if s.get("owner") else "")),
+    ("STATUS", lambda s: s.get("hold") or s["status"]),
     ("ITEM", lambda s: s.get("item")),
     ("FOR", lambda s: age(s.get("since"))),
     ("TURN", lambda s: s["turn"]),

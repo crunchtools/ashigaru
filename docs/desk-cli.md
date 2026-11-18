@@ -26,7 +26,7 @@ Every view and action prints a table, or the Desk's JSON with `--json`.
 | Command | Does |
 |---|---|
 | `usage` | per seat: model, context, session tokens and cost, turn and time in it; spend by billing source today and this month against limits |
-| `agents` | per seat: free or busy (and Scott's hold), item, how long, turn, task |
+| `agents` | per seat: `free`, `busy-auto` or `busy-manual` (Scott's hold), item, how long, turn, task |
 | `work [--all]` | the check table: blocked first, then newest; `--all` adds cleared and closed |
 | `queue` | queued items and the state of each item they wait on; `proposed` children and their expiry |
 | `outcomes` | each outcome's stories: done of total, blocked, open |
@@ -58,5 +58,6 @@ every failure, so a hook never blocks Claude.
 "Stop": [{"hooks": [{"type": "command", "command": "ashigaru hook stop", "timeout": 5}]}]
 ```
 
-The Desk lets a seat set only its `turn` and `task`; free or busy and Scott's
-manual hold are Josui's to set.
+The Desk lets a seat set only its `turn` and `task`, and infers Scott's hold
+from them ([desk-api.md](desk-api.md#scotts-hold)): the session's first typed
+prompt on a seat with no item opens a manual item, and `/clear` releases it.
