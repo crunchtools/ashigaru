@@ -793,6 +793,17 @@
             ],
             "title": "Done When"
           },
+          "filed_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Filed By"
+          },
           "id": {
             "anyOf": [
               {
@@ -1049,6 +1060,17 @@
             ],
             "title": "Done When"
           },
+          "filed_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Filed By"
+          },
           "kind": {
             "anyOf": [
               {
@@ -1282,6 +1304,51 @@
         ],
         "title": "Lane",
         "type": "string"
+      },
+      "Mark": {
+        "description": "A named watermark Josui keeps on the Desk, such as where the last sweep reached.",
+        "properties": {
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "updated_at": {
+            "title": "Updated At",
+            "type": "string"
+          },
+          "updated_by": {
+            "title": "Updated By",
+            "type": "string"
+          },
+          "value": {
+            "title": "Value",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "value",
+          "updated_at",
+          "updated_by"
+        ],
+        "title": "Mark",
+        "type": "object"
+      },
+      "MarkSet": {
+        "additionalProperties": false,
+        "properties": {
+          "value": {
+            "description": "Usually a time, YYYY-MM-DDTHH:MM:SSZ.",
+            "minLength": 1,
+            "title": "Value",
+            "type": "string"
+          }
+        },
+        "required": [
+          "value"
+        ],
+        "title": "MarkSet",
+        "type": "object"
       },
       "McpCode": {
         "properties": {
@@ -1567,6 +1634,357 @@
         "title": "Problem",
         "type": "object"
       },
+      "Queue": {
+        "description": "`ashigaru queue`: queued items with what each waits on, then agent-filed proposed children.",
+        "properties": {
+          "proposed": {
+            "items": {
+              "$ref": "#/components/schemas/Item"
+            },
+            "title": "Proposed",
+            "type": "array"
+          },
+          "queued": {
+            "items": {
+              "$ref": "#/components/schemas/QueuedItem"
+            },
+            "title": "Queued",
+            "type": "array"
+          },
+          "truncated": {
+            "default": false,
+            "description": "True when either list stopped at its limit of 1000.",
+            "title": "Truncated",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "queued",
+          "proposed"
+        ],
+        "title": "Queue",
+        "type": "object"
+      },
+      "QueuedItem": {
+        "properties": {
+          "after": {
+            "description": "Item ids this one waits on.",
+            "items": {
+              "type": "string"
+            },
+            "title": "After",
+            "type": "array"
+          },
+          "assigned_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Assigned At"
+          },
+          "blocked_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Blocked Reason"
+          },
+          "check_after": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Check After"
+          },
+          "cleared_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cleared At"
+          },
+          "closed_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Closed At"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "done_when": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Done When"
+          },
+          "expires_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When a proposed child is auto-abandoned.",
+            "title": "Expires At"
+          },
+          "extra": {
+            "additionalProperties": true,
+            "description": "Imported ledger fields with no column.",
+            "title": "Extra",
+            "type": "object"
+          },
+          "filed_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Identity that filed it, for agent-filed children.",
+            "title": "Filed By"
+          },
+          "filed_under": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The story it was filed from.",
+            "title": "Filed Under"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/Kind",
+            "default": "story"
+          },
+          "lane": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Lane"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "learned": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Learned"
+          },
+          "memorized": {
+            "default": false,
+            "title": "Memorized",
+            "type": "boolean"
+          },
+          "mode": {
+            "$ref": "#/components/schemas/Mode",
+            "default": "auto"
+          },
+          "next": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "parent": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The outcome this story serves.",
+            "title": "Parent"
+          },
+          "priority": {
+            "default": 0,
+            "title": "Priority",
+            "type": "integer"
+          },
+          "queued_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Queued At"
+          },
+          "ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Issue or RT URL.",
+            "title": "Ref"
+          },
+          "repo": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Repo"
+          },
+          "result": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Result"
+          },
+          "seat": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Owner seat; the only seat identity that may write it.",
+            "title": "Seat"
+          },
+          "state": {
+            "$ref": "#/components/schemas/State"
+          },
+          "subject_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Dedup key: repo#PR, repo#issue, RT#, repo:alert.",
+            "title": "Subject Key"
+          },
+          "task": {
+            "default": "",
+            "description": "One-line objective.",
+            "title": "Task",
+            "type": "string"
+          },
+          "updated_at": {
+            "title": "Updated At",
+            "type": "string"
+          },
+          "verified_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Verified By"
+          },
+          "waits_on": {
+            "description": "Each `after` item and its state.",
+            "items": {
+              "$ref": "#/components/schemas/WaitsOn"
+            },
+            "title": "Waits On",
+            "type": "array"
+          },
+          "wrap": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Wrap"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "state",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "QueuedItem",
+        "type": "object"
+      },
       "Report": {
         "additionalProperties": false,
         "description": "DONE / BLOCKED / WORKING / CC-DONE, with the Learned: line. The Filed: line has no field here:\na child exists only once POST /v1/items/{id}/file records it.",
@@ -1693,6 +2111,12 @@
               }
             ]
           },
+          "missing": {
+            "default": false,
+            "description": "In `GET /seats`: a seat identity that never checked in, or whose row has not changed in STALE_SEAT.",
+            "title": "Missing",
+            "type": "boolean"
+          },
           "model": {
             "anyOf": [
               {
@@ -1793,13 +2217,20 @@
             "title": "Turn Started At"
           },
           "updated_at": {
-            "title": "Updated At",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Its last check-in; null if it never checked in.",
+            "title": "Updated At"
           }
         },
         "required": [
           "name",
-          "updated_at",
           "hold"
         ],
         "title": "Seat",
@@ -2221,6 +2652,33 @@
         "title": "Verdict",
         "type": "string"
       },
+      "WaitsOn": {
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "state": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/State"
+              },
+              {
+                "const": "unknown",
+                "type": "string"
+              }
+            ],
+            "description": "unknown when no such item exists.",
+            "title": "State"
+          }
+        },
+        "required": [
+          "id",
+          "state"
+        ],
+        "title": "WaitsOn",
+        "type": "object"
+      },
       "WebhookAck": {
         "description": "The whole answer to a verified delivery; nothing from the delivery is echoed.",
         "properties": {
@@ -2250,6 +2708,47 @@
         ],
         "title": "Wrap",
         "type": "string"
+      },
+      "WrapUp": {
+        "additionalProperties": false,
+        "description": "`ashigaru wrap`, one meaning for the CLI and MCP. `wrapping` records that /cc seat was sent.\n`cleared` refuses until the item is memorized (CC-DONE) or `learned` is given, and its seat's turn\nis idle, unless `force`; then it clears the wrap and closes the item in `state`, freeing the seat.",
+        "properties": {
+          "force": {
+            "default": false,
+            "description": "Skip the CC-DONE and idle checks.",
+            "title": "Force",
+            "type": "boolean"
+          },
+          "learned": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The report's Learned: line; none is no line.",
+            "title": "Learned"
+          },
+          "stage": {
+            "$ref": "#/components/schemas/Wrap",
+            "default": "cleared"
+          },
+          "state": {
+            "default": "done",
+            "description": "The closed state for an open item; a closed one keeps its own.",
+            "enum": [
+              "done",
+              "wontdo",
+              "abandoned"
+            ],
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "title": "WrapUp",
+        "type": "object"
       }
     },
     "securitySchemes": {
@@ -2618,7 +3117,7 @@
                 }
               }
             },
-            "description": "A taken id or subject_key, an existing identity, a second child in one assignment, or an item or seat not in a state to assign or claim."
+            "description": "A taken id or subject_key (the detail names the item holding it), an existing identity, a second child in one assignment, or an item or seat not in a state to assign, claim or wrap."
           },
           "422": {
             "content": {
@@ -3031,7 +3530,7 @@
                 }
               }
             },
-            "description": "A taken id or subject_key, an existing identity, a second child in one assignment, or an item or seat not in a state to assign or claim."
+            "description": "A taken id or subject_key (the detail names the item holding it), an existing identity, a second child in one assignment, or an item or seat not in a state to assign, claim or wrap."
           },
           "422": {
             "content": {
@@ -3153,7 +3652,10 @@
             "schema": {
               "anyOf": [
                 {
-                  "$ref": "#/components/schemas/State"
+                  "items": {
+                    "$ref": "#/components/schemas/State"
+                  },
+                  "type": "array"
                 },
                 {
                   "type": "null"
@@ -3240,6 +3742,74 @@
                 }
               ],
               "title": "Parent"
+            }
+          },
+          {
+            "description": "A key or a ref, normalised as a write stores it: an issue URL finds owner/repo#N.",
+            "in": "query",
+            "name": "subject_key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "A key or a ref, normalised as a write stores it: an issue URL finds owner/repo#N.",
+              "title": "Subject Key"
+            }
+          },
+          {
+            "in": "query",
+            "name": "ref",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Ref"
+            }
+          },
+          {
+            "description": "true: has a Learned line; false: has none.",
+            "in": "query",
+            "name": "learned",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "true: has a Learned line; false: has none.",
+              "title": "Learned"
+            }
+          },
+          {
+            "in": "query",
+            "name": "memorized",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Memorized"
             }
           },
           {
@@ -3363,7 +3933,7 @@
                 }
               }
             },
-            "description": "A taken id or subject_key, an existing identity, a second child in one assignment, or an item or seat not in a state to assign or claim."
+            "description": "A taken id or subject_key (the detail names the item holding it), an existing identity, a second child in one assignment, or an item or seat not in a state to assign, claim or wrap."
           },
           "422": {
             "content": {
@@ -3525,7 +4095,7 @@
                 }
               }
             },
-            "description": "A taken id or subject_key, an existing identity, a second child in one assignment, or an item or seat not in a state to assign or claim."
+            "description": "A taken id or subject_key (the detail names the item holding it), an existing identity, a second child in one assignment, or an item or seat not in a state to assign, claim or wrap."
           },
           "422": {
             "content": {
@@ -3623,7 +4193,7 @@
                 }
               }
             },
-            "description": "A taken id or subject_key, an existing identity, a second child in one assignment, or an item or seat not in a state to assign or claim."
+            "description": "A taken id or subject_key (the detail names the item holding it), an existing identity, a second child in one assignment, or an item or seat not in a state to assign, claim or wrap."
           },
           "422": {
             "content": {
@@ -3711,7 +4281,7 @@
                 }
               }
             },
-            "description": "A taken id or subject_key, an existing identity, a second child in one assignment, or an item or seat not in a state to assign or claim."
+            "description": "A taken id or subject_key (the detail names the item holding it), an existing identity, a second child in one assignment, or an item or seat not in a state to assign, claim or wrap."
           },
           "422": {
             "content": {
@@ -3906,7 +4476,7 @@
                 }
               }
             },
-            "description": "A taken id or subject_key, an existing identity, a second child in one assignment, or an item or seat not in a state to assign or claim."
+            "description": "A taken id or subject_key (the detail names the item holding it), an existing identity, a second child in one assignment, or an item or seat not in a state to assign, claim or wrap."
           },
           "422": {
             "content": {
@@ -4004,7 +4574,7 @@
                 }
               }
             },
-            "description": "A taken id or subject_key, an existing identity, a second child in one assignment, or an item or seat not in a state to assign or claim."
+            "description": "A taken id or subject_key (the detail names the item holding it), an existing identity, a second child in one assignment, or an item or seat not in a state to assign, claim or wrap."
           },
           "422": {
             "content": {
@@ -4025,6 +4595,254 @@
         "summary": "Report",
         "tags": [
           "items"
+        ]
+      }
+    },
+    "/v1/items/{item_id}/wrap": {
+      "post": {
+        "description": "Admin: `wrapping` records that /cc seat was sent. `cleared` (the default) refuses with 409\nuntil the item is memorized (CC-DONE) or `learned` is sent, and while its seat is mid-turn,\nunless `force`; then it clears the wrap and closes an open item in `state`, freeing the seat.",
+        "operationId": "wrap_v1_items__item_id__wrap_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "title": "Item Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WrapUp"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Item"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Missing, unknown or revoked API key."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The caller's role, or its seat, may not do this."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "No such item, seat, identity or key."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A taken id or subject_key (the detail names the item holding it), an existing identity, a second child in one assignment, or an item or seat not in a state to assign, claim or wrap."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Wrap",
+        "tags": [
+          "items"
+        ]
+      }
+    },
+    "/v1/marks/{name}": {
+      "get": {
+        "description": "A named watermark, such as `sweep`: how far the last sweep reached. 404 until first set.",
+        "operationId": "get_mark_v1_marks__name__get",
+        "parameters": [
+          {
+            "description": "e.g. sweep",
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "description": "e.g. sweep",
+              "pattern": "^[a-z][a-z0-9-]{0,63}$",
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Mark"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Missing, unknown or revoked API key."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "No such item, seat, identity or key."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Mark",
+        "tags": [
+          "views"
+        ]
+      },
+      "put": {
+        "description": "Admin: set a watermark, replacing its value; the Desk stamps when and by whom.",
+        "operationId": "set_mark_v1_marks__name__put",
+        "parameters": [
+          {
+            "description": "e.g. sweep",
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "description": "e.g. sweep",
+              "pattern": "^[a-z][a-z0-9-]{0,63}$",
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MarkSet"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Mark"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Missing, unknown or revoked API key."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The caller's role, or its seat, may not do this."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Set Mark",
+        "tags": [
+          "views"
         ]
       }
     },
@@ -4109,8 +4927,46 @@
         ]
       }
     },
+    "/v1/queue": {
+      "get": {
+        "description": "`ashigaru queue`: queued items with the state of each item they wait on, then proposed children\nwith their expiry.",
+        "operationId": "queue_v1_queue_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Queue"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Missing, unknown or revoked API key."
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Queue",
+        "tags": [
+          "views"
+        ]
+      }
+    },
     "/v1/seats": {
       "get": {
+        "description": "Every seat, then each seat identity that never checked in. `missing` marks those, and any seat\nwhose row has not changed in a day.",
         "operationId": "list_seats_v1_seats_get",
         "responses": {
           "200": {

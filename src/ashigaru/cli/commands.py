@@ -2,27 +2,30 @@
 arguments. Each returns plain data; rendering is the caller's."""
 
 import os
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from http import HTTPStatus
 from typing import Any
 from urllib.parse import quote
 
 from .client import Desk, DeskError, Unreachable
-from .wait import waiter_for
-
-CLOSED = frozenset({"done", "wontdo", "abandoned"})
+from .wait import CIWaiter, waiter_for
 
 
 class CommandError(Exception):
     """A command refused on the client's side, before anything changed."""
 
 
+class Refused(CommandError):
+    """The Desk refused, and `item` is the one a caller wants anyway: the one holding a subject_key,
+    or one recorded before its assign was refused. The CLI prints it, then exits 1."""
+
+    def __init__(self, message: str, item: dict[str, Any]) -> None:
+        super().__init__(message)
+        self.item = item
+
+
 def _item(item_id: str) -> str:
     return f"/v1/items/{quote(item_id, safe='')}"
-
-
-def _seat(name: str) -> str:
-    return f"/v1/seats/{quote(name, safe='')}"
 
 
 def _codes_of(name: str) -> str:
@@ -50,23 +53,11 @@ def work(desk: Desk, all: bool = False) -> list[dict[str, Any]]:
     return result
 
 
-def queue(desk: Desk) -> dict[str, list[dict[str, Any]]]:
-    """Queued items with the state of each item they wait on, and agent-filed `proposed` children
-    with their expiry."""
-    queued: list[dict[str, Any]] = desk.get("/v1/items", state="queued", limit=1000)
-    proposed: list[dict[str, Any]] = desk.get("/v1/items", state="proposed", limit=1000)
-    # One page of recent items answers most; only an older dependency costs a request of its own.
-    states = {row["id"]: row["state"] for row in desk.get("/v1/items", limit=1000)}
-    for after in sorted({after for item in queued for after in item.get("after") or []} - set(states)):
-        try:
-            states[after] = desk.get(_item(after))["state"]
-        except DeskError as exc:
-            if exc.status != HTTPStatus.NOT_FOUND:
-                raise
-            states[after] = "unknown"
-    for item in queued:
-        item["waits_on"] = [{"id": a, "state": states[a]} for a in item.get("after") or []]
-    return {"queued": queued, "proposed": proposed}
+def queue(desk: Desk) -> dict[str, Any]:
+    """Queued items with the state of each item they wait on (`waits_on`), and agent-filed `proposed`
+    children with their expiry."""
+    result: dict[str, Any] = desk.get("/v1/queue")
+    return result
 
 
 def outcomes(desk: Desk) -> list[dict[str, Any]]:
@@ -75,7 +66,97 @@ def outcomes(desk: Desk) -> list[dict[str, Any]]:
     return result
 
 
+def items(
+    desk: Desk,
+    state: Sequence[str] | None = None,
+    learned: bool | None = None,
+    memorized: bool | None = None,
+    **filters: str | int | None,
+) -> list[dict[str, Any]]:
+    """Items, newest first, matching every filter given: any of `state`, seat, lane, kind, mode,
+    parent, subject_key, ref, whether a Learned line is recorded, memorized; pages of limit from
+    offset. The MCP tool is desk_list."""
+    flags = {"learned": learned, "memorized": memorized}
+    params = {**filters, **{k: str(v).lower() for k, v in flags.items() if v is not None}}
+    result: list[dict[str, Any]] = desk.get("/v1/items", state=state or None, **params)
+    return result
+
+
+def get(
+    desk: Desk, item: str | None = None, subject_key: str | None = None, ref: str | None = None
+) -> dict[str, Any]:
+    """One item: by id, by subject_key (unique), or the most recently updated with this ref. The MCP
+    tool is desk_get, and desk_list finds one by subject_key or ref."""
+    if sum(x is not None for x in (item, subject_key, ref)) != 1:
+        raise CommandError("name one of: an item, --subject-key, --ref")
+    if item is not None:
+        one: dict[str, Any] = desk.get(_item(item))
+        return one
+    found: list[dict[str, Any]] = desk.get("/v1/items", subject_key=subject_key, ref=ref, limit=1)
+    if not found:
+        raise CommandError(f"no item with {'subject_key' if subject_key else 'ref'} {subject_key or ref}")
+    return found[0]
+
+
+def mark(desk: Desk, name: str, value: str | None = None) -> dict[str, Any]:
+    """A named watermark, such as `sweep`; with a `value` (admin), set it to that. The MCP tool is
+    desk_mark."""
+    path = f"/v1/marks/{quote(name, safe='')}"
+    result: dict[str, Any] = (
+        desk.get(path) if value is None else desk.request("PUT", path, body={"value": value})
+    )
+    return result
+
+
 # Actions
+
+
+def create(desk: Desk, **fields: Any) -> dict[str, Any]:
+    """Admin: record an item, `queued` unless `state` says otherwise, without assigning it. A taken
+    subject_key or id raises Refused carrying the item that holds it. The MCP tool is desk_create."""
+    body = {key: value for key, value in fields.items() if value is not None}
+    try:
+        created: dict[str, Any] = desk.post("/v1/items", body)
+    except DeskError as exc:
+        if exc.status != HTTPStatus.CONFLICT:
+            raise
+        # A create's only conflicts, in the order the Desk checks them: the id is taken, else the
+        # subject_key is.
+        found = []
+        if body.get("id"):
+            try:
+                found = [desk.get(_item(body["id"]))]
+            except DeskError as missing:
+                if missing.status != HTTPStatus.NOT_FOUND:
+                    raise
+        if not found and body.get("subject_key"):
+            found = desk.get("/v1/items", subject_key=body["subject_key"], limit=1)
+        if not found:
+            raise
+        raise Refused(f"{found[0]['id']} exists: {exc.detail}", found[0]) from exc
+    return created
+
+
+def update(desk: Desk, item: str, clear: Sequence[str] = (), **fields: Any) -> dict[str, Any]:
+    """Set the fields given; each name in `clear` is set to null. A seat may set only state
+    (working, review, blocked), result, next, learned, note, blocked_reason, memorized and
+    check_after on its own open item. The MCP tool is desk_update."""
+    body = {key: value for key, value in fields.items() if value is not None}
+    body |= dict.fromkeys(clear)
+    if not body:
+        raise CommandError("nothing to update; give a field, or --clear one")
+    result: dict[str, Any] = desk.request("PATCH", _item(item), body=body)
+    return result
+
+
+def report(desk: Desk, item: str, verb: str, **lines: str | None) -> dict[str, Any]:
+    """The report contract, with `text`, `next` and `learned` in `lines`: DONE moves to review with
+    the text as the result, BLOCKED to blocked with it as the reason, WORKING to working with it as
+    the note; CC-DONE marks the learnings memorized. A `learned` of none is not recorded. The MCP
+    tool is desk_report."""
+    body = {"verb": verb.upper(), **{k: v for k, v in lines.items() if v is not None}}
+    result: dict[str, Any] = desk.post(f"{_item(item)}/report", body)
+    return result
 
 
 def assign(
@@ -88,16 +169,21 @@ def assign(
 ) -> dict[str, Any]:
     """Assign an item to a seat: `seat` names one, else the Desk picks the seat in `lane` (default:
     the item's) free longest and not held by Scott. With a `task` in `record` (and optionally
-    done_when, ref, repo, after, mode), the item is recorded first, in `lane`."""
+    done_when, ref, repo, after, mode, subject_key), the item is recorded first, in `lane`; if the
+    subject_key is taken, or the assign is refused, Refused carries the item so its id is not lost."""
     if seat and lane:
         raise CommandError("name a seat or a lane, not both")
     if record.get("task"):
-        fields = {"id": item, "lane": lane, **record}
-        item = desk.post("/v1/items", {k: v for k, v in fields.items() if v is not None})["id"]
+        item = create(desk, id=item, lane=lane, **record)["id"]
     elif not item:
         raise CommandError("name an item, or give --task to record a new one")
     body = {"seat": seat} if seat else {"lane": lane} if lane else {}
-    result: dict[str, Any] = desk.post(f"{_item(item)}/assign", body)
+    try:
+        result: dict[str, Any] = desk.post(f"{_item(item)}/assign", body)
+    except DeskError as exc:
+        if not record.get("task") or exc.status >= HTTPStatus.INTERNAL_SERVER_ERROR:
+            raise
+        raise Refused(f"recorded {item}, not assigned: {exc.detail}", desk.get(_item(item))) from exc
     return result
 
 
@@ -113,28 +199,25 @@ def manual(desk: Desk, item: str) -> dict[str, Any]:
     return result
 
 
-def wait(desk: Desk, item: str, timeout: float | None = None) -> dict[str, Any]:
-    """Block until the item settles (review, done, blocked, wontdo, abandoned); returns it."""
-    return waiter_for(desk).wait(item, timeout)
+def wait(desk: Desk, target: Sequence[str], timeout: float | None = None) -> dict[str, Any]:
+    """`[item]`: block until the item settles (review, done, blocked, wontdo, abandoned); returns it.
+    `[repo, sha]`: block until the commit's CI is no longer pending; returns its CI result. The MCP
+    tool for a commit is desk_wait."""
+    item_or_repo, *sha = target
+    if not sha:
+        return waiter_for(desk).wait(item_or_repo, timeout)
+    if len(sha) > 1:
+        raise CommandError("wait takes an item, or a repo and a sha")
+    return CIWaiter(desk).wait(item_or_repo, sha[0], timeout)
 
 
-def wrap(
-    desk: Desk, item: str, learned: str | None = None, state: str = "done", force: bool = False
-) -> dict[str, Any]:
-    """Record the learnings, confirm the seat is idle and its learnings saved (CC-DONE), then clear
-    the wrap and close the item, which frees the seat. `force` skips the two confirmations."""
-    current = desk.get(_item(item))
-    if not force:
-        if not (current.get("memorized") or learned):
-            raise CommandError(f"{item}: no CC-DONE yet; send /cc seat first, or pass --force")
-        if current.get("seat") and desk.get(_seat(current["seat"]))["turn"] == "active":
-            raise CommandError(f"{current['seat']} is mid-turn; wrap it once it is idle")
-    fields: dict[str, Any] = {"wrap": "cleared"}
-    if learned:
-        fields["learned"] = learned
-    if current["state"] not in CLOSED:
-        fields["state"] = state
-    result: dict[str, Any] = desk.request("PATCH", _item(item), body=fields)
+def wrap(desk: Desk, item: str, **options: str | bool | None) -> dict[str, Any]:
+    """`options` are stage, learned, state and force. Stage `wrapping` records that /cc seat was sent.
+    `cleared`, the default, refuses until CC-DONE (or a `learned`) and an idle turn, unless `force`;
+    then clears the wrap and closes the item in `state` (default done), which frees the seat. The
+    Desk decides, so the CLI and the MCP tool mean the same thing."""
+    body = {k: v for k, v in options.items() if v is not None}
+    result: dict[str, Any] = desk.post(f"{_item(item)}/wrap", body)
     return result
 
 
@@ -202,7 +285,8 @@ def mcp_revoke(desk: Desk, code_id: str, identity: str | None = None) -> dict[st
 COMMANDS: dict[str, Callable[..., Any]] = {
     command.__name__: command
     for command in (
-        *(usage, agents, work, queue, outcomes, assign, auto, manual, wait, wrap),
+        *(usage, agents, work, queue, outcomes, get, mark),
+        *(create, update, report, assign, auto, manual, wait, wrap),
         *(mcp_mint, mcp_list, mcp_revoke),
     )
-}
+} | {"list": items}

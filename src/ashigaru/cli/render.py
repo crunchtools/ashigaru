@@ -64,7 +64,7 @@ def usage(report: dict[str, Any]) -> str:
     return f"{table(report['seats'], USAGE)}\n\n{table(report['spend'], SPEND)}"
 
 
-def queue(lists: dict[str, list[dict[str, Any]]]) -> str:
+def queue(lists: dict[str, Any]) -> str:
     return f"{table(lists['queued'], QUEUED)}\n\n{table(lists['proposed'], PROPOSED)}"
 
 
@@ -75,15 +75,26 @@ def minted(result: dict[str, Any]) -> str:
     return f"wrote the MCP URL for {result['identity']} (code {result['code_id']}) to {result['out']}"
 
 
+def _row(item: dict[str, Any]) -> dict[str, Any]:
+    """An item as a check-table row."""
+    return {**item, "result_or_blocker": item.get("blocked_reason") or item.get("result")}
+
+
+def waited(result: dict[str, Any]) -> str:
+    """A settled item's row, or a commit's CI: its status, then each check."""
+    if "status" not in result:
+        return table([_row(result)], WORK)
+    head = f"{result['repo']}@{result['sha'][:12]}  {result['status']}"
+    return f"{head}\n\n{table(result['checks'], CHECKS)}" if result.get("checks") else head
+
+
 def view(command: str, result: Any) -> str:
     """The table for a command's result: a view's own, or one work row for an action's item."""
     if command in VIEWS:
         return VIEWS[command](result)
     if command in LISTS:
         return table(result, LISTS[command])
-    return table(
-        [{**result, "result_or_blocker": result.get("blocked_reason") or result.get("result")}], WORK
-    )
+    return table([_row(result)], WORK)
 
 
 USAGE: list[Column] = [
@@ -104,11 +115,12 @@ SPEND: list[Column] = [
 ]
 AGENTS: list[Column] = [
     ("SEAT", lambda s: s["name"]),
-    ("STATUS", lambda s: s.get("hold") or s["status"]),
+    ("STATUS", lambda s: "missing" if s.get("missing") else s.get("hold") or s["status"]),
     ("ITEM", lambda s: s.get("item")),
     ("FOR", lambda s: age(s.get("since"))),
     ("TURN", lambda s: s["turn"]),
     ("TASK", lambda s: s.get("task")),
+    ("SEEN", lambda s: age(s.get("updated_at")) or "never"),
 ]
 WORK: list[Column] = [
     ("ID", lambda r: r["id"]),
@@ -150,8 +162,22 @@ CODES: list[Column] = [
     ("LAST USED", lambda c: c.get("last_used_at")),
     ("REVOKED", lambda c: c.get("revoked_at")),
 ]
+CHECKS: list[Column] = [
+    ("CHECK", lambda c: c["name"]),
+    ("VERDICT", lambda c: c["verdict"]),
+    ("URL", lambda c: c.get("url")),
+]
+MARK: list[Column] = [
+    ("MARK", lambda m: m["name"]),
+    ("VALUE", lambda m: m["value"]),
+    ("UPDATED", lambda m: m["updated_at"]),
+    ("BY", lambda m: m["updated_by"]),
+]
 LISTS = {"agents": AGENTS, "work": WORK, "outcomes": OUTCOMES, "mcp_list": CODES}
 VIEWS: dict[str, Callable[[Any], str]] = {
+    "list": lambda items: table([_row(item) for item in items], WORK),
+    "wait": waited,
+    "mark": lambda m: table([m], MARK),
     "usage": usage,
     "queue": queue,
     "mcp_mint": minted,

@@ -6,7 +6,7 @@ import stat
 import time
 from collections.abc import Iterator
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
 from fake_desk import FakeDesk, Seen, serve
@@ -14,7 +14,7 @@ from fake_desk import FakeDesk, Seen, serve
 from ashigaru.cli import commands, config, hooks
 from ashigaru.cli.__main__ import main
 from ashigaru.cli.client import Desk, DeskError, Unreachable
-from ashigaru.cli.wait import PollWaiter
+from ashigaru.cli.wait import CIWaiter, PollWaiter
 
 KEY = "ash_k1_secret"
 USAGE_ERROR = 2
@@ -162,8 +162,16 @@ def test_agents(desk: FakeDesk, capsys: pytest.CaptureFixture[str]) -> None:
     desk.on("GET", "/v1/seats", (200, [SEAT, SEAT | {"name": "Max 2", "status": "free", "item": None}]))
     assert main(["agents"]) == 0
     lines = capsys.readouterr().out.splitlines()
-    assert lines[0].split() == ["SEAT", "STATUS", "ITEM", "FOR", "TURN", "TASK"]
+    assert lines[0].split() == ["SEAT", "STATUS", "ITEM", "FOR", "TURN", "TASK", "SEEN"]
     assert lines[1].startswith("Vertex 1") and "a1" in lines[1]
+
+
+def test_agents_shows_missing_seats(desk: FakeDesk, capsys: pytest.CaptureFixture[str]) -> None:
+    never = {"name": "Max 4", "status": "free", "turn": "idle", "updated_at": None, "missing": True}
+    desk.on("GET", "/v1/seats", (200, [SEAT | {"updated_at": "2026-11-17T10:00:00Z"}, never]))
+    assert main(["agents"]) == 0
+    last = capsys.readouterr().out.splitlines()[-1].split()
+    assert last[:3] == ["Max", "4", "missing"] and last[-1] == "never"
 
 
 def test_agents_shows_the_hold(desk: FakeDesk, capsys: pytest.CaptureFixture[str]) -> None:
@@ -224,35 +232,16 @@ def test_work_all(desk: FakeDesk, capsys: pytest.CaptureFixture[str]) -> None:
 
 
 def test_queue_shows_what_each_item_waits_on(desk: FakeDesk, capsys: pytest.CaptureFixture[str]) -> None:
-    def items(seen: Seen) -> tuple[int, Any]:
-        if "state" not in seen.query:
-            return 200, [item(state="working"), item(id="a3")]
-        if seen.query["state"] == ["queued"]:
-            return 200, [item(id="a3", after=["a1", "a9"], lane="vertex")]
-        return 200, [
-            item(id="a4", state="proposed", parent="a0", filed_by="Max 1", expires_at="2026-12-01T00:00:00Z")
-        ]
-
-    desk.on("GET", "/v1/items", items)
-    data = commands.queue(Desk(config.load()))
-    assert data["queued"][0]["waits_on"] == [
-        {"id": "a1", "state": "working"},
-        {"id": "a9", "state": "unknown"},
-    ]
-    assert [s.path for s in desk.seen if s.path.startswith("/v1/items/")] == ["/v1/items/a9"]
+    queued = item(
+        id="a3", lane="vertex", waits_on=[{"id": "a1", "state": "working"}, {"id": "a9", "state": "unknown"}]
+    )
+    proposed = item(
+        id="a4", state="proposed", parent="a0", filed_by="Max 1", expires_at="2026-12-01T00:00:00Z"
+    )
+    desk.on("GET", "/v1/queue", (200, {"queued": [queued], "proposed": [proposed]}))
     assert main(["queue"]) == 0
     out = capsys.readouterr().out
     assert "a1 working, a9 unknown" in out and "2026-12-01" in out
-
-
-def test_queue_does_not_hide_a_refusal_as_unknown(desk: FakeDesk) -> None:
-    def items(seen: Seen) -> tuple[int, Any]:
-        return 200, [item(id="a3", after=["a9"])] if seen.query.get("state") == ["queued"] else []
-
-    desk.on("GET", "/v1/items", items)
-    desk.on("GET", "/v1/items/a9", (403, {"detail": "no"}))
-    with pytest.raises(DeskError, match="403"):
-        commands.queue(Desk(config.load()))
 
 
 def test_outcomes(desk: FakeDesk, capsys: pytest.CaptureFixture[str]) -> None:
@@ -303,37 +292,159 @@ def test_auto_and_manual(desk: FakeDesk, mode: str) -> None:
     assert desk.seen[0].body == {"mode": mode}
 
 
-def test_wrap_refuses_before_cc_done(desk: FakeDesk, capsys: pytest.CaptureFixture[str]) -> None:
-    desk.on("GET", "/v1/items/a1", (200, item(seat="Max 1", state="review", memorized=False)))
+def test_wrap_asks_the_desk_to_clear_and_close(desk: FakeDesk) -> None:
+    desk.on("POST", "/v1/items/a1/wrap", (200, item(state="done", wrap="cleared")))
+    assert main(["wrap", "a1", "--learned", "poll less"]) == 0
+    assert main(["wrap", "a1", "--state", "wontdo", "--force"]) == 0
+    first, second = desk.calls("POST", "/v1/items/a1/wrap")
+    assert first.body == {"stage": "cleared", "learned": "poll less", "state": "done", "force": False}
+    assert second.body == {"stage": "cleared", "state": "wontdo", "force": True}
+
+
+def test_wrap_marks_wrapping(desk: FakeDesk) -> None:
+    desk.on("POST", "/v1/items/a1/wrap", (200, item(state="review", wrap="wrapping")))
+    assert main(["wrap", "a1", "--stage", "wrapping"]) == 0
+    assert desk.seen[0].body["stage"] == "wrapping"
+
+
+def test_wrap_says_why_the_desk_refused(desk: FakeDesk, capsys: pytest.CaptureFixture[str]) -> None:
+    desk.on("POST", "/v1/items/a1/wrap", (409, {"detail": "a1: no CC-DONE yet; send /cc seat first"}))
     assert main(["wrap", "a1"]) == 1
     assert "/cc seat" in capsys.readouterr().err
-    assert desk.calls("PATCH", "/v1/items/a1") == []
 
 
-def test_wrap_refuses_a_seat_mid_turn(desk: FakeDesk, capsys: pytest.CaptureFixture[str]) -> None:
-    desk.on("GET", "/v1/items/a1", (200, item(seat="Max 1", state="review", memorized=True)))
-    desk.on("GET", "/v1/seats/Max%201", (200, SEAT | {"name": "Max 1"}))
-    assert main(["wrap", "a1"]) == 1
-    assert "mid-turn" in capsys.readouterr().err
+# Items
 
 
-def test_wrap_clears_and_closes(desk: FakeDesk) -> None:
-    desk.on("GET", "/v1/items/a1", (200, item(seat="Max 1", state="review", memorized=True)))
-    desk.on("GET", "/v1/seats/Max%201", (200, SEAT | {"turn": "idle"}))
-    desk.on("PATCH", "/v1/items/a1", (200, item(state="done", wrap="cleared")))
-    assert main(["wrap", "a1", "--learned", "poll less"]) == 0
-    assert desk.calls("PATCH", "/v1/items/a1")[0].body == {
-        "wrap": "cleared",
-        "learned": "poll less",
-        "state": "done",
+def test_create_queues_without_assigning(desk: FakeDesk, capsys: pytest.CaptureFixture[str]) -> None:
+    desk.on("POST", "/v1/items", (201, item(id="a7", subject_key="crunchtools/ashigaru#5")))
+    argv = [
+        "create",
+        "--task",
+        "t",
+        "--subject-key",
+        "crunchtools/ashigaru#5",
+        "--after",
+        "a1",
+        "--priority",
+        "2",
+    ]
+    assert main(argv) == 0
+    assert desk.seen[0].body == {
+        "task": "t",
+        "subject_key": "crunchtools/ashigaru#5",
+        "after": ["a1"],
+        "priority": 2,
     }
+    assert capsys.readouterr().out.splitlines()[1].startswith("a7")
+    assert desk.calls("POST", "/v1/items/a7/assign") == []
 
 
-def test_wrap_leaves_a_closed_state_alone(desk: FakeDesk) -> None:
-    desk.on("GET", "/v1/items/a1", (200, item(seat="Max 1", state="wontdo")))
-    desk.on("PATCH", "/v1/items/a1", (200, item(state="wontdo", wrap="cleared")))
-    assert main(["wrap", "a1", "--force"]) == 0
-    assert desk.calls("PATCH", "/v1/items/a1")[0].body == {"wrap": "cleared"}
+def test_create_prints_the_item_holding_a_subject_key(
+    desk: FakeDesk, capsys: pytest.CaptureFixture[str]
+) -> None:
+    desk.on("POST", "/v1/items", (409, {"detail": "subject_key RT#9 is taken by a3"}))
+    desk.on("GET", "/v1/items", (200, [item(id="a3", subject_key="RT#9")]))
+    assert main(["create", "--task", "t", "--subject-key", "RT#9", "--json"]) == 1
+    out = capsys.readouterr()
+    assert json.loads(out.out)["id"] == "a3" and "a3 exists" in out.err
+    assert desk.calls("GET", "/v1/items")[0].query == {"subject_key": ["RT#9"], "limit": ["1"]}
+
+
+def test_create_prints_the_item_holding_an_id(desk: FakeDesk, capsys: pytest.CaptureFixture[str]) -> None:
+    desk.on("POST", "/v1/items", (409, {"detail": "id a3 is taken"}))
+    desk.on("GET", "/v1/items/a3", (200, item(id="a3")))
+    assert main(["create", "--task", "t", "--id", "a3"]) == 1
+    assert capsys.readouterr().out.splitlines()[1].startswith("a3")
+
+
+def test_create_looks_up_a_taken_id_before_the_subject_key(
+    desk: FakeDesk, capsys: pytest.CaptureFixture[str]
+) -> None:
+    desk.on("POST", "/v1/items", (409, {"detail": "id a3 is taken"}))
+    desk.on("GET", "/v1/items/a3", (200, item(id="a3")))
+    desk.on("GET", "/v1/items", (200, [item(id="a5", subject_key="RT#9")]))
+    assert main(["create", "--task", "t", "--id", "a3", "--subject-key", "RT#9"]) == 1
+    assert capsys.readouterr().out.splitlines()[1].startswith("a3")
+    desk.on("GET", "/v1/items/a3", (404, {"detail": "no such item"}))
+    assert main(["create", "--task", "t", "--id", "a3", "--subject-key", "RT#9"]) == 1
+    assert capsys.readouterr().out.splitlines()[1].startswith("a5")
+
+
+def test_assign_task_keeps_the_id_when_the_assign_is_refused(
+    desk: FakeDesk, capsys: pytest.CaptureFixture[str]
+) -> None:
+    desk.on("POST", "/v1/items", (201, item(id="a8")))
+    desk.on("POST", "/v1/items/a8/assign", (409, {"detail": "no free seat in lane vertex"}))
+    desk.on("GET", "/v1/items/a8", (200, item(id="a8", lane="vertex")))
+    assert main(["assign", "--task", "t", "--lane", "vertex", "--subject-key", "RT#1"]) == 1
+    out = capsys.readouterr()
+    assert out.out.splitlines()[1].startswith("a8") and "recorded a8, not assigned" in out.err
+    assert desk.calls("POST", "/v1/items")[0].body == {"task": "t", "lane": "vertex", "subject_key": "RT#1"}
+
+
+def test_assign_task_does_not_hide_a_desk_failure(desk: FakeDesk, capsys: pytest.CaptureFixture[str]) -> None:
+    desk.on("POST", "/v1/items", (201, item(id="a8")))
+    desk.on("POST", "/v1/items/a8/assign", (500, {"detail": "boom"}))
+    assert main(["assign", "--task", "t", "--lane", "vertex"]) == 1
+    out = capsys.readouterr()
+    assert out.out == "" and "500: boom" in out.err
+
+
+def test_get_by_id_subject_key_or_ref(desk: FakeDesk, capsys: pytest.CaptureFixture[str]) -> None:
+    desk.on("GET", "/v1/items/a1", (200, item()))
+    desk.on("GET", "/v1/items", lambda seen: (200, [item(id="a2")] if "ref" in seen.query else []))
+    assert main(["get", "a1"]) == 0
+    assert main(["get", "--ref", "https://rt.example/9", "--json"]) == 0
+    assert json.loads(capsys.readouterr().out.split("\n", 2)[2])["id"] == "a2"
+    assert main(["get", "--subject-key", "RT#404"]) == 1
+    assert "no item with subject_key RT#404" in capsys.readouterr().err
+    assert main(["get"]) == 1
+
+
+def test_list_takes_several_states_and_the_learned_filters(
+    desk: FakeDesk, capsys: pytest.CaptureFixture[str]
+) -> None:
+    desk.on(
+        "GET", "/v1/items", (200, [item(state="done", learned="x", blocked_reason=None, result="shipped")])
+    )
+    argv = ["list", "--state", "done", "--state", "blocked", "--learned", "--no-memorized", "--limit", "5"]
+    assert main(argv) == 0
+    assert desk.seen[0].query == {
+        "state": ["done", "blocked"], "learned": ["true"], "memorized": ["false"], "limit": ["5"]
+    }  # fmt: skip
+    assert "shipped" in capsys.readouterr().out
+
+
+def test_update_sets_and_clears(desk: FakeDesk) -> None:
+    desk.on("PATCH", "/v1/items/a1", (200, item(state="review")))
+    argv = ["update", "a1", "--state", "review", "--check-after", "2026-11-19T00:00:00Z", "--memorized"]
+    assert main([*argv, "--clear", "next", "--filed-by", "Max 1"]) == 0
+    assert desk.seen[0].body == {
+        "state": "review", "check_after": "2026-11-19T00:00:00Z", "memorized": True, "filed_by": "Max 1",
+        "next": None,
+    }  # fmt: skip
+    assert main(["update", "a1", "--clear", "after"]) == 0
+    assert desk.seen[-1].body == {"after": None}
+    assert main(["update", "a1"]) == 1
+
+
+def test_mark_reads_and_sets(desk: FakeDesk, capsys: pytest.CaptureFixture[str]) -> None:
+    mark = {"name": "sweep", "value": "2026-11-18T06:00:00Z", "updated_at": "x", "updated_by": "Josui Prime"}
+    desk.on("GET", "/v1/marks/sweep", (200, mark))
+    desk.on("PUT", "/v1/marks/sweep", (200, mark))
+    assert main(["mark", "sweep"]) == 0
+    assert "2026-11-18T06:00:00Z" in capsys.readouterr().out
+    assert main(["mark", "sweep", "--set", "2026-11-18T06:00:00Z"]) == 0
+    assert desk.calls("PUT", "/v1/marks/sweep")[0].body == {"value": "2026-11-18T06:00:00Z"}
+
+
+def test_report(desk: FakeDesk) -> None:
+    desk.on("POST", "/v1/items/a1/report", (200, item(state="review")))
+    assert main(["report", "a1", "done", "--text", "PR #5", "--learned", "none"]) == 0
+    assert desk.seen[0].body == {"verb": "DONE", "text": "PR #5", "learned": "none"}
+    assert main(["report", "a1", "cc-done"]) == 0
+    assert desk.seen[1].body == {"verb": "CC-DONE"}
 
 
 # Wait
@@ -385,6 +496,103 @@ def test_wait_stops_on_a_refusal(desk: FakeDesk) -> None:
 def test_wait_exit_follows_the_state(desk: FakeDesk, state: str, code: int) -> None:
     desk.on("GET", "/v1/items/a1", (200, item(state=state)))
     assert main(["wait", "a1"]) == code
+
+
+SHA = "0123456789abcdef0123456789abcdef01234567"
+
+
+def ci(status: str, **extra: Any) -> dict[str, Any]:
+    return {"repo": "crunchtools/ashigaru", "sha": SHA, "status": status, "checks": [], "failing": []} | extra
+
+
+def test_wait_on_a_commit_long_polls_until_it_is_not_pending(desk: FakeDesk) -> None:
+    replies = [(200, ci("pending")), (502, {"detail": "proxy"}), (200, ci("success"))]
+    answers = iter(replies)
+    desk.on("GET", "/v1/ci/wait", lambda seen: next(answers))
+    clock = Clock()
+    waiter = CIWaiter(Desk(config.load()), sleep=clock.sleep, clock=lambda: clock.now)
+    assert waiter.wait("crunchtools/ashigaru", SHA, None)["status"] == "success"
+    queries = [seen.query for seen in desk.calls("GET", "/v1/ci/wait")]
+    assert queries[0] == {"repo": ["crunchtools/ashigaru"], "sha": [SHA], "timeout": ["90"]}
+    assert len(queries) == len(replies) and clock.slept == [5.0]
+
+
+def test_wait_on_a_commit_rides_out_no_answer() -> None:
+    class Flaky:
+        def __init__(self) -> None:
+            self.answers: list[Any] = [Unreachable("connect"), ci("failure")]
+
+        def request(self, *args: Any, **kwargs: Any) -> Any:
+            answer = self.answers.pop(0)
+            if isinstance(answer, Exception):
+                raise answer
+            return answer
+
+    clock = Clock()
+    waiter = CIWaiter(cast("Desk", Flaky()), sleep=clock.sleep, clock=lambda: clock.now)
+    assert waiter.wait("crunchtools/ashigaru", SHA, None)["status"] == "failure"
+    assert clock.slept == [5.0]
+
+
+def test_a_long_poll_outlasts_the_clients_timeout(desk: FakeDesk) -> None:
+    desk.on("GET", "/v1/ci/wait", (200, ci("success")))
+    desk.delay = 0.3
+    client = Desk(config.load(), timeout=0.1)
+    with pytest.raises(Unreachable):
+        client.request("GET", "/v1/ci/wait")
+    assert client.request("GET", "/v1/ci/wait", timeout=2.0)["status"] == "success"
+
+
+def test_wait_on_a_commit_pauses_no_longer_than_its_deadline(desk: FakeDesk) -> None:
+    desk.on("GET", "/v1/ci/wait", (503, {"detail": "busy"}))
+    clock = Clock()
+    waiter = CIWaiter(Desk(config.load()), pause=5.0, sleep=clock.sleep, clock=lambda: clock.now)
+    with pytest.raises(TimeoutError):
+        waiter.wait("crunchtools/ashigaru", SHA, 3)
+    assert clock.slept == [3.0] and len(desk.calls("GET", "/v1/ci/wait")) == 1
+
+
+def test_wait_on_a_commit_stops_on_a_refusal(desk: FakeDesk) -> None:
+    desk.on("GET", "/v1/ci/wait", (422, {"detail": "sha must be the full commit id"}))
+    clock = Clock()
+    waiter = CIWaiter(Desk(config.load()), sleep=clock.sleep, clock=lambda: clock.now)
+    with pytest.raises(DeskError, match="422"):
+        waiter.wait("crunchtools/ashigaru", "abc", None)
+    assert clock.slept == [] and len(desk.calls("GET", "/v1/ci/wait")) == 1
+
+
+def test_wait_on_a_commit_gives_up_at_its_timeout(desk: FakeDesk) -> None:
+    clock = Clock()
+
+    def held(seen: Seen) -> tuple[int, Any]:
+        clock.now += int(seen.query["timeout"][0])  # the Desk holds the request that long
+        return 200, ci("pending")
+
+    desk.on("GET", "/v1/ci/wait", held)
+    waiter = CIWaiter(Desk(config.load()), sleep=clock.sleep, clock=lambda: clock.now)
+    with pytest.raises(TimeoutError, match="still pending"):
+        waiter.wait("crunchtools/ashigaru", SHA, 30)
+    assert [seen.query["timeout"] for seen in desk.calls("GET", "/v1/ci/wait")] == [["30"]]
+
+
+@pytest.mark.parametrize(("status", "code"), [("success", 0), ("failure", 1)])
+def test_wait_on_a_commit_exit_follows_the_verdict(
+    desk: FakeDesk, capsys: pytest.CaptureFixture[str], status: str, code: int
+) -> None:
+    check = {"name": "sdlc ci", "verdict": status, "url": None, "updated_at": "2026-11-18T00:00:00Z"}
+    desk.on("GET", "/v1/ci/wait", (200, ci(status, checks=[check])))
+    assert main(["wait", "crunchtools/ashigaru", SHA]) == code
+    out = capsys.readouterr().out.splitlines()
+    assert out[0] == f"crunchtools/ashigaru@{SHA[:12]}  {status}"
+    assert out[2].split() == ["CHECK", "VERDICT", "URL"] and out[3].split() == ["sdlc", "ci", status]
+
+
+def test_wait_on_a_commit_says_when_the_desk_has_no_ci_wait(
+    desk: FakeDesk, capsys: pytest.CaptureFixture[str]
+) -> None:
+    assert main(["wait", "crunchtools/ashigaru", SHA]) == 1
+    assert "serves no CI wait" in capsys.readouterr().err
+    assert main(["wait", "a", "b", "c"]) == 1
 
 
 # Hooks

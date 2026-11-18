@@ -80,7 +80,8 @@ def test_initialize_and_list_tools(client: TestClient, urls: dict[str, str]) -> 
     names = {tool["name"] for tool in listed.json()["result"]["tools"]}
     assert names == {
         "usage", "agents", "work", "queue", "outcomes", "assign", "auto", "manual", "wrap",
-        "desk_list", "desk_get", "desk_claim", "desk_update", "desk_report", "desk_file", "desk_wait",
+        "desk_list", "desk_get", "desk_create", "desk_claim", "desk_update", "desk_report", "desk_file",
+        "desk_wait", "desk_mark",
     }  # fmt: skip
     for tool in listed.json()["result"]["tools"]:
         assert not {"who", "identity", "caller"} & set(tool["inputSchema"].get("properties", {}))
@@ -155,7 +156,8 @@ CASES: list[tuple[str, dict[str, Any], str, str, dict[str, Any] | None, set[str]
     ("desk_file", {"task": "child"}, "POST", "/v1/items/{id}/file", {"task": "child"}, OWNER_OR_ADMIN),
     ("auto", {}, "PATCH", "/v1/items/{id}", {"mode": "auto"}, ADMIN),
     ("manual", {}, "PATCH", "/v1/items/{id}", {"mode": "manual"}, ADMIN),
-    ("wrap", {"stage": "wrapping"}, "PATCH", "/v1/items/{id}", {"wrap": "wrapping"}, ADMIN),
+    ("wrap", {"stage": "wrapping"}, "POST", "/v1/items/{id}/wrap", {"stage": "wrapping"}, ADMIN),
+    ("wrap", {"force": True}, "POST", "/v1/items/{id}/wrap", {"force": True}, ADMIN),
     ("assign", {"seat": OTHER}, "POST", "/v1/items/{id}/assign", {"seat": OTHER}, ADMIN),
     ("desk_claim", {}, "POST", "/v1/items/{id}/claim", None, SEATS),
 ]  # fmt: skip
@@ -196,6 +198,28 @@ def test_mcp_authority_matches_rest(
             assert result["structuredContent"][field] == rest.json()[field]
 
 
+def test_desk_create_is_admin_only_and_names_a_taken_subject_key(
+    client: TestClient, urls: dict[str, str]
+) -> None:
+    fields = {"task": "t", "subject_key": "RT#7", "filed_by": SEAT}
+    created = call(client, urls[JOSUI], "desk_create", {"fields": fields})["structuredContent"]
+    assert (created["state"], created["seat"], created["filed_by"]) == ("queued", None, SEAT)
+    again = call(client, urls[JOSUI], "desk_create", {"fields": fields})
+    assert mcp_status(again) == CONFLICT and created["id"] in again["content"][0]["text"]
+    assert mcp_status(call(client, urls[SEAT], "desk_create", {"fields": {"task": "t"}})) == FORBIDDEN
+
+
+def test_desk_mark_reads_for_all_and_sets_for_an_admin(
+    client: TestClient, keys: Keys, urls: dict[str, str]
+) -> None:
+    assert mcp_status(call(client, urls[SEAT], "desk_mark", {"name": "sweep"})) == NOT_FOUND
+    assert mcp_status(call(client, urls[SEAT], "desk_mark", {"name": "sweep", "value": "t1"})) == FORBIDDEN
+    set_ = call(client, urls[JOSUI], "desk_mark", {"name": "sweep", "value": "t1"})["structuredContent"]
+    read = call(client, urls["ci"], "desk_mark", {"name": "sweep"})["structuredContent"]
+    assert set_ == read == client.get("/v1/marks/sweep", headers=keys["ci"]).json()
+    assert call(client, urls[JOSUI], "desk_mark", {"name": "Bad_Name", "value": "t1"})["isError"] is True
+
+
 def test_views_answer_every_identity(client: TestClient, keys: Keys, urls: dict[str, str]) -> None:
     for name in IDENTITIES:
         for tool, path in (
@@ -211,13 +235,17 @@ def test_views_answer_every_identity(client: TestClient, keys: Keys, urls: dict[
 
 
 def test_queue_lists_queued_then_proposed(
-    client: TestClient, urls: dict[str, str], conn: sqlite3.Connection
+    client: TestClient, keys: Keys, urls: dict[str, str], conn: sqlite3.Connection
 ) -> None:
     store.insert_item(conn, {"id": "a1", "task": "q", "state": "queued", "after": ["a2"]}, JOSUI)
     store.insert_item(conn, {"id": "a2", "task": "p", "state": "proposed"}, JOSUI)
     store.insert_item(conn, {"id": "a3", "task": "w", "state": "working"}, JOSUI)
-    rows = call(client, urls[SEAT], "queue")["structuredContent"]["result"]
-    assert [(row["id"], row["after"]) for row in rows] == [("a1", ["a2"]), ("a2", [])]
+    content = call(client, urls[SEAT], "queue")["structuredContent"]
+    assert [(row["id"], row["waits_on"]) for row in content["queued"]] == [
+        ("a1", [{"id": "a2", "state": "proposed"}])
+    ]
+    assert [row["id"] for row in content["proposed"]] == ["a2"]
+    assert content == client.get("/v1/queue", headers=keys[SEAT]).json()
 
 
 CLIENT_LOGS = ("httpx", "httpcore")

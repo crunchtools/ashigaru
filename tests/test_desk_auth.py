@@ -148,7 +148,8 @@ def test_seat_writes_only_turn_task_and_since_on_its_own_row(client: TestClient,
         client.patch(f"/v1/seats/{OTHER}", headers=keys[MINE], json={"turn": "idle"}).status_code == FORBIDDEN
     )
     assert client.patch(f"/v1/seats/{CI}", headers=keys[CI], json={"turn": "idle"}).status_code == FORBIDDEN
-    assert [seat["name"] for seat in client.get("/v1/seats", headers=keys[CI]).json()] == [MINE]
+    rows = client.get("/v1/seats", headers=keys[CI]).json()
+    assert [(seat["name"], seat["missing"]) for seat in rows] == [(MINE, False), (OTHER, True)]
 
 
 def test_a_seat_cannot_undo_scotts_manual_hold(client: TestClient, keys: Keys) -> None:

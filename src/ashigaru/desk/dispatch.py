@@ -1,4 +1,5 @@
-"""Dispatch on top of the store: assign and claim, usage and spend, the outcomes rollup.
+"""Dispatch on top of the store: assign, claim and wrap, usage and spend, the queue, seats and
+outcomes views.
 
 Assign and claim run in one BEGIN IMMEDIATE transaction each, so two callers
 racing for one item or one seat get one winner and one Conflict.
@@ -10,7 +11,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from . import store
-from .model import CLOSED, SEAT_ROW_FIELDS, SeatStatus, State, Turn, Wrap
+from .model import CLOSED, SEAT_ROW_FIELDS, STALE_SEAT, Role, SeatStatus, State, Turn, Wrap
 
 PICK_SEAT = """
     SELECT name FROM seats
@@ -34,6 +35,15 @@ OUTCOMES = """
     WHERE o.kind = 'outcome'
     GROUP BY o.id
     ORDER BY o.updated_at DESC, o.id DESC
+"""
+
+QUEUE_LIMIT = 1000
+"""Items per list in the queue view, GET /v1/items's own cap; a longer queue is paged there."""
+
+UNSEEN_SEATS = """
+    SELECT name FROM identities
+    WHERE role = :role AND disabled_at IS NULL AND name NOT IN (SELECT name FROM seats)
+    ORDER BY name
 """
 
 ADD_SPEND = """
@@ -200,3 +210,70 @@ def set_limits(conn: sqlite3.Connection, billing: str, limits: dict[str, Any]) -
 def outcomes(conn: sqlite3.Connection) -> list[dict[str, Any]]:
     """`ashigaru outcomes`: each outcome with its stories' done, blocked and open counts."""
     return [dict(row) for row in conn.execute(OUTCOMES)]
+
+
+class Refused(Exception):
+    """An action the item's state does not allow yet; nothing changed."""
+
+
+def wrap(conn: sqlite3.Connection, item_id: str, request: dict[str, Any], actor: str) -> None:
+    """`wrap`, for the CLI and MCP alike. `wrapping` records that /cc seat was sent. `cleared` refuses
+    (Refused) until the item is memorized or a Learned line comes with the request, and while its
+    seat's turn is active, unless forced; then it clears the wrap and closes an open item, which
+    frees the seat."""
+    with store.transaction(conn):
+        item = store.get_item(conn, item_id)
+        if item is None:
+            raise KeyError(item_id)
+        fields: dict[str, Any] = {"wrap": request["stage"]}
+        if request.get("learned"):
+            fields["learned"] = request["learned"]
+        if request["stage"] == Wrap.CLEARED:
+            if not request.get("force"):
+                if not (item["memorized"] or request.get("learned")):
+                    raise Refused(f"{item_id}: no CC-DONE yet; send /cc seat first, or force")
+                seat = store.get_seat(conn, item["seat"]) if item["seat"] else None
+                if item["seat"] and seat is None:
+                    raise Refused(f"{item['seat']} never reported, so it cannot be seen idle; force to clear")
+                if seat and seat["turn"] == Turn.ACTIVE:
+                    raise Refused(f"{item['seat']} is mid-turn; wrap it once it is idle")
+            if item["state"] not in CLOSED:
+                fields["state"] = request["state"]
+        store.update_item(conn, item_id, fields, actor, source="wrap")
+
+
+def queue(conn: sqlite3.Connection) -> dict[str, Any]:
+    """`ashigaru queue`: the newest QUEUE_LIMIT queued items, each with the state of every item it
+    waits on (`unknown` for an id with no item), then as many proposed children with their expiry;
+    `truncated` when either list was cut."""
+    store.expire_proposed(conn)
+    queued = store.list_items(conn, limit=QUEUE_LIMIT + 1, state=State.QUEUED)
+    proposed = store.list_items(conn, limit=QUEUE_LIMIT + 1, state=State.PROPOSED)
+    truncated = len(queued) > QUEUE_LIMIT or len(proposed) > QUEUE_LIMIT
+    queued, proposed = queued[:QUEUE_LIMIT], proposed[:QUEUE_LIMIT]
+    wanted = sorted({after for item in queued for after in item["after"]})
+    states = {
+        row[0]: row[1]
+        for row in conn.execute(
+            "SELECT id, state FROM items WHERE id IN (SELECT value FROM json_each(?))", (json.dumps(wanted),)
+        )
+    }
+    for item in queued:
+        item["waits_on"] = [{"id": after, "state": states.get(after, "unknown")} for after in item["after"]]
+    return {"queued": queued, "proposed": proposed, "truncated": truncated}
+
+
+def seats(conn: sqlite3.Connection) -> list[dict[str, Any]]:
+    """`ashigaru agents`: every seat row, then every seat identity that never checked in. A seat is
+    missing when it never did, or its row has not changed in STALE_SEAT."""
+    stale = (datetime.now(UTC) - STALE_SEAT).strftime("%Y-%m-%dT%H:%M:%SZ")
+    rows = [{**seat, "missing": seat["updated_at"] < stale} for seat in store.list_seats(conn)]
+    unseen = conn.execute(UNSEEN_SEATS, {"role": Role.SEAT})
+    return rows + [{**store.SEAT_DEFAULTS, "name": row[0], "missing": True} for row in unseen]
+
+
+def seat(conn: sqlite3.Connection, name: str) -> dict[str, Any] | None:
+    """One seat row, `missing` when it has not changed in STALE_SEAT."""
+    found = store.get_seat(conn, name)
+    stale = (datetime.now(UTC) - STALE_SEAT).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return {**found, "missing": found["updated_at"] < stale} if found else None

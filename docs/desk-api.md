@@ -44,18 +44,22 @@ can return.
 | `GET /healthz` | 200 with the schema version; no key |
 | `POST /webhook/{forge}` | a forge's webhook delivery (`/webhook/github`); its signature, not a key, authenticates it (see Webhooks) |
 | `GET /me` | the caller's identity and role |
-| `GET /items` | list, newest first; filters `state`, `seat`, `lane`, `kind`, `mode`, `parent`; pages of `limit` (200, at most 1000) from `offset` |
-| `POST /items` | admin: create; `id` defaults to the next `a<N>`, `state` to `queued`; 409 on a taken id or `subject_key`. A `subject_key` that is a ref is stored as its key: a GitHub issue or PR URL or `owner/repo#N` becomes `owner/repo#N` in lowercase, an RT URL or `RT #N` becomes `RT#N`; any other key is stored as given |
+| `GET /items` | list, newest first; filters `state` (repeat it for any of several), `seat`, `lane`, `kind`, `mode`, `parent`, `subject_key` (normalised the same way), `ref`, `learned` (true: a Learned line other than `none` is recorded) and `memorized`; pages of `limit` (200, at most 1000) from `offset` |
+| `POST /items` | admin: create; `id` defaults to the next `a<N>`, `state` to `queued`; 409 on a taken id or `subject_key`, whose detail names the item holding it (`subject_key RT#9 is taken by a3`). A `subject_key` that is a ref is stored as its key: a GitHub issue or PR URL or `owner/repo#N` becomes `owner/repo#N` in lowercase, an RT URL or `RT #N` becomes `RT#N`; any other key is stored as given. An admin may set `filed_by` |
 | `GET /items/{id}` | one item |
 | `PATCH /items/{id}` | the fields sent change; `null` clears; a `subject_key` is stored as `POST /items` stores it |
 | `POST /items/{id}/report` | the report contract: `DONE` to `review` with `text` as the result, `BLOCKED` to `blocked` with `text` as the reason, `WORKING` to `working`, `CC-DONE` sets `memorized`; a `learned` of `none` is not recorded |
 | `POST /items/{id}/file` | `desk_file`: a `proposed` child under the story's outcome; one per assignment (409 on the second); abandoned 14 days later unless Josui promotes it |
 | `POST /items/{id}/assign` | admin: `{seat}` names one; `{}` or `{lane}` picks the seat in the lane (default: the item's) free longest and not held by Scott. 409 when the item is closed or waits on an `after` item not done, or the seat is busy, held or unknown |
+| `POST /items/{id}/wrap` | admin, `wrap` in the CLI and MCP: `{stage: wrapping}` records that `/cc seat` was sent. `{stage: cleared}` (the default) is 409 until the item is memorized (CC-DONE) or `learned` is sent, and while its seat's turn is active or its seat never reported, unless `force`; then it clears the wrap and closes an open item in `state` (`done`, `wontdo`, `abandoned`), which frees the seat |
 | `POST /items/{id}/claim` | `desk_claim`, seats only: take a `queued`, seatless, `auto` item in the seat's lane whose `after` items are done. Atomic; the loser of a race gets 409. The seat must be free, unheld and have a lane: a seat with no lane claims nothing, and an item with no lane is claimed by no seat (Josui sets its lane or assigns it) |
 | `GET /items/{id}/events` | the item's history, ledger lines included, oldest first; pages of `limit` (200, at most 1000) after `after` (a seq) |
 | `GET /ci/wait` | `desk_wait`: `repo` (owner/name) and full `sha`; the commit's CI result as soon as it is not `pending`, else as it stands after `timeout` seconds (default and most 90; 0 reads now). A client waits again on `pending` |
 | `GET /check` | the `/agents check` table: id, seat, mode, task, state, wrap, result or blocker, next. Blocked first, then newest; `?all=true` includes cleared, wontdo and abandoned |
-| `GET /seats`, `GET /seats/{name}` | seat state: free/busy, owner, `hold` (`free`, `busy-auto` or `busy-manual`), turn, task, item, since, and the last usage report |
+| `GET /marks/{name}` | a named watermark (`sweep`: how far the last sweep reached): value, updated_at, updated_by; 404 until first set |
+| `PUT /marks/{name}` | admin: `{value}` sets it; names are `[a-z][a-z0-9-]*` |
+| `GET /queue` | `ashigaru queue`: the newest 1000 `queued` items, each with `waits_on` (every `after` id and its state, `unknown` for no such item), and the newest 1000 `proposed` children; `truncated` is true when either list was cut |
+| `GET /seats`, `GET /seats/{name}` | seat state: free/busy, owner, `hold` (`free`, `busy-auto` or `busy-manual`), turn, task, item, since, and the last usage report. `missing` is true for a seat whose row has not changed in 24 hours; the list ends with each seat identity that never checked in, `missing` with a null `updated_at` |
 | `PATCH /seats/{name}` | created on first call; a seat sends `turn` and `task`. `since` is server-set when `status` changes, `turn_started_at` when the turn goes active. The Desk infers Scott's hold (below) |
 | `POST /seats/{name}/usage` | the seat or an admin: `session_id`, `model`, `billing` (max / vertex / openrouter), `context_used`, `context_window`, `session_tokens`, `cost_usd` (the session's running total; the increase since the last report is booked to today's spend) |
 | `GET /usage` | `ashigaru usage`: per seat model, context, session tokens and cost, turn and seconds in it; spend by billing source today and this month (UTC) with limits |
@@ -82,10 +86,10 @@ redact the path the same way.
 
 The tools are the shared command set: `usage`, `agents`, `work`, `queue`,
 `outcomes`, `assign`, `auto`, `manual`, `wrap`, plus `desk_list`, `desk_get`,
-`desk_claim`, `desk_update`, `desk_report`, `desk_file` and `desk_wait` (the
-`GET /ci/wait` long-poll). Each calls the REST route's own function with the
-code's identity, so authority is the API's: a refusal comes back as a tool
-error carrying the same status and detail.
+`desk_create`, `desk_claim`, `desk_update`, `desk_report`, `desk_file`,
+`desk_mark` and `desk_wait` (the `GET /ci/wait` long-poll). Each calls the REST route's own
+function with the code's identity, so authority is the API's: a refusal comes
+back as a tool error carrying the same status and detail.
 
 ## Scott's hold
 
