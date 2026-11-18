@@ -76,7 +76,7 @@ def import_ledger(args: argparse.Namespace) -> int:
         summary = importer.import_ledger(_open(args.db), ledger)
     print(
         f"{summary.lines} lines: {summary.applied} applied, {summary.skipped} already imported; "
-        f"{len(summary.created)} items created, {len(summary.updated)} updated"
+        f"{len(summary.created)} items created, {len(summary.updated)} updated, {len(summary.keyed)} keyed"
     )
     return 0
 

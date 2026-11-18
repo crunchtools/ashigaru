@@ -5,10 +5,31 @@ The item carries every field and state the /agents ledger uses (ashigaru-3.md,
 repo, priority).
 """
 
+import re
 from enum import StrEnum
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, computed_field
+from pydantic import BaseModel, ConfigDict, Field, computed_field, field_validator
+
+GITHUB_URL = re.compile(r"^https?://(?:www\.)?github\.com/([^/\s]+/[^/\s]+)/(?:issues|pull)/(\d+)\b", re.I)
+RT_URL = re.compile(r"^https?://\S+/Ticket/\w+\.html\?(?:\S*&)?id=(\d+)\b", re.I)
+RT_REF = re.compile(r"^RT\s*#?\s*(\d+)$", re.I)
+REPO_REF = re.compile(r"^([\w.-]+/[\w.-]+)#(\d+)$")
+
+
+def subject_key(value: str | None) -> str | None:
+    """The one form of a dedup key: `owner/name#N` for a GitHub issue or PR, `RT#N` for a ticket.
+
+    An issue's URL and its `owner/name#N` key come out the same, so a sweep that sends the
+    URL, a webhook that sends the key and the ledger import all dedupe against each other.
+    Anything else (`repo:alert`) is only trimmed.
+    """
+    value = (value or "").strip()
+    if github := GITHUB_URL.match(value) or REPO_REF.match(value):
+        return f"{github[1].lower()}#{github[2]}"
+    if rt := RT_URL.match(value) or RT_REF.match(value):
+        return f"RT#{rt[1]}"
+    return value or None
 
 
 class State(StrEnum):
@@ -151,6 +172,11 @@ class _Fields(BaseModel):
     verified_by: str | None = None
     priority: int | None = None
     wrap: Wrap | None = None
+
+    @field_validator("subject_key")
+    @classmethod
+    def _one_form(cls, value: str | None) -> str | None:
+        return subject_key(value)
 
 
 class ItemCreate(_Fields):

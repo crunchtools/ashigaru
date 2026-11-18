@@ -2,13 +2,14 @@
 
 import json
 import sqlite3
+from http.client import CONFLICT
 from typing import Any
 
 from conftest import LEDGER, Keys
 from fastapi.testclient import TestClient
 
 from ashigaru.desk import importer, store
-from ashigaru.desk.model import Item
+from ashigaru.desk.model import CLOSED, Item, subject_key
 
 LINES = LEDGER.read_text().splitlines(keepends=True)
 LINE_COUNT, ITEM_COUNT = 816, 217
@@ -29,6 +30,14 @@ def fold() -> dict[str, dict[str, Any]]:
 
 def dump(conn: sqlite3.Connection) -> list[tuple[Any, ...]]:
     return [tuple(row) for row in conn.execute("SELECT * FROM items ORDER BY id")]
+
+
+def unkeyed(conn: sqlite3.Connection) -> list[tuple[Any, ...]]:
+    return [row[:3] + row[4:] for row in dump(conn)]
+
+
+def keyed(conn: sqlite3.Connection) -> dict[str, str]:
+    return dict(conn.execute("SELECT id, subject_key FROM items WHERE subject_key IS NOT NULL").fetchall())
 
 
 def test_every_line_applies_and_every_item_is_valid(conn: sqlite3.Connection) -> None:
@@ -69,7 +78,9 @@ def test_a_grown_ledger_applies_only_new_lines(conn: sqlite3.Connection, tmp_pat
     whole = store.connect(tmp_path / "whole.db")
     store.migrate(whole)
     importer.import_ledger(whole, LINES)
-    assert dump(conn) == dump(whole)
+    assert unkeyed(conn) == unkeyed(whole)
+    # A key given while an item was open stays when a later line closes it, as a Desk item's does.
+    assert keyed(conn).items() >= keyed(whole).items()
 
 
 def test_untimed_lines_take_the_ledgers_time_not_the_clock(conn: sqlite3.Connection) -> None:
@@ -114,3 +125,83 @@ def test_imported_ledger_serves_the_check_view(
     assert len(first) == 1 and len(rest) == A1_LINES - 1
     created = client.post("/v1/items", headers=keys["Josui Prime"], json={"task": "next one"}).json()
     assert created["id"] == "a" + str(max(int(item_id[1:]) for item_id in fold()) + 1)
+
+
+OPEN_ISSUE = "https://github.com/crunchtools/example/issues/7"
+
+
+def test_open_items_get_the_key_their_ref_implies(conn: sqlite3.Connection) -> None:
+    summary = importer.import_ledger(conn, LINES)
+    keys = keyed(conn)
+    assert keys and sorted(summary.keyed) == sorted(keys)
+    for item_id, key in keys.items():
+        item = store.get_item(conn, item_id) or {}
+        assert item["state"] not in CLOSED and key == subject_key(item["ref"])
+    closed_with_ref = [i for i in store.list_items(conn) if i["ref"] and i["state"] in CLOSED]
+    assert closed_with_ref and all(item["subject_key"] is None for item in closed_with_ref)
+
+
+def test_keying_leaves_the_items_history_and_order_alone(conn: sqlite3.Connection) -> None:
+    importer.import_ledger(conn, LINES)
+    for item_id in keyed(conn):
+        events = conn.execute("SELECT at, source FROM events WHERE item_id = ? ORDER BY seq", (item_id,))
+        *lines, backfill = events.fetchall()
+        assert backfill["source"] == "backfill" and all(line["source"] == "ledger" for line in lines)
+        assert backfill["at"] == (store.get_item(conn, item_id) or {})["updated_at"]
+
+
+def test_a_reimport_backfills_keys_and_never_overwrites_one(conn: sqlite3.Connection) -> None:
+    importer.import_ledger(conn, LINES)
+    want = keyed(conn)
+    first, second, *_ = want
+    conn.execute("UPDATE items SET subject_key = NULL WHERE id != ?", (first,))
+    conn.execute("UPDATE items SET subject_key = 'kept-by-hand' WHERE id = ?", (first,))
+    summary = importer.import_ledger(conn, LINES)
+    assert summary.applied == 0 and first not in summary.keyed and second in summary.keyed
+    assert keyed(conn) == {**want, first: "kept-by-hand"}
+    assert importer.import_ledger(conn, LINES).keyed == []
+
+
+def test_one_ref_keys_only_its_newest_open_item(conn: sqlite3.Connection) -> None:
+    lines = [
+        f'{{"id":"a1","task":"old","ref":"{OPEN_ISSUE}","state":"done","at":"2026-11-15T01:00Z"}}\n',
+        f'{{"id":"a2","task":"open","ref":"{OPEN_ISSUE}","state":"queued","at":"2026-11-15T02:00Z"}}\n',
+        f'{{"id":"a3","task":"newer","ref":"{OPEN_ISSUE}/","state":"working","at":"2026-11-15T03:00Z"}}\n',
+        '{"id":"a4","task":"rt","ref":"https://rt.example/Ticket/Display.html?id=1500","at":"2026-11-15T03:00Z"}\n',
+    ]
+    importer.import_ledger(conn, lines)
+    assert keyed(conn) == {"a3": "crunchtools/example#7", "a4": "RT#1500"}
+
+
+def test_a_key_another_item_holds_is_left_alone(conn: sqlite3.Connection) -> None:
+    with store.transaction(conn):
+        store.insert_item(conn, {"id": "a9", "subject_key": "crunchtools/example#7"}, "Josui Prime")
+    importer.import_ledger(conn, [f'{{"id":"a1","task":"t","ref":"{OPEN_ISSUE}"}}\n'])
+    assert keyed(conn) == {"a9": "crunchtools/example#7"}
+
+
+def test_a_sweep_after_the_import_is_refused_as_a_duplicate(
+    client: TestClient, keys: Keys, conn: sqlite3.Connection
+) -> None:
+    importer.import_ledger(conn, [f'{{"id":"a1","task":"t","ref":"{OPEN_ISSUE}"}}\n'])
+    body = {"task": "again", "ref": OPEN_ISSUE, "subject_key": OPEN_ISSUE}
+    assert client.post("/v1/items", headers=keys["Josui Prime"], json=body).status_code == CONFLICT
+    other = {"task": "new", "subject_key": " https://github.com/CrunchTools/Example/pull/8 "}
+    created = client.post("/v1/items", headers=keys["Josui Prime"], json=other).json()
+    assert created["subject_key"] == "crunchtools/example#8"
+
+
+def test_subject_keys_have_one_form() -> None:
+    same = {
+        "crunchtools/ashigaru#5": [
+            "https://github.com/crunchtools/ashigaru/issues/5",
+            "https://github.com/Crunchtools/Ashigaru/pull/5/files",
+            "http://www.github.com/crunchtools/ashigaru/issues/5#issuecomment-1",
+            "crunchtools/ashigaru#5",
+        ],
+        "RT#1500": ["RT#1500", "rt #1500", "https://rt.crunchtools.com/Ticket/Display.html?id=1500"],
+        "repo:alert": [" repo:alert "],
+    }
+    for want, forms in same.items():
+        assert {subject_key(form) for form in forms} == {want}
+    assert subject_key("  ") is None and subject_key(None) is None

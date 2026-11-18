@@ -44,7 +44,7 @@ can return.
 | `GET /healthz` | 200 with the schema version; no key |
 | `GET /me` | the caller's identity and role |
 | `GET /items` | list, newest first; filters `state`, `seat`, `lane`, `kind`, `mode`, `parent`; pages of `limit` (200, at most 1000) from `offset` |
-| `POST /items` | admin: create; `id` defaults to the next `a<N>`, `state` to `queued`; 409 on a taken id or `subject_key` |
+| `POST /items` | admin: create; `id` defaults to the next `a<N>`, `state` to `queued`; 409 on a taken id or `subject_key`. A `subject_key` is stored in one form: a GitHub issue or PR URL becomes `owner/name#N`, an RT URL or `RT #N` becomes `RT#N`, anything else is trimmed |
 | `GET /items/{id}` | one item |
 | `PATCH /items/{id}` | the fields sent change; `null` clears |
 | `POST /items/{id}/report` | the report contract: `DONE` to `review` with `text` as the result, `BLOCKED` to `blocked` with `text` as the reason, `WORKING` to `working`, `CC-DONE` sets `memorized`; a `learned` of `none` is not recorded |
