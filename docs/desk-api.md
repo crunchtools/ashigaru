@@ -140,7 +140,8 @@ the accounts in `ASHIGARU_FORGE_AUTHORS_GITHUB` (the image sets
 PRs, so listing an account makes its own subjects auto-claimable: a `lane:*`
 label on one sets its lane and mode `auto`, as for any writer's. Their lane
 labels on anyone else's subject approve nothing. The record issues the sweep
-keeps (labeled `ashigaru-inbox`, `ashigaru-releases` or `ashigaru-observe`) are
+keeps (labeled `ashigaru-inbox`, `ashigaru-releases`, `ashigaru-red` or
+`ashigaru-observe`) are
 never queued, and one queued before is held on its next delivery.
 
 **CI.** One result per (repo, commit): each check's name and verdict

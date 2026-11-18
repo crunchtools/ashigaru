@@ -142,13 +142,7 @@ TYPE_DIFFERS = {
     ): "the CLI's is its whole wait, fractional seconds; the tool's one poll, whole, at most 90",
 }
 """A tool argument deliberately not the CLI flag's type, with why."""
-FREE = "the CLI takes free text and leaves the value to the Desk, which refuses a bad one"
-CHOICES_DIFFER = {
-    **{("desk_list", n): FREE for n in ("state", "lane", "kind", "mode")},
-    **{("desk_create", n): FREE for n in ("kind", "lane", "mode", "state")},
-    **{("desk_update", n): FREE for n in ("kind", "lane", "mode", "state")},
-    ("desk_assign", "lane"): FREE,
-}
+CHOICES_DIFFER: dict[tuple[str, str], str] = {}
 """A tool argument whose choices the CLI flag does not declare, with why."""
 REQUIRED_DIFFERS = {
     ("desk_assign", "task"): "the record's task is for a new item; assign by `item` needs none",
@@ -160,7 +154,10 @@ NULL_DIFFERS = {
     ("desk_list", "offset"): OMITTED,
     ("desk_assign", "task"): "the record's task is for a new item; assign by `item` needs none",
     ("desk_assign", "after"): "the CLI's unset is None; the record's is an empty list",
-    ("desk_wait", "timeout"): OMITTED,
+    (
+        "desk_wait",
+        "timeout",
+    ): "the CLI's None goes to the waiter, which waits as long as it takes; the tool's is 90",
 }
 """An argument `T | None` on one side and `T` on the other, with why."""
 DEFAULT_DIFFERS = {
@@ -303,6 +300,26 @@ def test_every_listed_difference_still_differs(listed: dict[tuple[str, str], str
         flat, carried = _mcp_args(tool)
         mcp, cli = (flat | carried)[name], _cli_args(tool.removeprefix("desk_"))[name]
         assert getattr(mcp, field) != getattr(cli, field), f"{tool} {name}: {field} agrees now"
+
+
+def test_every_listed_gap_is_still_a_gap() -> None:
+    """A stale TYPE_DIFFERS, MCP_ONLY, RENAMED or CLI_ONLY entry would hide the next drift."""
+    for tool, name in TYPE_DIFFERS:
+        flat, carried = _mcp_args(tool)
+        mcp, cli = (flat | carried)[name], _cli_args(tool.removeprefix("desk_"))[name]
+        assert mcp.type != cli.type, f"{tool} {name}: type agrees now"
+    for tool, gaps in MCP_ONLY.items():
+        flags = _cli_args(tool.removeprefix("desk_"))
+        _, carried = _mcp_args(tool)
+        assert set(gaps) <= set(carried), f"{tool}: {sorted(set(gaps) - set(carried))} is not a field"
+        assert not set(gaps) & set(flags), f"{tool}: {sorted(set(gaps) & set(flags))} is on the CLI"
+    for command in CLI_ONLY:
+        assert f"desk_{command}" not in TOOLS, f"{command} is a tool now"
+    for dest, names in RENAMED.items():
+        used = {a.dest for command in SHARED for a in CLI[command]._actions}
+        assert dest in used, f"no CLI argument is named {dest}"
+        flats = set().union(*(_mcp_args(f"desk_{command}")[0] for command in SHARED))
+        assert names <= flats, f"{dest}: no tool argument {sorted(names - flats)}"
 
 
 @pytest.mark.parametrize("command", SHARED)

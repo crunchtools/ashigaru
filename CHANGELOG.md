@@ -25,9 +25,9 @@ All notable changes to this project are documented here. The format follows
   `--since` with `--advance` is refused, since that round could move the mark
   past events it never read (a374).
 - The record issues the sweep keeps (`ashigaru-inbox`, `ashigaru-releases`,
-  `ashigaru-observe`) are never queued: the inbox lists strangers' titles and
-  arrived trusted and `auto` as the bot's own issue; one queued before is
-  held on its next delivery (a374).
+  `ashigaru-red`, `ashigaru-observe`) are never queued: the inbox and the red
+  issue carry strangers' text and arrived trusted and `auto` as the bot's own
+  issues; one queued before is held on its next delivery (a374).
 - The CLI-to-MCP drift test compares choices on either side, required-ness of
   carried fields, nullability and defaults, and checks `docs/desk-api.md`'s
   tool names (a374).

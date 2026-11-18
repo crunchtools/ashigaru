@@ -28,8 +28,9 @@ import pytest
 from conftest import Keys
 from fastapi.testclient import TestClient
 
+import common
 from ashigaru.desk import __main__ as desk_main
-from ashigaru.desk import ci, store, webhooks
+from ashigaru.desk import ci, intake, store, webhooks
 from ashigaru.desk.api import create_app
 from ashigaru.desk.forges import FORGES, CIUpdate, github
 from ashigaru.desk.model import Verdict
@@ -1038,7 +1039,7 @@ def test_the_apps_lane_label_approves_nobody_elses_issue(
     assert "approved_by" not in held_item(conn)["extra"]
 
 
-@pytest.mark.parametrize("record", ["ashigaru-inbox", "ashigaru-releases", "ashigaru-observe"])
+@pytest.mark.parametrize("record", sorted(intake.RECORDS))
 def test_the_apps_record_issues_are_never_queued(
     trusting_the_bot: TestClient, conn: sqlite3.Connection, record: str
 ) -> None:
@@ -1046,6 +1047,11 @@ def test_the_apps_record_issues_are_never_queued(
     labels = [{"name": record}, {"name": "lane:dolza-max"}]
     deliver(trusting_the_bot, "issues", payload("issues", user={"login": BOT}, labels=labels))
     assert store.item_by_subject(conn, f"{REPO}#190") is None
+
+
+def test_records_are_the_issues_the_sweep_keeps() -> None:
+    """The record labels are scripts/common.py's, so a new record issue can't drift past intake."""
+    assert {common.INBOX, common.RELEASES, common.RED, common.OBSERVE} == intake.RECORDS
 
 
 def test_a_record_issue_queued_before_is_held_on_its_next_delivery(

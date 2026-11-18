@@ -17,6 +17,16 @@ from .client import Desk, DeskError, Unreachable
 from .config import ConfigError, load
 from .wait import CI_SUCCEEDED, SUCCEEDED
 
+CHOICES = {
+    "--kind": ("outcome", "story"),
+    "--lane": ("vertex", "dolza-max", "exedore-max", "prime", "rule"),
+    "--mode": ("auto", "manual"),
+    "--state": (
+        "proposed", "queued", "assigned", "working", "review", "done", "blocked", "wontdo", "abandoned",
+    ),
+}  # fmt: skip
+"""The Desk's enums, spelled out so the CLI stays stdlib-only; the drift test in test_skill.py keeps
+them in step with ashigaru.desk.model."""
 FIELDS = (
     ("--kind", "outcome or story"),
     ("--parent", "the outcome this story serves"),
@@ -48,7 +58,7 @@ CLEARABLE = (
 
 def _fields(command: argparse.ArgumentParser, options: tuple[tuple[str, str | None], ...]) -> None:
     for flag, text in options:
-        command.add_argument(flag, help=text)
+        command.add_argument(flag, help=text, choices=CHOICES.get(flag))
 
 
 def _item_commands(
@@ -56,9 +66,11 @@ def _item_commands(
 ) -> None:
     """list, get, create, update, mark and report: the MCP's desk_* tools."""
     listing = sub.add_parser("list", parents=[common], help="items, newest first, by any filters")
-    listing.add_argument("--state", action="append", help="any of these states (repeatable)")
+    listing.add_argument(
+        "--state", action="append", choices=CHOICES["--state"], help="any of these states (repeatable)"
+    )
     for flag in ("--seat", "--lane", "--kind", "--mode", "--parent", "--subject-key", "--ref"):
-        listing.add_argument(flag)
+        listing.add_argument(flag, choices=CHOICES.get(flag))
     listing.add_argument(
         "--learned", action=argparse.BooleanOptionalAction, help="with (or without) a Learned line"
     )
@@ -152,13 +164,17 @@ def parser() -> argparse.ArgumentParser:
     assign.add_argument("item", nargs="?", help="the item; with --task, the new item's id (default next)")
     where = assign.add_mutually_exclusive_group()
     where.add_argument("--seat", help="this seat")
-    where.add_argument("--lane", help="the seat in this lane free longest (default: the item's lane)")
+    where.add_argument(
+        "--lane",
+        choices=CHOICES["--lane"],
+        help="the seat in this lane free longest (default: the item's lane)",
+    )
     assign.add_argument("--task", help="record a new item with this one-line objective first")
     assign.add_argument("--done-when", dest="done_when")
     assign.add_argument("--ref", help="the issue or RT URL")
     assign.add_argument("--repo")
     assign.add_argument("--after", action="append", help="an item this one waits on (repeatable)")
-    assign.add_argument("--mode", choices=["auto", "manual"])
+    assign.add_argument("--mode", choices=CHOICES["--mode"])
     assign.add_argument("--subject-key", dest="subject_key", help="with --task: the new item's dedup key")
 
     for name, text in (("auto", "hand an item to Josui"), ("manual", "hand an item to Scott")):

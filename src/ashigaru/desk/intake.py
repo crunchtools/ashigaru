@@ -16,9 +16,9 @@ queued and seatless and nobody but intake has set them: a hold Josui chose
 wins. Otherwise later deliveries never touch what Josui owns (task, lane, mode,
 state, seat): they refresh the ref, and the source's title, labels and open or
 closed state under `extra`. A subject first seen closed is not queued, nor is one of the record issues
-the sweep keeps (RECORDS): the inbox lists strangers' titles, and its author, the app's bot, would
-make it trusted and claimable. One queued before that is held on its next delivery, for good: nothing
-it carries can trust it again.
+the sweep keeps (RECORDS): the inbox and the red issue carry strangers' text, and their author, the
+app's bot, would make them trusted and claimable. One queued before that is held on its next delivery,
+for good: nothing it carries can trust it again.
 """
 
 import dataclasses
@@ -31,7 +31,7 @@ from .model import Kind, Lane, Mode, State
 
 ACTOR = "intake"
 SOURCE = "webhook"
-RECORDS = frozenset({"ashigaru-inbox", "ashigaru-releases", "ashigaru-observe"})
+RECORDS = frozenset({"ashigaru-inbox", "ashigaru-releases", "ashigaru-red", "ashigaru-observe"})
 """The labels of the issues the sweep keeps as records (scripts/common.py), which are never work."""
 
 
