@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [3.4.0] - 2026-11-18
+
 ### Added
 - `ashigaru --version` prints the installed package version and exits 0 (#206).
 - `ashigaru hook statusline` (a328): run from a seat's status line, it posts
