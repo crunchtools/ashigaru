@@ -1,0 +1,26 @@
+{
+  "action": "opened",
+  "issue": {
+    "number": 190,
+    "title": "Desk: take RT tickets as intake",
+    "html_url": "https://github.com/crunchtools/ashigaru/issues/190",
+    "state": "open",
+    "labels": [
+      {
+        "name": "enhancement"
+      },
+      {
+        "name": "lane:dolza-max"
+      }
+    ],
+    "user": {
+      "login": "fatherlinux"
+    }
+  },
+  "repository": {
+    "full_name": "crunchtools/ashigaru"
+  },
+  "sender": {
+    "login": "fatherlinux"
+  }
+}

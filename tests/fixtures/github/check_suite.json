@@ -1,0 +1,12 @@
+{
+  "action": "completed",
+  "check_suite": {
+    "id": 118578147,
+    "head_sha": "acb5820ced9479c074f688cc328bf03f341a511d",
+    "status": "completed",
+    "conclusion": "failure",
+    "updated_at": "2026-11-17T10:05:00Z",
+    "app": {"id": 812345, "slug": "gatehouse", "name": "Gatehouse"}
+  },
+  "repository": {"full_name": "crunchtools/ashigaru"}
+}

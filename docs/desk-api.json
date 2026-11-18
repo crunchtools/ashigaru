@@ -131,6 +131,89 @@
         "title": "BillingLimits",
         "type": "object"
       },
+      "CIResult": {
+        "description": "The normalized CI result for one commit: what `desk_wait` and `ashigaru wait` read.",
+        "properties": {
+          "checks": {
+            "items": {
+              "$ref": "#/components/schemas/Check"
+            },
+            "title": "Checks",
+            "type": "array"
+          },
+          "failing": {
+            "description": "Names of the checks that failed or were cancelled.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Failing",
+            "type": "array"
+          },
+          "repo": {
+            "description": "owner/name, lower case.",
+            "title": "Repo",
+            "type": "string"
+          },
+          "sha": {
+            "title": "Sha",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/CIStatus"
+          }
+        },
+        "required": [
+          "repo",
+          "sha",
+          "status"
+        ],
+        "title": "CIResult",
+        "type": "object"
+      },
+      "CIStatus": {
+        "description": "A commit's CI as a whole: pending while any check is (or none has reported), else failure when\nany check failed or was cancelled, else success.",
+        "enum": [
+          "pending",
+          "success",
+          "failure"
+        ],
+        "title": "CIStatus",
+        "type": "string"
+      },
+      "Check": {
+        "properties": {
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "updated_at": {
+            "description": "When the forge last changed it.",
+            "title": "Updated At",
+            "type": "string"
+          },
+          "url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Url"
+          },
+          "verdict": {
+            "$ref": "#/components/schemas/Verdict"
+          }
+        },
+        "required": [
+          "name",
+          "verdict",
+          "updated_at"
+        ],
+        "title": "Check",
+        "type": "object"
+      },
       "CheckRow": {
         "description": "One row of the /agents check table.",
         "properties": {
@@ -2125,6 +2208,40 @@
         "title": "Verb",
         "type": "string"
       },
+      "Verdict": {
+        "description": "One check's verdict, whatever forge ran it. A forge adapter maps its own conclusions onto these.",
+        "enum": [
+          "pending",
+          "success",
+          "failure",
+          "cancelled",
+          "skipped",
+          "neutral"
+        ],
+        "title": "Verdict",
+        "type": "string"
+      },
+      "WebhookAck": {
+        "description": "The whole answer to a verified delivery; nothing from the delivery is echoed.",
+        "properties": {
+          "duplicate": {
+            "description": "True when the same signed delivery (forge, event and body) was already processed.",
+            "title": "Duplicate",
+            "type": "boolean"
+          },
+          "handled": {
+            "description": "True when an adapter mapped the event to CI or intake.",
+            "title": "Handled",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "duplicate",
+          "handled"
+        ],
+        "title": "WebhookAck",
+        "type": "object"
+      },
       "Wrap": {
         "description": "Wrap-up, orthogonal to state: /cc seat sent, then the seat cleared.",
         "enum": [
@@ -2311,6 +2428,93 @@
         "summary": "Check",
         "tags": [
           "views"
+        ]
+      }
+    },
+    "/v1/ci/wait": {
+      "get": {
+        "description": "desk_wait: the commit's CI result as soon as it is no longer pending, or as it stands when\n`timeout` runs out (status still `pending`; wait again). Nothing polls the forge: a CI webhook\ndelivery for the commit is what ends the wait.",
+        "operationId": "ci_wait_v1_ci_wait_get",
+        "parameters": [
+          {
+            "description": "owner/name",
+            "in": "query",
+            "name": "repo",
+            "required": true,
+            "schema": {
+              "description": "owner/name",
+              "pattern": "^[^/\\s]+/[^/\\s]+$",
+              "title": "Repo",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The full commit id.",
+            "in": "query",
+            "name": "sha",
+            "required": true,
+            "schema": {
+              "description": "The full commit id.",
+              "pattern": "^[0-9a-fA-F]{40}([0-9a-fA-F]{24})?$",
+              "title": "Sha",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Seconds to wait; 0 reads now.",
+            "in": "query",
+            "name": "timeout",
+            "required": false,
+            "schema": {
+              "default": 90,
+              "description": "Seconds to wait; 0 reads now.",
+              "maximum": 90,
+              "minimum": 0,
+              "title": "Timeout",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CIResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Missing, unknown or revoked API key."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Ci Wait",
+        "tags": [
+          "ci"
         ]
       }
     },
@@ -4200,6 +4404,79 @@
         "summary": "Usage",
         "tags": [
           "views"
+        ]
+      }
+    },
+    "/webhook/{forge}": {
+      "post": {
+        "description": "A forge's webhook delivery, authenticated by its signature rather than an API key. CI events\nupdate the commit's result and wake its waiters; issue and PR events upsert queue items.",
+        "operationId": "webhook_webhook__forge__post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "forge",
+            "required": true,
+            "schema": {
+              "title": "Forge",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebhookAck"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Verified, but not a delivery the adapter can read."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "No secret configured for this forge verifies the signature."
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Larger than any delivery the Desk takes."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Webhook",
+        "tags": [
+          "webhooks"
         ]
       }
     }

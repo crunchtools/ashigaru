@@ -6,7 +6,7 @@ import threading
 import time
 from collections.abc import Iterator
 from contextlib import contextmanager
-from http.client import CONFLICT, CREATED, FORBIDDEN, NOT_FOUND, OK
+from http.client import CONFLICT, CREATED, FORBIDDEN, NOT_FOUND, OK, UNPROCESSABLE_ENTITY
 from pathlib import Path
 from typing import Any
 
@@ -80,7 +80,7 @@ def test_initialize_and_list_tools(client: TestClient, urls: dict[str, str]) -> 
     names = {tool["name"] for tool in listed.json()["result"]["tools"]}
     assert names == {
         "usage", "agents", "work", "queue", "outcomes", "assign", "auto", "manual", "wrap",
-        "desk_list", "desk_get", "desk_claim", "desk_update", "desk_report", "desk_file",
+        "desk_list", "desk_get", "desk_claim", "desk_update", "desk_report", "desk_file", "desk_wait",
     }  # fmt: skip
     for tool in listed.json()["result"]["tools"]:
         assert not {"who", "identity", "caller"} & set(tool["inputSchema"].get("properties", {}))
@@ -280,3 +280,22 @@ def test_without_fastmcp_there_is_no_mcp(
         assert [
             row["code_id"] for row in bare.get(f"/v1/identities/{SEAT}/mcp", headers=keys[SEAT]).json()
         ] == [code_id]
+
+
+def test_desk_wait_reads_what_rest_reads(
+    client: TestClient, keys: Keys, urls: dict[str, str], conn: sqlite3.Connection
+) -> None:
+    sha = "a" * 40
+    check = {"repo": "crunchtools/ashigaru", "sha": sha, "key": "workflow:1:push", "name": "CI (push)"}
+    with store.transaction(conn):
+        store.write_check(
+            conn,
+            {**check, "verdict": "failure", "run": "1", "url": None, "source": "github", "updated_at": "t"},
+        )
+    query: dict[str, str | int] = {"repo": "crunchtools/ashigaru", "sha": sha, "timeout": 0}
+    rest = client.get("/v1/ci/wait", headers=keys[SEAT], params=query).json()
+    result = call(client, urls[SEAT], "desk_wait", query)
+    assert not result["isError"] and result["structuredContent"] == rest
+    assert rest["status"] == "failure" and rest["failing"] == ["CI (push)"]
+    refused = call(client, urls[SEAT], "desk_wait", {**query, "sha": sha[:12]})
+    assert mcp_status(refused) == UNPROCESSABLE_ENTITY
