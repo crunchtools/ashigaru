@@ -5,10 +5,34 @@ The item carries every field and state the /agents ledger uses (ashigaru-3.md,
 repo, priority).
 """
 
+import re
 from enum import StrEnum
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, computed_field
+from pydantic import BaseModel, ConfigDict, Field, computed_field, field_validator
+
+REPO = r"([a-z\d](?:[a-z\d]|-(?=[a-z\d])){0,38}/[a-z\d_.-]{1,100})"
+"""GitHub's names: an owner is 1-39 letters, digits or single inner hyphens; a repo adds _ and ."""
+GITHUB_URL = re.compile(rf"^https?://(?:www\.)?github\.com/{REPO}/(?:issues|pull)/(\d+)(?![\w.-])", re.I)
+RT_URL = re.compile(r"^https?://\S+/Ticket/\w+\.html\?(?:\S*&)?id=(\d+)\b", re.I)
+RT_REF = re.compile(r"^RT\s*#?\s*(\d+)$", re.I)
+REPO_REF = re.compile(rf"^{REPO}#(\d+)$", re.I)
+
+
+def subject_key(ref: str | None) -> str | None:
+    """The dedup key a ref names: `owner/repo#N` for a GitHub issue or PR, `RT#N` for a ticket.
+
+    An issue's URL and its `owner/repo#N` key come out the same, so a writer that sends the
+    URL, one that sends the key and the ledger import all dedupe against each other. GitHub
+    names are case-insensitive, so owner/repo is lowercased, a key already in that form
+    included; anything else is not a ref, and is None.
+    """
+    ref = (ref or "").strip()
+    if github := GITHUB_URL.match(ref) or REPO_REF.match(ref):
+        return f"{github[1].lower()}#{github[2]}"
+    if rt := RT_URL.match(ref) or RT_REF.match(ref):
+        return f"RT#{rt[1]}"
+    return None
 
 
 class State(StrEnum):
@@ -151,6 +175,12 @@ class _Fields(BaseModel):
     verified_by: str | None = None
     priority: int | None = None
     wrap: Wrap | None = None
+
+    @field_validator("subject_key")
+    @classmethod
+    def _one_form(cls, value: str | None) -> str | None:
+        """A ref is stored as its key, any other key (`repo:alert`) trimmed, and a blank one as none."""
+        return subject_key(value) or (value or "").strip() or None
 
 
 class ItemCreate(_Fields):

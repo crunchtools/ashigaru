@@ -15,3 +15,11 @@ file = "src/ashigaru/cli/commands.py"
 evidence = "names = [row[\"name\"] for row in desk.get(\"/v1/identities\")] if me[\"role\"] == \"admin\" else [me[\"name\"]]"
 status = "not-a-bug"
 reason = "The Desk lists MCP codes per identity only, and an identity is a seat, Josui, Scott or a CI job, a dozen or so; a bulk route is a server change outside the CLI, and --identity skips the walk."
+
+[[findings]]
+agent = "performance"
+category = "performance"
+file = "src/ashigaru/desk/importer.py"
+evidence = "for key, items in wanting.items():\n    if conn.execute(\"SELECT 1 FROM items WHERE subject_key = ?\", (key,)).fetchone():"
+status = "not-a-bug"
+reason = "Each check is a lookup on the unique items_subject_key index, a few hundred at most, in one transaction on a one-time import; preloading the whole key set would cost more."
