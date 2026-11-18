@@ -24,7 +24,7 @@ jobs:
     name: Publish the release
     permissions:
       contents: read
-    uses: crunchtools/ashigaru/.github/workflows/release-tag.yml@v3
+    uses: crunchtools/ashigaru/.github/workflows/release-tag.yml@v4
     with:
       bot: ${{ inputs.bot }}
     secrets:

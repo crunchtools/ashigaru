@@ -63,9 +63,9 @@ While the topic is there, the triage and code agents still run and every step th
 
 ## Releasing
 
-Callers use the major tag, `@v3`, and each reusable workflow fetches its scripts at the same tag: a called workflow cannot name its own ref, so it is a literal. To release `X.Y.Z`: set `VERSION`, add the CHANGELOG entry, merge, then tag `vX.Y.Z` and publish the GitHub Release. Publishing runs `major-tag.yml`, which moves `v3` to the release when it is the newest of its major, and from that moment every enrolled repository runs it. A late patch to an older minor is published without moving `v3`. Unlike the agents it runs while `ASHIGARU_ENABLED` is `false`, so a release still reaches the callers. No file in any other repository changes. `tests/test_workflows.py` fails if a workflow, the example or this repository's caller names anything but the major tag.
+Callers use the major tag, `@v4`, and each reusable workflow fetches its scripts at the same tag: a called workflow cannot name its own ref, so it is a literal. To release `X.Y.Z`: set `VERSION`, add the CHANGELOG entry, merge, then tag `vX.Y.Z` and publish the GitHub Release. Publishing runs `major-tag.yml`, which moves `v3` to the release when it is the newest of its major, and from that moment every enrolled repository runs it. A late patch to an older minor is published without moving `v3`. Unlike the agents it runs while `ASHIGARU_ENABLED` is `false`, so a release still reaches the callers. No file in any other repository changes. `tests/test_workflows.py` fails if a workflow, the example or this repository's caller names anything but the major tag.
 
-**Rolling back.** Every release keeps its own tag. To undo one, move the major tag back: `git tag -f v3 vX.Y.Z && git push -f origin v3`. A repository that needs to stay on one release can call `@vX.Y.Z`, but the scripts are still fetched at `v3`, so this holds only the workflow files.
+**Rolling back.** Every release keeps its own tag. To undo one, move the major tag back: `git tag -f v4 vX.Y.Z && git push -f origin v3`. A repository that needs to stay on one release can call `@vX.Y.Z`, but the scripts are still fetched at `v3`, so this holds only the workflow files.
 
 **A new major.** A change to the public interface is the next major tag (`v4` after `v3`). Repositories move to it by editing their caller file, on their own schedule.
 
