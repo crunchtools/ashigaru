@@ -233,7 +233,7 @@ LIST_ITEMS = """
 
 CHECK_ACTIVE = """
     SELECT * FROM items
-    WHERE coalesce(wrap, '') != 'cleared' AND state NOT IN ('wontdo', 'abandoned')
+    WHERE coalesce(wrap, '') != 'cleared' AND state NOT IN ('done', 'wontdo', 'abandoned')
     ORDER BY state = 'blocked' DESC, updated_at DESC, id DESC
 """
 
@@ -542,7 +542,8 @@ def steered_by_other(conn: sqlite3.Connection, item_id: str, actor: str) -> bool
 
 
 def check(conn: sqlite3.Connection, show_all: bool = False) -> list[dict[str, Any]]:
-    """The /agents check table: blocked first, then newest. Hides wrapped and dead items by default."""
+    """The check table: blocked first, then newest. Only open items unless `show_all`: a closed item,
+    or a cleared one, is history."""
     rows = conn.execute(CHECK_ALL if show_all else CHECK_ACTIVE)
     return [
         {

@@ -2,12 +2,13 @@
 
 `ashigaru` is a client of the Desk's REST API ([desk-api.md](desk-api.md)).
 Its command set is the one the `/ashigaru` skill and the Desk's MCP tools use:
-the same names, the same arguments (`src/ashigaru/cli/commands.py`). The item
-commands `list`, `get`, `create`, `update`, `report`, `mark` and
-`wait <repo> <sha>` are the MCP tools `desk_list`, `desk_get`, `desk_create`,
-`desk_update`, `desk_report`, `desk_mark` and `desk_wait`. Every decision (what `wrap` checks, what
-`queue` shows) is the Desk's, so a terminal and an MCP client get the same
-answer.
+the same names, the same arguments (`src/ashigaru/cli/commands.py`). Every
+command is the MCP tool `desk_<command>` (`work` is `desk_work`, `list` is
+`desk_list`), with a positional item as `item_id`, `assign --task` and its
+fields as `record`, `create`'s and `update`'s
+flags as `fields` and `list`'s as `filters`; `mcp` and `hook` are the CLI's
+alone. Every decision (what `wrap` checks, what `work` shows) is the Desk's,
+so a terminal and an MCP client get the same answer.
 
 ## Config
 
@@ -32,20 +33,22 @@ Every view and action prints a table, or the Desk's JSON with `--json`.
 |---|---|
 | `usage` | per seat: model, context, session tokens and cost, turn and time in it; spend by billing source today and this month against limits |
 | `agents` | per seat: `free`, `busy-auto` or `busy-manual` (Scott's hold), item, how long, turn, task, last seen. A seat identity that never checked in, or whose seat row has not changed in 24 hours, shows as `missing` |
-| `work [--all]` | the check table: blocked first, then newest; `--all` adds cleared and closed |
+| `work [--all] [--since T] [--advance]` | the whole check round, from `GET /v1/work`: open items blocked first, then newest (`--all` adds closed and cleared); every seat and `N of M up, K items open`; the queue with `waits_on`; and the GitHub catch-up, the issues and PRs the org webhook brought in since the `sweep` mark (or `--since`), as `new` (queued, or `held` for a maintainer) and `reopened` (open again while the item is closed). `--advance` (admin, `POST /v1/work`) then moves the mark to the round's `until` |
 | `queue` | queued items and the state of each item they wait on; `proposed` children and their expiry |
 | `outcomes` | each outcome's stories: done of total, blocked, open |
 | `list [--state S]... [--seat] [--lane] [--kind] [--mode] [--parent] [--subject-key K] [--ref URL] [--[no-]learned] [--[no-]memorized] [--limit N] [--offset N]` | items, newest first; `--state` repeats for any of several; `--learned` means a Learned line other than `none` is recorded |
 | `get <item> \| --subject-key K \| --ref URL` | one item: by id, by `subject_key`, or the most recently updated with that ref |
 | `create --task T [--id] [--subject-key K] [--kind] [--parent] [--done-when] [--ref] [--repo] [--lane] [--mode] [--state] [--after A]... [--priority] [--note] [--filed-by]` | admin: record an item without assigning it, `queued` unless `--state` says otherwise. A taken `subject_key` or id prints the item that holds it and exits 1 |
 | `update <item> [--state] [--result] [--next] [--note] [--learned] [--blocked-reason] [--check-after] [--[no-]memorized] [...] [--clear FIELD]...` | set an item's fields (`create`'s too, admin only); `--clear` sets one to null. A seat sets only its own open item's `state` (working, review, blocked), `result`, `next`, `learned`, `note`, `blocked_reason`, `memorized`, `check_after` |
-| `mark <name> [--set VALUE]` | a named watermark, such as `sweep`, the time the last sweep reached; `--set` (admin) moves it |
+| `mark <name> [--set VALUE]` | a named watermark, such as `sweep`, where `work`'s catch-up starts; `--set` (admin) moves it |
 | `report <item> DONE\|BLOCKED\|WORKING\|CC-DONE [--text T] [--next N] [--learned L]` | the report contract: DONE to review with the text as result, BLOCKED to blocked with it as reason, WORKING to working; CC-DONE marks the learnings memorized; a Learned of `none` records nothing |
 | `assign <item> [--seat S \| --lane L]` | assign; with no seat, the Desk picks the lane's seat free longest. `--task` (with `--subject-key`, `--done-when`, `--ref`, `--repo`, `--after`, `--mode`) records a new item first; if that `subject_key` is taken, or the assign is refused, it prints the item and exits 1, so the id is never lost. Sending the brief stays with Josui |
 | `auto <item>`, `manual <item>` | hand an item to Josui or to Scott |
 | `wait <item> [--timeout S]` | block until the item reaches review or closes; exit 1 unless review or done |
 | `wait <repo> <sha> [--timeout S]` | block until the commit's CI is no longer pending; print its status and checks; exit 1 unless `success` |
 | `wrap <item> [--stage wrapping\|cleared] [--learned T] [--state done\|wontdo\|abandoned] [--force]` | admin. `--stage wrapping` records that `/cc seat` was sent. `cleared` (the default) refuses until CC-DONE (or a `--learned` other than `none`) and an idle turn (a seat that never reported counts as not idle), unless `--force`, then clears the wrap and closes the item, which frees the seat |
+| `claim <item>` | a seat takes a queued, unowned `auto` item in its lane whose `after` items are all done |
+| `file <item> --task T [--done-when D] [--note N]` | a seat files one proposed child of its story, under the story's outcome; one per assignment |
 | `mcp mint <identity> [--label L] [--out FILE]` | admin: a new hosted MCP URL, `https://<host>/mcp/<code>`. The URL is the credential and the Desk shows it once: printed alone, or with `--out` written only to that new file (mode 0600) while stdout names the code id. A Desk without the `mcp` extra (the RPM) refuses with 409 |
 | `mcp list [identity]` | codes by id, identity, label, created, last used, revoked; never the code. No identity: every one's for an admin, else your own |
 | `mcp revoke <id> [--identity NAME]` | revoke a code that `mcp list` shows; its URL stops on the next request |
@@ -74,12 +77,13 @@ mkdir -p ~/.claude/skills && ln -sfn /usr/share/ashigaru/skills/ashigaru ~/.clau
 ```
 
 The link follows every RPM update. The skill's commands are this CLI's, verb
-for verb; `tests/test_skill.py` fails on a mismatch in either direction and
-parses every command line in the skill with the CLI's parser.
+for verb, and so are the MCP tools; `tests/test_skill.py` fails on a mismatch
+in any direction, between tool and command arguments too, and parses every
+command line in the skill with the CLI's parser.
 
 ## Claude Code hooks
 
-`ashigaru hook session-start | prompt-submit | stop` replace the
+`hook`, like `mcp`, has no MCP tool. `ashigaru hook session-start | prompt-submit | stop` replace the
 `seat-state.json` hooks, with their rules: a typed prompt (not a
 `<cross-session-message>` or `<task-notification>`) that is the session's first
 becomes the seat's task; `stop` (also for StopFailure and the `idle_prompt`

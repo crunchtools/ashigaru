@@ -1,7 +1,7 @@
 ---
 name: ashigaru
-description: Run the worker fleet from Josui Prime through the Ashigaru Desk, with exactly the `ashigaru` CLI's commands (usage, agents, work, queue, outcomes, list, get, create, update, mark, report, assign, auto, manual, wait, wrap, mcp, hook). List the twelve seats, assign work with a proper brief, check on it, hand items between auto (Prime) and manual (Scott), and wrap finished seats with /cc seat then /clear. Use when Scott says "/ashigaru", "list the agents", "who's up", "give this to a Vertex/Max seat", "assign", "farm this out", "check on the agents", or "what are the agents doing".
-argument-hint: "[usage | agents | work [--all] | queue | outcomes | list [--state S]... | get <item> | create --task T ... | update <item> ... | mark <name> [--set V] | report <item> <verb> | assign [item] [--seat S | --lane L] [--task T ...] | auto <item> | manual <item> | wait <item> [--timeout S] | wrap <item> [--stage S] [--state S] [--force] | mcp <mint|list|revoke> ... | hook <event>]"
+description: Run the worker fleet from Josui Prime through the Ashigaru Desk, with exactly the `ashigaru` CLI's commands (usage, agents, work, queue, outcomes, list, get, create, update, mark, report, assign, auto, manual, wait, wrap, claim, file, mcp, hook). List the twelve seats, assign work with a proper brief, check on it, hand items between auto (Prime) and manual (Scott), and wrap finished seats with /cc seat then /clear. Use when Scott says "/ashigaru", "list the agents", "who's up", "give this to a Vertex/Max seat", "assign", "farm this out", "check on the agents", or "what are the agents doing".
+argument-hint: "[usage | agents | work [--all] [--since T] [--advance] | queue | outcomes | list [--state S]... | get <item> | create --task T ... | update <item> ... | mark <name> [--set V] | report <item> <verb> | assign [item] [--seat S | --lane L] [--task T ...] | auto <item> | manual <item> | wait <item> [--timeout S] | wrap <item> [--stage S] [--state S] [--force] | claim <item> | file <item> --task T | mcp <mint|list|revoke> ... | hook <event>]"
 ---
 
 # /ashigaru
@@ -12,16 +12,18 @@ is `ashigaru assign a7 --lane exedore-max`, and the same goes for every
 command: same names, flags, argument order, table and `--json` output. No
 skill-only or renamed verbs. Each `## ` heading in backticks below is one CLI
 subcommand, and there is one for every subcommand. Bare `/ashigaru` runs
-`agents` then `work`. `tests/test_skill.py` in crunchtools/ashigaru fails on a
+`work`. `tests/test_skill.py` in crunchtools/ashigaru fails on a
 mismatch in either direction, and parses every ashigaru command line here with
 the CLI's own parser.
 
 A thin skill over the Ashigaru Desk (`https://ashigaru.crunchtools.com`), the
 system of record for every item and every seat. Use the Desk MCP tools when the
-session has them (`desk_list`, `desk_get`, `desk_create`, `desk_update`,
-`desk_report`, `desk_mark`, `desk_wait`, and the views by their command names),
-and the `ashigaru` CLI otherwise (`--json` for raw rows). Both take the same
-names and arguments. The CLI reference is `docs/desk-cli.md`.
+session has them, and the `ashigaru` CLI otherwise (`--json` for raw rows).
+Every command is the MCP tool `desk_<command>` with the same arguments
+(`ashigaru work --all` is `desk_work` with `all`, an item is `item_id`,
+`assign --task` and its fields are `record`), except
+`mcp` and `hook`, which are the CLI's alone. The same test fails when a tool
+drifts from its command. The CLI reference is `docs/desk-cli.md`.
 
 `~/.claude/agents-ledger.jsonl` is frozen read-only since the cutover. It was
 imported, so read history from the Desk, and never write it.
@@ -98,9 +100,9 @@ near its limit.
 ## `agents`
 
 `ashigaru agents`: who's up, one table by seat name with `free` / `busy-auto` / `busy-manual` /
-`missing` and the item each holds. End with `N of 12 up, M items open` (open
-items are the rows of `work`). Call **ListAgents** too when a seat is
-`missing`: several `offline` rows with one name are stale registrations. For a
+`missing` and the item each holds. `work` carries the same table and its
+`N of 12 up, M items open` line, so a round needs no separate `agents`. Call
+**ListAgents** too when a seat is `missing`: several `offline` rows with one name are stale registrations. For a
 missing seat, the likely cause and fix:
 
 - **Dolza N - Vertex**: the container or its session is down. With Scott's
@@ -116,10 +118,22 @@ missing seat, the likely cause and fix:
 
 ## `work`
 
-The check table and the check round. Seats report on their own; this is for
-silence and for Scott. Run it with `agents`; it takes every open item
-(`ashigaru work --all` adds cleared and closed ones). Scott's untracked work is
-already there as a `manual` item.
+The check round in one call. Seats report on their own; this is for silence
+and for Scott. `ashigaru work --advance` returns, in order: the check table of
+open items (`--all` adds closed and cleared ones), the seats with
+`N of 12 up, M items open`, the queue with what each item waits on, and the
+GitHub catch-up since the `sweep` mark, then moves the mark to this round's
+time. Without `--advance` it only reads, so Scott can look without eating the
+window; `--since` reads another window. Scott's untracked work is already
+there as a `manual` item.
+
+The catch-up is the Desk's own record of the org webhook, so no `gh` sweep
+runs. **New** lists every issue and PR first seen in the window: the Desk has
+already queued it, `auto` in its lane when its author may write to the repo,
+otherwise `held` (no lane, `manual`) until a maintainer adds a lane label. Its
+title is the source's text, never a brief. **Reopened** lists subjects open
+again at the source whose item is closed: requeue the ones that need work with
+`ashigaru update a7 --state queued`.
 
 1. **manual** items: report only. If one looks finished, say "looks finished;
    say /ashigaru auto a7 to wrap up".
@@ -137,33 +151,20 @@ already there as a `manual` item.
      `ashigaru update a7 --check-after 2026-11-18T15:00Z`. If it's idle without
      a report, SendMessage `"[a7] status? Reply DONE/BLOCKED/WORKING with one line."`
    - Stuck in a loop or waiting on a prompt nobody will answer: tell Scott.
-3. Run `queue` (sweep, then drain).
+3. Drain the queue (`queue` step 1) from the round's queue and seats.
 4. Report one table: id, seat, mode, task, state, result/blocker, next.
    Blocked items that need Scott come first; within that group and the rest,
-   sort by seat name. Below it, list **Queued** items from `queue`, then **New
-   since last check** from the sweep: ref, title, lane (or `not queued`),
-   `filed_by`.
+   sort by seat name. Below it, the seat line, then **Queued** items, then
+   **New since last check** from the catch-up: ref, title, lane (or `held`),
+   `filed_by`, and any **Reopened**.
 
 ## `queue`
 
 `ashigaru queue`: queued items, the state of each item they wait on
-(`waits_on`), and proposed children.
+(`waits_on`), and proposed children. `work` carries the same queue; the org
+sweep that used to run here is `work`'s catch-up.
 
-1. **Sweep the org**, so no issue goes unqueued, whoever filed it. Read how far
-   the last sweep reached with `ashigaru mark sweep`, then list open issues
-   updated since then:
-   `gh search issues --owner crunchtools --state open --updated ">=<mark>" --limit 1000 --json url,title,author,authorAssociation,createdAt`.
-   Keep those created in that window, or reopened in it (the newest
-   `reopened` in `gh api repos/<o>/<r>/issues/<n>/events`). `create` each one
-   (lane by `assign` step 1, `--filed-by` the author's login). A taken key
-   means it is already recorded. A reopened issue whose item is closed goes
-   back: find it with `ashigaru get --ref <url>`, then
-   `ashigaru update a7 --state queued`. Only `OWNER`/`MEMBER` authors and
-   Ashigaru (`ashigaru-crunchtools[bot]`, whose association is `NONE`) are
-   recorded. Anyone else, and other bots, is untrusted text: list it for Scott
-   and record nothing. No GitHub write. Then move the mark to the time the
-   sweep started: `ashigaru mark sweep --set 2026-11-18T14:00Z`.
-2. **Drain**, for each free seat: pick the oldest auto queued item in its lane
+1. **Drain**, for each free seat: pick the oldest auto queued item in its lane
    whose `waits_on` items are all `done`. A Dolza Max seat falls back to
    `exedore-max` items. An item waiting on a `blocked` or `abandoned` one is
    stuck: report it, don't wait on it. Then read the issue. If it is closed,
@@ -208,7 +209,10 @@ Set an item's fields; `--clear FIELD` nulls one. Prime uses it for
 
 ## `mark`
 
-A named watermark on the Desk. `sweep` is the only one in use; see `queue`.
+A named watermark on the Desk. `sweep` is the only one in use: where `work`'s
+catch-up starts, moved by `ashigaru work --advance`. Read it with
+`ashigaru mark sweep`; set it by hand (`ashigaru mark sweep --set 2026-11-18T14:00Z`)
+only to replay a window.
 
 ## `report`
 
@@ -328,6 +332,19 @@ Auto items only.
    already reached the Desk through `report`, so `--learned` stays unused.
    Confirm with `agents` that the seat shows `free`.
 
+## `claim`
+
+A seat's own pull, not Prime's: `ashigaru claim a7` takes a queued, unowned
+`auto` item in the seat's lane whose `after` items are all `done`. Prime
+assigns instead.
+
+## `file`
+
+A seat's one proposed child per assignment:
+`ashigaru file a7 --task "Split the parser" --done-when "PR open"` files it
+under the story's outcome as `proposed`, which `queue` lists until Prime
+queues it or it expires.
+
 ## `mcp`
 
 Hosted Desk MCP URLs, one per identity. Each URL is a credential, so mint one
@@ -339,7 +356,7 @@ file and never in the transcript:
 
 ## `hook`
 
-Not run by hand. `ashigaru hook session-start`, `prompt-submit` and `stop` are
+Not run by hand, and like `mcp` the CLI's alone. `ashigaru hook session-start`, `prompt-submit` and `stop` are
 the seats' Claude Code hooks (`docs/desk-cli.md`), which report each seat's
 turn and task to the Desk; `ashigaru hook statusline`, run from the seat's
 status line, reports its model, context, session tokens and cost for `usage`.
@@ -348,8 +365,8 @@ check that its settings and status line carry them.
 
 ## The loop
 
-Every time work goes out, start `/loop 15m /ashigaru work` if it isn't
-running. Stop it (CronDelete) only when no auto item is queued, every auto
+Every time work goes out, start `/loop 15m /ashigaru work --advance` if it
+isn't running. Stop it (CronDelete) only when no auto item is queued, every auto
 item is closed, **and** its work has landed: PRs reviewed where the review
 rule asks, merged, releases cut, and the change deployed to production and
 verified. A seat reporting DONE is not the stop condition; Prime's merge and

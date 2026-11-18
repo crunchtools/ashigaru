@@ -221,8 +221,12 @@ def test_usage(desk: FakeDesk, capsys: pytest.CaptureFixture[str]) -> None:
     assert "$300.25" in out and "$50.00" in out
 
 
-def test_work_all(desk: FakeDesk, capsys: pytest.CaptureFixture[str]) -> None:
-    row = {
+def seat_row(name: str, **fields: Any) -> dict[str, Any]:
+    return {"name": name, "status": "free", "turn": "idle", "missing": False} | fields
+
+
+def round_(**fields: Any) -> dict[str, Any]:
+    blocked = {
         "id": "a2",
         "seat": "Max 1",
         "mode": "manual",
@@ -232,12 +236,72 @@ def test_work_all(desk: FakeDesk, capsys: pytest.CaptureFixture[str]) -> None:
         "result_or_blocker": "needs a key",
         "next": None,
     }
-    desk.on("GET", "/v1/check", (200, [row]))
+    caught = {"since": "2026-11-17T06:00:00Z", "until": "2026-11-18T06:00:00Z", "new": [], "reopened": []}
+    return {
+        "items": [blocked],
+        "seats": [seat_row("Max 1"), seat_row("Max 2", missing=True)],
+        "summary": {"up": 1, "seats": 2, "open": 1},
+        "queue": {"queued": [item(id="a3", lane="vertex", waits_on=[])], "proposed": [], "truncated": False},
+        "catch_up": caught | {"advanced": False},
+    } | fields
+
+
+def caught_row(id: str, **fields: Any) -> dict[str, Any]:
+    return {
+        "id": id,
+        "ref": f"https://github.com/crunchtools/x/issues/{id}",
+        "title": f"title of {id}",
+        "lane": "vertex",
+        "held": False,
+        "filed_by": "fatherlinux",
+        "state": "queued",
+    } | fields
+
+
+def test_work_renders_the_whole_round(desk: FakeDesk, capsys: pytest.CaptureFixture[str]) -> None:
+    caught = round_()["catch_up"] | {"new": [caught_row("a8"), caught_row("a9", held=True, lane=None)]}
+    desk.on("GET", "/v1/work", (200, round_(catch_up=caught)))
     assert main(["work"]) == 0
-    assert main(["work", "--all"]) == 0
-    first, second = desk.calls("GET", "/v1/check")
-    assert first.query == {} and second.query == {"all": ["true"]}
-    assert "needs a key" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert "needs a key" in out and "Max 2" in out and "missing" in out
+    assert "1 of 2 up, 1 items open" in out
+    assert "a3" in out and "vertex" in out
+    assert "NEW" in out and "title of a8" in out and "fatherlinux" in out
+    assert "held" in out and "since 2026-11-17T06:00:00Z" in out
+    assert "REOPENED" not in out
+
+
+def test_work_shows_what_reopened(desk: FakeDesk, capsys: pytest.CaptureFixture[str]) -> None:
+    caught = round_()["catch_up"] | {"reopened": [caught_row("a7", state="done")]}
+    desk.on("GET", "/v1/work", (200, round_(catch_up=caught)))
+    assert main(["work"]) == 0
+    out = capsys.readouterr().out
+    assert "REOPENED" in out and "title of a7" in out
+
+
+def test_work_all_and_since_are_sent(desk: FakeDesk) -> None:
+    desk.on("GET", "/v1/work", (200, round_()))
+    assert main(["work"]) == 0
+    assert main(["work", "--all", "--since", "2026-11-01T00:00:00Z"]) == 0
+    first, second = desk.calls("GET", "/v1/work")
+    assert first.query == {}
+    assert second.query == {"all": ["true"], "since": ["2026-11-01T00:00:00Z"]}
+
+
+def test_work_advance_posts(desk: FakeDesk, capsys: pytest.CaptureFixture[str]) -> None:
+    moved = round_()
+    moved["catch_up"] = moved["catch_up"] | {"advanced": True}
+    desk.on("POST", "/v1/work", (200, moved))
+    assert main(["work", "--advance", "--since", "2026-11-01T00:00:00Z"]) == 0
+    assert [s.method for s in desk.seen] == ["POST"]
+    assert desk.seen[0].query == {"since": ["2026-11-01T00:00:00Z"]}
+    assert "sweep mark moved" in capsys.readouterr().out
+
+
+def test_work_json_prints_the_whole_round(desk: FakeDesk, capsys: pytest.CaptureFixture[str]) -> None:
+    desk.on("GET", "/v1/work", (200, round_()))
+    assert main(["work", "--json"]) == 0
+    assert json.loads(capsys.readouterr().out) == round_()
 
 
 def test_queue_shows_what_each_item_waits_on(desk: FakeDesk, capsys: pytest.CaptureFixture[str]) -> None:
@@ -292,6 +356,34 @@ def test_assign_needs_an_item(desk: FakeDesk, capsys: pytest.CaptureFixture[str]
     assert main(["assign"]) == 1
     assert "name an item" in capsys.readouterr().err
     assert desk.seen == []
+
+
+def test_claim_posts_an_empty_body(desk: FakeDesk, capsys: pytest.CaptureFixture[str]) -> None:
+    desk.on("POST", "/v1/items/a1/claim", (200, item(seat="Max 1", state="assigned")))
+    assert main(["claim", "a1"]) == 0
+    assert desk.seen[0].body == {}
+    assert "Max 1" in capsys.readouterr().out
+
+
+def test_claim_refused_exits_1(desk: FakeDesk, capsys: pytest.CaptureFixture[str]) -> None:
+    desk.on("POST", "/v1/items/a1/claim", (409, {"detail": "a1 is not queued"}))
+    assert main(["claim", "a1"]) == 1
+    assert "not queued" in capsys.readouterr().err
+
+
+def test_file_sends_the_fields_given(desk: FakeDesk) -> None:
+    desk.on("POST", "/v1/items/a1/file", (201, item(id="a9", state="proposed")))
+    assert main(["file", "a1", "--task", "split it", "--done-when", "tests pass", "--note", "n"]) == 0
+    assert main(["file", "a1", "--task", "bare"]) == 0
+    full, bare = desk.seen
+    assert full.body == {"task": "split it", "done_when": "tests pass", "note": "n"}
+    assert bare.body == {"task": "bare"}
+
+
+def test_file_needs_a_task(desk: FakeDesk) -> None:
+    with pytest.raises(SystemExit) as stop:
+        main(["file", "a1"])
+    assert stop.value.code == USAGE_ERROR
 
 
 @pytest.mark.parametrize("mode", ["auto", "manual"])

@@ -47,9 +47,18 @@ def agents(desk: Desk) -> list[dict[str, Any]]:
     return result
 
 
-def work(desk: Desk, all: bool = False) -> list[dict[str, Any]]:
-    """The /agents check table, blocked first then newest; `all` adds cleared and closed items."""
-    result: list[dict[str, Any]] = desk.get("/v1/check", all="true" if all else None)
+def work(desk: Desk, since: str | None = None, **flags: bool) -> dict[str, Any]:
+    """The whole check round: open items blocked first then newest, the seats with how many are up
+    and how many items are open, the queue, and the forge catch-up from `since` (default the sweep
+    mark). `flags` are `all`, which adds closed and cleared items, and `advance` (admin), which then
+    moves the mark to the round's `until`. The MCP tool is desk_work."""
+    query = {"since": since} if since else {}
+    if flags.get("all"):
+        query["all"] = "true"
+    if flags.get("advance"):
+        moved: dict[str, Any] = desk.request("POST", "/v1/work", params=query, body={})
+        return moved
+    result: dict[str, Any] = desk.get("/v1/work", **query)
     return result
 
 
@@ -221,6 +230,25 @@ def wrap(desk: Desk, item: str, **options: str | bool | None) -> dict[str, Any]:
     return result
 
 
+def claim(desk: Desk, item: str) -> dict[str, Any]:
+    """A seat takes a queued auto item in its lane whose after items are done. The MCP tool is
+    desk_claim."""
+    result: dict[str, Any] = desk.post(f"{_item(item)}/claim", {})
+    return result
+
+
+def file(
+    desk: Desk, item: str, task: str, done_when: str | None = None, note: str | None = None
+) -> dict[str, Any]:
+    """File one proposed child of this story, under its outcome; one per assignment. The MCP tool is
+    desk_file."""
+    body = {"task": task, "done_when": done_when, "note": note}
+    result: dict[str, Any] = desk.post(
+        f"{_item(item)}/file", {k: v for k, v in body.items() if v is not None}
+    )
+    return result
+
+
 # Hosted MCP URLs. The CLI's alone: no MCP tool mints a credential.
 
 
@@ -286,7 +314,7 @@ COMMANDS: dict[str, Callable[..., Any]] = {
     command.__name__: command
     for command in (
         *(usage, agents, work, queue, outcomes, get, mark),
-        *(create, update, report, assign, auto, manual, wait, wrap),
+        *(create, update, report, assign, auto, manual, wait, wrap, claim, file),
         *(mcp_mint, mcp_list, mcp_revoke),
     )
 } | {"list": items}

@@ -44,6 +44,7 @@ from .model import (
     Queue,
     Report,
     Role,
+    Round,
     Seat,
     SeatPatch,
     State,
@@ -158,6 +159,7 @@ ERRORS = {
         "A taken id or subject_key (the detail names the item holding it), an existing identity, a"
         " second child in one assignment, or an item or seat not in a state to assign, claim or wrap."
     ),
+    422: "A query or body the Desk cannot read, such as a time that is not one.",
 }
 
 
@@ -248,9 +250,44 @@ def item_events(
 
 @router.get("/v1/check", tags=["views"], responses=errors(401))
 def check(conn: Conn, who: Who, show_all: Annotated[bool, Query(alias="all")] = False) -> list[CheckRow]:
-    """The /agents check table: blocked first, then newest. `all` includes wrapped and dead items."""
+    """The check table alone, as `items` in /v1/work: open items, blocked first, then newest. `all`
+    includes closed and cleared items."""
     store.expire_proposed(conn)
     return [CheckRow.model_validate(row) for row in store.check(conn, show_all)]
+
+
+Since = Annotated[
+    str | None, Query(description="Start of the catch-up window, a time; default the sweep mark.")
+]
+
+
+def _round(conn: sqlite3.Connection, show_all: bool, since: str | None) -> Round:
+    try:
+        return Round.model_validate(dispatch.work(conn, show_all, since))
+    except ValueError as error:
+        what = "since" if since is not None else "the sweep mark"
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, f"{what} is not a time: {error}") from error
+
+
+@router.get("/v1/work", tags=["views"], responses=errors(401, 422))
+def work(
+    conn: Conn, who: Who, show_all: Annotated[bool, Query(alias="all")] = False, since: Since = None
+) -> Round:
+    """`ashigaru work`, the whole check round in one read: the check table (open items unless `all`),
+    the seats with how many are up and how many items are open, the queue, and the forge catch-up
+    from the org webhook's intake since the sweep mark."""
+    return _round(conn, show_all, since)
+
+
+@router.post("/v1/work", tags=["views"], responses=errors(401, 403, 422))
+def advance(
+    conn: Conn, who: Admin, show_all: Annotated[bool, Query(alias="all")] = False, since: Since = None
+) -> Round:
+    """`ashigaru work --advance`, admin: the same round, then the sweep mark moves to its `until`, so
+    the next round's catch-up starts where this one stopped."""
+    found = _round(conn, show_all, since)
+    store.set_mark(conn, dispatch.SWEEP, found.catch_up.until, who.name)
+    return found.model_copy(update={"catch_up": found.catch_up.model_copy(update={"advanced": True})})
 
 
 @router.get("/v1/queue", tags=["views"], responses=errors(401))

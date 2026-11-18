@@ -15,6 +15,26 @@ All notable changes to this project are documented here. The format follows
   `POST /v1/seats/{name}/usage`, so `ashigaru usage` and its billing table show
   real numbers. Billing follows the seat's lane. At most one post per 30
   seconds per session, state on tmpfs, never any output.
+- `ashigaru work` runs the whole check round in one call (a335): `GET /v1/work`
+  returns the open items, every seat with `N of M up, K items open`, the queue
+  with `waits_on`, and a GitHub catch-up from the org webhook's intake since
+  the `sweep` mark (`new`, queued or held, and `reopened`), so Prime runs no
+  `gh` sweep. `--since` reads another window; `--advance` (admin,
+  `POST /v1/work`) moves the mark to the round's time.
+- `ashigaru claim` and `ashigaru file`, the CLI side of the seats' MCP tools.
+- `tests/test_skill.py` fails when an MCP tool drifts from its CLI command, in
+  name or arguments, or a doc names a tool that does not exist.
+
+### Changed
+- Every hosted MCP tool is `desk_<command>` for its `ashigaru` command, with
+  the command's arguments: `usage`, `agents`, `work`, `queue`, `outcomes`,
+  `assign`, `auto`, `manual` and `wrap` are now `desk_usage` ... `desk_wrap`;
+  `desk_work` returns the round; `desk_get` takes `subject_key` or `ref`;
+  `desk_assign` takes a `record` (`assign --task` and its fields) to record the item first;
+  `desk_wait` takes an `item_id` as well as a `repo` and `sha`, and returns
+  `{"result": ...}`. The old names are gone.
+- `ashigaru work` and `GET /v1/check` list only open items: `done` rows that
+  were never wrapped (old imports) no longer show without `--all`.
 
 ### Fixed
 - A narrow `single_use_helpers` exception for `CIWaiter._ask`, `_poll`'s twin.

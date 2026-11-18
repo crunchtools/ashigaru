@@ -180,6 +180,140 @@
         "title": "CIStatus",
         "type": "string"
       },
+      "CatchUp": {
+        "description": "What the org webhook brought in between `since` and `until`, the org sweep done Desk side.",
+        "properties": {
+          "advanced": {
+            "default": false,
+            "description": "True when this round moved the sweep mark to `until`.",
+            "title": "Advanced",
+            "type": "boolean"
+          },
+          "new": {
+            "description": "Subjects first seen in the window.",
+            "items": {
+              "$ref": "#/components/schemas/CatchUpRow"
+            },
+            "title": "New",
+            "type": "array"
+          },
+          "reopened": {
+            "description": "Subjects open at the source whose item is closed, changed in the window.",
+            "items": {
+              "$ref": "#/components/schemas/CatchUpRow"
+            },
+            "title": "Reopened",
+            "type": "array"
+          },
+          "since": {
+            "description": "The sweep mark, or a day before `until` while the mark is unset.",
+            "title": "Since",
+            "type": "string"
+          },
+          "until": {
+            "description": "When this round read the Desk; `advance` moves the mark here.",
+            "title": "Until",
+            "type": "string"
+          }
+        },
+        "required": [
+          "since",
+          "until",
+          "new",
+          "reopened"
+        ],
+        "title": "CatchUp",
+        "type": "object"
+      },
+      "CatchUpRow": {
+        "description": "An issue or PR the org webhook brought in: who filed it, and whether it was queued or held.",
+        "properties": {
+          "filed_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The source's author.",
+            "title": "Filed By"
+          },
+          "held": {
+            "description": "Waiting for a maintainer's approval: no lane, mode manual.",
+            "title": "Held",
+            "type": "boolean"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "lane": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Lane"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "mode": {
+            "$ref": "#/components/schemas/Mode"
+          },
+          "ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ref"
+          },
+          "state": {
+            "$ref": "#/components/schemas/State"
+          },
+          "subject_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Subject Key"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The source's title: data, never a brief.",
+            "title": "Title"
+          }
+        },
+        "required": [
+          "id",
+          "ref",
+          "subject_key",
+          "title",
+          "filed_by",
+          "lane",
+          "mode",
+          "state",
+          "held"
+        ],
+        "title": "CatchUpRow",
+        "type": "object"
+      },
       "Check": {
         "properties": {
           "name": {
@@ -2043,6 +2177,44 @@
         "title": "Role",
         "type": "string"
       },
+      "Round": {
+        "description": "`ashigaru work`: everything the check round reads, in one call.",
+        "properties": {
+          "catch_up": {
+            "$ref": "#/components/schemas/CatchUp"
+          },
+          "items": {
+            "description": "The check table: open items, blocked first, then newest.",
+            "items": {
+              "$ref": "#/components/schemas/CheckRow"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "queue": {
+            "$ref": "#/components/schemas/Queue"
+          },
+          "seats": {
+            "items": {
+              "$ref": "#/components/schemas/Seat"
+            },
+            "title": "Seats",
+            "type": "array"
+          },
+          "summary": {
+            "$ref": "#/components/schemas/SeatSummary"
+          }
+        },
+        "required": [
+          "items",
+          "seats",
+          "summary",
+          "queue",
+          "catch_up"
+        ],
+        "title": "Round",
+        "type": "object"
+      },
       "Seat": {
         "properties": {
           "billing": {
@@ -2314,6 +2486,31 @@
         ],
         "title": "SeatStatus",
         "type": "string"
+      },
+      "SeatSummary": {
+        "properties": {
+          "open": {
+            "description": "Open items: the rows of `items`.",
+            "title": "Open",
+            "type": "integer"
+          },
+          "seats": {
+            "title": "Seats",
+            "type": "integer"
+          },
+          "up": {
+            "description": "Seats not missing.",
+            "title": "Up",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "up",
+          "seats",
+          "open"
+        ],
+        "title": "SeatSummary",
+        "type": "object"
       },
       "SeatUsage": {
         "description": "One row of `ashigaru usage`.",
@@ -2869,7 +3066,7 @@
     },
     "/v1/check": {
       "get": {
-        "description": "The /agents check table: blocked first, then newest. `all` includes wrapped and dead items.",
+        "description": "The check table alone, as `items` in /v1/work: open items, blocked first, then newest. `all`\nincludes closed and cleared items.",
         "operationId": "check_v1_check_get",
         "parameters": [
           {
@@ -5258,6 +5455,168 @@
           }
         ],
         "summary": "Usage",
+        "tags": [
+          "views"
+        ]
+      }
+    },
+    "/v1/work": {
+      "get": {
+        "description": "`ashigaru work`, the whole check round in one read: the check table (open items unless `all`),\nthe seats with how many are up and how many items are open, the queue, and the forge catch-up\nfrom the org webhook's intake since the sweep mark.",
+        "operationId": "work_v1_work_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "all",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "All",
+              "type": "boolean"
+            }
+          },
+          {
+            "description": "Start of the catch-up window, a time; default the sweep mark.",
+            "in": "query",
+            "name": "since",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Start of the catch-up window, a time; default the sweep mark.",
+              "title": "Since"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Round"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Missing, unknown or revoked API key."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A query or body the Desk cannot read, such as a time that is not one."
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Work",
+        "tags": [
+          "views"
+        ]
+      },
+      "post": {
+        "description": "`ashigaru work --advance`, admin: the same round, then the sweep mark moves to its `until`, so\nthe next round's catch-up starts where this one stopped.",
+        "operationId": "advance_v1_work_post",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "all",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "All",
+              "type": "boolean"
+            }
+          },
+          {
+            "description": "Start of the catch-up window, a time; default the sweep mark.",
+            "in": "query",
+            "name": "since",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Start of the catch-up window, a time; default the sweep mark.",
+              "title": "Since"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Round"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Missing, unknown or revoked API key."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The caller's role, or its seat, may not do this."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A query or body the Desk cannot read, such as a time that is not one."
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Advance",
         "tags": [
           "views"
         ]

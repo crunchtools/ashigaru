@@ -1,5 +1,5 @@
-"""Dispatch on top of the store: assign, claim and wrap, usage and spend, the queue, seats and
-outcomes views.
+"""Dispatch on top of the store: assign, claim and wrap, usage and spend, the queue, seats, outcomes
+and work views.
 
 Assign and claim run in one BEGIN IMMEDIATE transaction each, so two callers
 racing for one item or one seat get one winner and one Conflict.
@@ -7,7 +7,7 @@ racing for one item or one seat get one winner and one Conflict.
 
 import json
 import sqlite3
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from . import store
@@ -38,6 +38,20 @@ OUTCOMES = """
 """
 
 QUEUE_LIMIT = 1000
+
+INTAKE = """
+    SELECT * FROM items
+    WHERE json_extract(extra, '$.source') IS NOT NULL AND json_extract(extra, '$.trusted') IS NOT NULL
+"""
+"""Items the org webhook created: intake records the source and whether it trusts the author."""
+NEW_INTAKE = INTAKE + " AND created_at >= :since AND created_at < :until ORDER BY created_at, id"
+REOPENED = (
+    INTAKE
+    + """ AND json_extract(extra, '$.source_state') = 'open' AND state IN ('done', 'wontdo', 'abandoned')
+    AND updated_at >= :since AND updated_at < :until ORDER BY updated_at, id"""
+)
+SWEEP = "sweep"
+CATCH_UP_DEFAULT = timedelta(days=1)
 """Items per list in the queue view, GET /v1/items's own cap; a longer queue is paged there."""
 
 UNSEEN_SEATS = """
@@ -277,3 +291,60 @@ def seat(conn: sqlite3.Connection, name: str) -> dict[str, Any] | None:
     found = store.get_seat(conn, name)
     stale = (datetime.now(UTC) - STALE_SEAT).strftime("%Y-%m-%dT%H:%M:%SZ")
     return {**found, "missing": found["updated_at"] < stale} if found else None
+
+
+def stamp(when: datetime) -> str:
+    return when.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def instant(value: str) -> str:
+    """A time as the Desk stores it, so it compares as text, from one without seconds (`T14:00Z`) or
+    with an offset. Raises ValueError for anything that is not a time."""
+    parsed = datetime.fromisoformat(value)
+    return stamp(parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC))
+
+
+def _caught(item: dict[str, Any]) -> dict[str, Any]:
+    extra = item["extra"]
+    return {
+        **{key: item[key] for key in ("id", "ref", "subject_key", "lane", "mode", "state")},
+        "title": extra.get("title"),
+        "filed_by": extra.get("author"),
+        "held": extra.get("trusted") is False,
+    }
+
+
+def catch_up(conn: sqlite3.Connection, since: str | None, until: str) -> dict[str, Any]:
+    """The org sweep from the Desk's own data: intake subjects first seen between `since` (default
+    the sweep mark, else a day back) and `until`, and those reopened at the source while their item
+    is closed. A sweep mark that is not a time raises ValueError."""
+    if since is None:
+        mark = store.get_mark(conn, SWEEP)
+        back = stamp(datetime.strptime(until, "%Y-%m-%dT%H:%M:%SZ") - CATCH_UP_DEFAULT)
+        since = mark["value"] if mark else back
+    window = {"since": instant(since), "until": until}
+    found = {
+        name: [_caught(store.decode(row)) for row in conn.execute(query, window)]
+        for name, query in (("new", NEW_INTAKE), ("reopened", REOPENED))
+    }
+    return {**window, **found}
+
+
+def work(conn: sqlite3.Connection, show_all: bool = False, since: str | None = None) -> dict[str, Any]:
+    """`ashigaru work`, the whole check round: the check table, the seats with how many are up and how
+    many items are open, the queue, and the catch-up."""
+    until = stamp(datetime.now(UTC))
+    items = store.check(conn, show_all)
+    roster = seats(conn)
+    open_items = items if not show_all else store.check(conn)
+    return {
+        "items": items,
+        "seats": roster,
+        "summary": {
+            "up": sum(not seat["missing"] for seat in roster),
+            "seats": len(roster),
+            "open": len(open_items),
+        },
+        "queue": queue(conn),
+        "catch_up": catch_up(conn, since, until),
+    }
