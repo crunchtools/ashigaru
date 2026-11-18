@@ -50,6 +50,11 @@ This package adds the service, ashigaru-desk, and its web stack.
 for bin in %{buildroot}%{_bindir}/*; do
     [ "${bin##*/}" = ashigaru-desk ] || echo "%{_bindir}/${bin##*/}" >> %{pyproject_files}
 done
+# The /ashigaru Claude Code skill ships with the CLI it drives, so the two never
+# disagree (tests/test_skill.py). It lands in /usr/share, not a home directory,
+# so one install serves every user; each links it into ~/.claude/skills, the way
+# seats already link josui-skills. See docs/desk-cli.md.
+install -Dpm 0644 skills/ashigaru/SKILL.md %{buildroot}%{_datadir}/ashigaru/skills/ashigaru/SKILL.md
 
 %check
 # The hosted MCP needs fastmcp, the `mcp` extra, which the RPMs leave out.
@@ -58,6 +63,7 @@ done
 %files -f %{pyproject_files}
 %license LICENSE
 %doc README.md
+%{_datadir}/ashigaru/
 
 %files desk
 %{_bindir}/ashigaru-desk

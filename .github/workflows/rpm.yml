@@ -28,6 +28,7 @@ on:
       - uv.lock
       - VERSION
       - src/**
+      - skills/**
       - .github/workflows/rpm.yml
   workflow_dispatch:
     inputs:

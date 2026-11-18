@@ -63,6 +63,20 @@ that does not serve the route yet answers 404, and `wait` says so.
 URL and `owner/repo#N` in any case are `owner/repo#N` in lowercase, an RT URL or
 `RT #N` is `RT#N`.
 
+## The /ashigaru skill
+
+The `ashigaru` RPM installs the Claude Code skill that drives this CLI at
+`/usr/share/ashigaru/skills/ashigaru/SKILL.md`. Claude Code loads personal
+skills from `~/.claude/skills`, so link it there once per user:
+
+```sh
+mkdir -p ~/.claude/skills && ln -sfn /usr/share/ashigaru/skills/ashigaru ~/.claude/skills/ashigaru
+```
+
+The link follows every RPM update. The skill's commands are this CLI's, verb
+for verb; `tests/test_skill.py` fails on a mismatch in either direction and
+parses every command line in the skill with the CLI's parser.
+
 ## Claude Code hooks
 
 `ashigaru hook session-start | prompt-submit | stop` replace the

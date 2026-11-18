@@ -6,6 +6,10 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- The `/ashigaru` Claude Code skill (a261) moves here from josui-skills, rewritten for the 3.1.0 CLI: the stopgaps for its old gaps are now `create`, `update`, `report`, `get`, `list` and `mark` calls, and it has a section for every CLI command, `hook` included. The `ashigaru` RPM installs it at `/usr/share/ashigaru/skills/ashigaru/SKILL.md`, and a user links that directory into `~/.claude/skills` (`docs/desk-cli.md`); `packaging/smoke.sh` checks it is installed. `tests/test_skill.py` fails if the skill's commands (headings, argument-hint, description, mcp actions) differ from the CLI's in either direction, or if any command line in the skill does not parse.
+
 ## [3.1.0] - 2026-11-18
 
 ### Added

@@ -47,6 +47,14 @@ def test_the_cli_package_does_not_carry_the_service() -> None:
     assert "%pyproject_extras_subpkg -n %{name} desk" in SPEC
 
 
+def test_the_cli_package_ships_the_skill_and_smoke_checks_it() -> None:
+    skill = "%{_datadir}/ashigaru/skills/ashigaru/SKILL.md"
+    assert f"install -Dpm 0644 skills/ashigaru/SKILL.md %{{buildroot}}{skill}" in SPEC
+    assert "%doc README.md\n%{_datadir}/ashigaru/\n" in SPEC
+    assert "skills/**" in WORKFLOW[True]["pull_request"]["paths"]
+    assert "/usr/share/ashigaru/skills/ashigaru/SKILL.md" in (ROOT / "packaging" / "smoke.sh").read_text()
+
+
 def test_the_build_refuses_a_tag_that_does_not_name_version(tmp_path: Path) -> None:
     result = subprocess.run(
         [ROOT / "packaging" / "build.sh", "unused-image", tmp_path / "out", "v0.0.0-not-this"],

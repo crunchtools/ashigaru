@@ -1,6 +1,6 @@
 #!/bin/bash
 # Install the built RPMs in a fresh container and run every console script
-# they ship with --help.
+# they ship with --help, and check the /ashigaru skill is installed.
 #   packaging/smoke.sh <image> <rpmdir> [require-cli]
 # With require-cli (a release), the `ashigaru` command must be among them.
 set -euo pipefail
@@ -22,6 +22,10 @@ podman run --rm -v "$rpms:/rpms:ro,Z" -e REQUIRE="$require" "$image" bash -euo p
         echo "no /usr/bin/ashigaru in the package" >&2
         exit 1
     fi
+    skill=/usr/share/ashigaru/skills/ashigaru/SKILL.md
+    rpm -ql ashigaru | grep -qx "$skill" || { echo "no $skill in the package" >&2; exit 1; }
+    head -2 "$skill" | grep -qx "name: ashigaru"
+    echo "installed: $skill"
     for command in $commands; do
         "$command" --help > /dev/null
         echo "ok: $command --help"
