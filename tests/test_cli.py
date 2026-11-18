@@ -516,6 +516,24 @@ def test_wait_on_a_commit_rides_out_no_answer() -> None:
     assert clock.slept == [5.0]
 
 
+def test_wait_on_a_commit_pauses_no_longer_than_its_deadline(desk: FakeDesk) -> None:
+    desk.on("GET", "/v1/ci/wait", (503, {"detail": "busy"}))
+    clock = Clock()
+    waiter = CIWaiter(Desk(config.load()), pause=5.0, sleep=clock.sleep, clock=lambda: clock.now)
+    with pytest.raises(TimeoutError):
+        waiter.wait("crunchtools/ashigaru", SHA, 3)
+    assert clock.slept == [3.0] and len(desk.calls("GET", "/v1/ci/wait")) == 1
+
+
+def test_wait_on_a_commit_stops_on_a_refusal(desk: FakeDesk) -> None:
+    desk.on("GET", "/v1/ci/wait", (422, {"detail": "sha must be the full commit id"}))
+    clock = Clock()
+    waiter = CIWaiter(Desk(config.load()), sleep=clock.sleep, clock=lambda: clock.now)
+    with pytest.raises(DeskError, match="422"):
+        waiter.wait("crunchtools/ashigaru", "abc", None)
+    assert clock.slept == [] and len(desk.calls("GET", "/v1/ci/wait")) == 1
+
+
 def test_wait_on_a_commit_gives_up_at_its_timeout(desk: FakeDesk) -> None:
     clock = Clock()
 

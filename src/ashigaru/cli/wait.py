@@ -107,10 +107,11 @@ class CIWaiter:
             result = self._ask(repo, sha, left)
             if result is not None and result["status"] != CI_PENDING:
                 return result
+            if result is None:
+                # A blip: pause, but never past the deadline.
+                self.sleep(self.pause if end is None else max(0.0, min(self.pause, end - self.clock())))
             if end is not None and end - self.clock() < 1:
                 raise TimeoutError(f"{repo}@{sha[:12]} CI is still pending after {timeout:g}s")
-            if result is None:
-                self.sleep(self.pause)
 
 
 def waiter_for(desk: "Desk") -> Waiter:
