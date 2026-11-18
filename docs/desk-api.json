@@ -5372,7 +5372,7 @@
     },
     "/v1/seats/{name}/usage": {
       "post": {
-        "description": "From the seat's hooks and status line: model, billing source, context, session tokens, and the\nsession's running cost, of which the increase since the last report is booked to today's spend.",
+        "description": "From the seat's hooks and status line: model, billing source, context, session tokens, and the\nsession's running cost, of which the increase since the last report is booked to today's spend.\nA seat's lane decides its billing over the report's, so a seat key cannot pick what it bills.",
         "operationId": "report_usage_v1_seats__name__usage_post",
         "parameters": [
           {

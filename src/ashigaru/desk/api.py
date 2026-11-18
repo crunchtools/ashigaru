@@ -326,9 +326,11 @@ def patch_seat(conn: Conn, who: Who, name: str, body: SeatPatch) -> Seat:
 @router.post("/v1/seats/{name}/usage", tags=["seats"], responses=errors(401, 403))
 def report_usage(conn: Conn, who: Who, name: str, body: UsageReport) -> Seat:
     """From the seat's hooks and status line: model, billing source, context, session tokens, and the
-    session's running cost, of which the increase since the last report is booked to today's spend."""
+    session's running cost, of which the increase since the last report is booked to today's spend.
+    A seat's lane decides its billing over the report's, so a seat key cannot pick what it bills."""
     own_seat(who, name)
-    return Seat.model_validate(dispatch.report_usage(conn, name, body.model_dump()))
+    lane_first = who.role == Role.SEAT
+    return Seat.model_validate(dispatch.report_usage(conn, name, body.model_dump(), lane_first))
 
 
 @router.get("/v1/usage", tags=["views"], responses=errors(401))

@@ -179,6 +179,12 @@ MIGRATIONS: tuple[str, ...] = (
         updated_by TEXT NOT NULL
     );
     """,
+    # How much of the session's running cost is already in spend: a row with billing booked all of
+    # it, a row without booked none, and that backlog is booked once billing is known.
+    """
+    ALTER TABLE seats ADD COLUMN session_booked_usd REAL NOT NULL DEFAULT 0;
+    UPDATE seats SET session_booked_usd = session_cost_usd WHERE billing IS NOT NULL;
+    """,
 )
 
 ITEM_DEFAULTS: dict[str, Any] = {
@@ -240,10 +246,11 @@ COUNT_OPEN = f"SELECT count(*) FROM items WHERE {OPEN}"
 UPSERT_SEAT = """
     INSERT INTO seats (
         name, lane, status, owner, turn, task, item, since, updated_at, model, billing, context_used,
-        context_window, session_id, session_tokens, session_cost_usd, turn_started_at
+        context_window, session_id, session_tokens, session_cost_usd, session_booked_usd, turn_started_at
     ) VALUES (
         :name, :lane, :status, :owner, :turn, :task, :item, :since, :updated_at, :model, :billing,
-        :context_used, :context_window, :session_id, :session_tokens, :session_cost_usd, :turn_started_at
+        :context_used, :context_window, :session_id, :session_tokens, :session_cost_usd, :session_booked_usd,
+        :turn_started_at
     )
     ON CONFLICT (name) DO UPDATE SET
         lane = excluded.lane, status = excluded.status, owner = excluded.owner, turn = excluded.turn,
@@ -251,13 +258,13 @@ UPSERT_SEAT = """
         model = excluded.model, billing = excluded.billing, context_used = excluded.context_used,
         context_window = excluded.context_window, session_id = excluded.session_id,
         session_tokens = excluded.session_tokens, session_cost_usd = excluded.session_cost_usd,
-        turn_started_at = excluded.turn_started_at
+        session_booked_usd = excluded.session_booked_usd, turn_started_at = excluded.turn_started_at
 """
 
 SEAT_DEFAULTS: dict[str, Any] = {
     "lane": None, "status": "free", "owner": None, "turn": "idle", "task": None, "item": None,
     "model": None, "billing": None, "context_used": None, "context_window": None, "session_id": None,
-    "session_tokens": None, "session_cost_usd": 0.0, "turn_started_at": None,
+    "session_tokens": None, "session_cost_usd": 0.0, "session_booked_usd": 0.0, "turn_started_at": None,
 }  # fmt: skip
 
 RELEASE_SEAT = """

@@ -2,6 +2,7 @@
 
 import sqlite3
 from http.client import CONFLICT, FORBIDDEN, NOT_FOUND, OK, UNPROCESSABLE_ENTITY
+from pathlib import Path
 
 import pytest
 from conftest import Keys
@@ -149,6 +150,77 @@ def test_usage_books_session_cost_deltas_against_spend_and_limits(
     [spend] = view["spend"]
     assert spend["billing"] == "max" and spend["today_usd"] == pytest.approx(2.25)
     assert spend["month_usd"] == pytest.approx(2.25) and spend["monthly_limit_usd"] == MONTHLY_LIMIT
+
+
+def spent(conn: sqlite3.Connection) -> dict[str, float]:
+    return {row["billing"]: row["cost_usd"] for row in conn.execute("SELECT * FROM spend")}
+
+
+def test_usage_books_the_backlog_once_billing_is_known(conn: sqlite3.Connection) -> None:
+    dispatch.report_usage(conn, MINE, {"session_id": "s1", "cost_usd": 1.0})
+    dispatch.report_usage(conn, MINE, {"session_id": "s1", "cost_usd": 1.5})
+    assert spent(conn) == {}
+    dispatch.report_usage(conn, MINE, {"session_id": "s1", "billing": "max", "cost_usd": 1.75})
+    dispatch.report_usage(conn, MINE, {"session_id": "s1", "cost_usd": 2.0})
+    assert spent(conn) == {"max": pytest.approx(2.0)}
+
+
+def test_usage_bills_by_the_seats_lane(client: TestClient, keys: Keys, conn: sqlite3.Connection) -> None:
+    seat(client, keys, MINE, lane="vertex")
+    row = dispatch.report_usage(conn, MINE, {"session_id": "s1", "cost_usd": 0.5})
+    assert row["billing"] == "vertex" and spent(conn) == {"vertex": pytest.approx(0.5)}
+
+
+def test_a_late_lower_report_does_not_rewind_what_is_booked(conn: sqlite3.Connection) -> None:
+    for cost in (2.0, 1.5, 2.1):
+        dispatch.report_usage(conn, MINE, {"session_id": "s1", "billing": "max", "cost_usd": cost})
+    assert spent(conn) == {"max": pytest.approx(2.1)}
+
+
+def test_a_seats_lane_outranks_the_billing_its_own_key_reports(
+    client: TestClient, keys: Keys, conn: sqlite3.Connection
+) -> None:
+    seat(client, keys, MINE)
+    seat(client, keys, OTHER)
+    for name, key in ((MINE, MINE), (OTHER, JOSUI)):
+        response = client.post(
+            f"/v1/seats/{name}/usage",
+            headers=keys[key],
+            json={"session_id": "s1", "billing": "openrouter", "cost_usd": 1.0},
+        )
+        assert response.status_code == OK, response.text
+    assert spent(conn) == {"max": pytest.approx(1.0), "openrouter": pytest.approx(1.0)}
+
+
+def test_usage_on_a_lane_with_no_billing_waits_for_one(
+    client: TestClient, keys: Keys, conn: sqlite3.Connection
+) -> None:
+    seat(client, keys, MINE, lane="prime")
+    dispatch.report_usage(conn, MINE, {"session_id": "s1", "cost_usd": 3.0})
+    assert spent(conn) == {}
+    dispatch.report_usage(conn, MINE, {"session_id": "s2", "cost_usd": 0.25})
+    dispatch.report_usage(conn, MINE, {"session_id": "s2", "billing": "openrouter", "cost_usd": 0.5})
+    assert spent(conn) == {"openrouter": pytest.approx(0.5)}
+
+
+def test_the_migration_counts_billed_sessions_as_booked(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    old = store.connect(tmp_path / "old.db")
+    monkeypatch.setattr(store, "MIGRATIONS", store.MIGRATIONS[:-1])
+    store.migrate(old)
+    for name, billing in ((MINE, "max"), (OTHER, None)):
+        old.execute(
+            "INSERT INTO seats (name, updated_at, billing, session_id, session_cost_usd)"
+            " VALUES (?, 'then', ?, 's1', 2)",
+            (name, billing),
+        )
+    monkeypatch.undo()
+    store.migrate(old)
+    assert [(store.get_seat(old, name) or {})["session_booked_usd"] for name in (MINE, OTHER)] == [2, 0]
+    dispatch.report_usage(old, OTHER, {"session_id": "s1", "billing": "vertex", "cost_usd": 2.5})
+    dispatch.report_usage(old, MINE, {"session_id": "s1", "cost_usd": 2.5})
+    assert spent(old) == {"vertex": pytest.approx(2.5), "max": pytest.approx(0.5)}
 
 
 def test_outcomes_roll_up_their_stories(client: TestClient, keys: Keys) -> None:

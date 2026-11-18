@@ -11,7 +11,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from . import store
-from .model import CLOSED, SEAT_ROW_FIELDS, STALE_SEAT, Role, SeatStatus, State, Turn, Wrap
+from .model import CLOSED, SEAT_ROW_FIELDS, STALE_SEAT, Billing, Lane, Role, SeatStatus, State, Turn, Wrap
 
 PICK_SEAT = """
     SELECT name FROM seats
@@ -71,6 +71,9 @@ UNSEEN_SEATS = """
     WHERE role = :role AND disabled_at IS NULL AND name NOT IN (SELECT name FROM seats)
     ORDER BY name
 """
+
+# Who pays for each lane's seats; a lane not here (prime, rule) bills nothing until a report names it.
+LANE_BILLING = {Lane.VERTEX: Billing.VERTEX, Lane.DOLZA_MAX: Billing.MAX, Lane.EXEDORE_MAX: Billing.MAX}
 
 ADD_SPEND = """
     INSERT INTO spend (billing, day, cost_usd) VALUES (:billing, :day, :cost)
@@ -197,19 +200,33 @@ def report_seat(conn: sqlite3.Connection, name: str, fields: dict[str, Any], act
         return store.get_seat(conn, name) or seat
 
 
-def report_usage(conn: sqlite3.Connection, seat: str, report: dict[str, Any]) -> dict[str, Any]:
-    """Record a seat's usage and book the session cost it added since its last report."""
+def report_usage(
+    conn: sqlite3.Connection, seat: str, report: dict[str, Any], lane_first: bool = False
+) -> dict[str, Any]:
+    """Record a seat's usage and book whatever of the session's cost is not yet in spend. Billing is
+    the report's, else the seat's lane's, else what the row had; with `lane_first` (a seat reporting
+    for itself) the lane's comes before the report's. Until one is known the cost waits."""
     with store.transaction(conn):
         current = store.get_seat(conn, seat) or {**store.SEAT_DEFAULTS, "session_id": None}
         cost = report.pop("cost_usd", None)
         fields = {key: value for key, value in report.items() if value is not None}
+        lane = LANE_BILLING.get(current["lane"])
+        reported = fields.get("billing")
+        billing = ((lane or reported) if lane_first else (reported or lane)) or current["billing"]
+        if billing:
+            fields["billing"] = billing
         if cost is not None:
             same = current["session_id"] == report["session_id"]
-            delta = max(cost - (current["session_cost_usd"] if same else 0.0), 0.0)
+            booked = current["session_booked_usd"] if same else 0.0
             fields["session_cost_usd"] = cost
-            billing = fields.get("billing") or current["billing"]
-            if billing and delta:
-                conn.execute(ADD_SPEND, {"billing": billing, "day": store.now()[:10], "cost": delta})
+            if billing:
+                if cost > booked:
+                    conn.execute(
+                        ADD_SPEND, {"billing": billing, "day": store.now()[:10], "cost": cost - booked}
+                    )
+                fields["session_booked_usd"] = max(cost, booked)
+            elif not same:
+                fields["session_booked_usd"] = 0.0
         return store.write_seat(conn, seat, fields)
 
 

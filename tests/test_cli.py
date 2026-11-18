@@ -836,7 +836,6 @@ def assistant(message_id: str, **usage: int) -> str:
 @pytest.fixture
 def statusline_seat(seat: FakeDesk, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> FakeDesk:
     monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path / "run"))
-    seat.on("GET", "/v1/seats/Max%201", (200, SEAT | {"lane": "exedore-max"}))
     seat.on("POST", "/v1/seats/Max%201/usage", (200, SEAT))
     return seat
 
@@ -847,7 +846,6 @@ def test_the_status_line_reports_usage(statusline_seat: FakeDesk, capsys: pytest
         {
             "session_id": "s1",
             "model": "claude-opus-5-5",
-            "billing": "max",
             "context_used": 41000,
             "context_window": 200000,
             "cost_usd": 1.25,
@@ -911,19 +909,6 @@ def test_the_status_line_skips_a_state_directory_another_user_can_write(
     hook("statusline", statusline())
     assert usage_posts(statusline_seat) == []
     assert list(shared.iterdir()) == []
-
-
-@pytest.mark.parametrize(("lane", "billing"), [("vertex", "vertex"), ("dolza-max", "max"), ("prime", None)])
-def test_the_status_line_bills_by_lane(statusline_seat: FakeDesk, lane: str, billing: str | None) -> None:
-    statusline_seat.on("GET", "/v1/seats/Max%201", (200, SEAT | {"lane": lane}))
-    hook("statusline", statusline())
-    assert usage_posts(statusline_seat)[0].get("billing") == billing
-
-
-def test_the_status_line_reports_before_the_seat_has_a_row(statusline_seat: FakeDesk) -> None:
-    del statusline_seat.routes[("GET", "/v1/seats/Max%201")]
-    hook("statusline", statusline())
-    assert "billing" not in usage_posts(statusline_seat)[0]
 
 
 def test_the_status_line_is_silent_on_every_failure(
