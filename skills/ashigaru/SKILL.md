@@ -341,8 +341,10 @@ file and never in the transcript:
 
 Not run by hand. `ashigaru hook session-start`, `prompt-submit` and `stop` are
 the seats' Claude Code hooks (`docs/desk-cli.md`), which report each seat's
-turn and task to the Desk. When `agents` shows a seat's turn or task wrong,
-check that its settings carry them.
+turn and task to the Desk; `ashigaru hook statusline`, run from the seat's
+status line, reports its model, context, session tokens and cost for `usage`.
+When `agents` shows a seat's turn or task wrong, or `usage` shows it blank,
+check that its settings and status line carry them.
 
 ## The loop
 

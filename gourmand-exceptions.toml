@@ -43,3 +43,13 @@ path = "src/ashigaru/cli/wait.py"
 item = "_ask"
 justification = "CIWaiter's twin of _poll: isolates the retry-on-blip policy (unreachable or a 5xx means ask again, a 404 means no CI wait) from the deadline loop; inlined, the loop needs an empty except to swallow the blip"
 classification = "by_design"
+
+# Shape, not copy: relock's guard-then-early-return run (a lockfile command)
+# and the status line's throttle (load state, check age, count, save) share
+# statement kinds and nothing else.
+[[exceptions]]
+check = "copy_paste_detection"
+path = "scripts/relock.py"
+item = "relock"
+justification = "matched only against hooks._throttled, a status line throttle with no shared logic; the similarity is a run of guards and early returns"
+classification = "gourmand_bug"

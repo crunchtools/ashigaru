@@ -1,5 +1,5 @@
-"""Claude Code hooks: report the seat's turn and task to the Desk. They replace the seat-state.json
-hooks and keep their rules.
+"""Claude Code hooks: report the seat's turn, task and usage to the Desk. They replace the
+seat-state.json hooks and keep their rules.
 
   session-start   SessionStart. startup and resume are not mid-turn: turn idle.
                   clear also drops the task. compact can come mid-turn and
@@ -11,6 +11,11 @@ hooks and keep their rules.
   stop            Stop, StopFailure and the idle_prompt Notification: turn
                   idle. idle_prompt leaves alone a turn that started too
                   recently to be the one it reports on.
+  statusline      The status line command, not a hook: model, context, session
+                  tokens and running cost to POST /v1/seats/{name}/usage. It
+                  runs on every refresh, so it posts at most once per
+                  STATUSLINE_EVERY per session, keeping its state on tmpfs,
+                  and prints nothing, not even its failures.
 
 A hook must never stand between a person and their prompt: the whole run is
 bounded at HOOK_SECONDS, every failure (no config, no network, a refusal) goes
@@ -19,6 +24,8 @@ would add to the conversation.
 """
 
 import json
+import os
+import re
 import signal
 import sys
 from collections.abc import Mapping
@@ -30,10 +37,10 @@ from urllib.parse import quote
 
 import httpx
 
-from .client import Desk
+from .client import Desk, DeskError
 from .config import load
 
-EVENTS = ("session-start", "prompt-submit", "stop")
+EVENTS = ("session-start", "prompt-submit", "stop", "statusline")
 HOOK_SECONDS = 2.0
 TASK_LENGTH = 120
 # Claude Code's messageIdleNotifThresholdMs: idle_prompt comes at least this
@@ -41,6 +48,11 @@ TASK_LENGTH = 120
 IDLE_NOTICE_AFTER = timedelta(seconds=60)
 # What Claude Code puts first in a prompt it submits on its own.
 HARNESS_MARKS = ("<cross-session-message", "<task-notification")
+STATUSLINE_EVERY = 30.0
+# The most of a transcript one status line run reads; the rest waits for the next.
+TRANSCRIPT_CHUNK = 4 << 20
+TOKEN_FIELDS = ("input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens", "output_tokens")
+LANE_BILLING = {"vertex": "vertex", "dolza-max": "max", "exedore-max": "max"}
 
 
 class _Deadline(Exception):
@@ -99,13 +111,103 @@ def _stop(event: dict[str, Any], desk: Desk, path: str) -> None:
     desk.request("PATCH", path, body={"turn": "idle"})
 
 
-HANDLERS = {"session-start": _start, "prompt-submit": _prompt, "stop": _stop}
+def usage_state(session: str) -> Path:
+    """Where the status line keeps its throttle and transcript offset: tmpfs, private to the user,
+    since it is looked at on every refresh."""
+    runtime = os.environ.get("XDG_RUNTIME_DIR") or f"/dev/shm/ashigaru-{os.getuid()}"
+    return Path(runtime) / "ashigaru" / f"usage-{re.sub(r'[^A-Za-z0-9_-]', '_', session)}.json"
+
+
+def _count_tokens(transcript: str, state: dict[str, Any]) -> None:
+    """Add the API calls appended to the transcript since the last run to state["tokens"]. Claude
+    Code writes a line per content block, each carrying its message's usage, so an id counts once."""
+    if state.get("transcript") != transcript:
+        state.update(transcript=transcript, offset=0, tokens=0, last_id=None)
+    with open(transcript, "rb") as handle:
+        handle.seek(state["offset"])
+        chunk = handle.read(TRANSCRIPT_CHUNK)
+    end = chunk.rfind(b"\n") + 1 or (len(chunk) if len(chunk) == TRANSCRIPT_CHUNK else 0)
+    for line in chunk[:end].splitlines():
+        try:
+            entry = json.loads(line)
+        except ValueError:
+            continue
+        if not isinstance(entry, dict) or entry.get("type") != "assistant":
+            continue
+        message = entry.get("message")
+        if not isinstance(message, dict):
+            continue
+        usage = message.get("usage")
+        message_id = message.get("id")
+        if not isinstance(usage, dict) or (message_id is not None and message_id == state["last_id"]):
+            continue
+        state["last_id"] = message_id
+        state["tokens"] += sum(v for k in TOKEN_FIELDS if isinstance(v := usage.get(k), int))
+    state["offset"] += end
+
+
+def _number(value: Any) -> Any:
+    return value if isinstance(value, int | float) and not isinstance(value, bool) else None
+
+
+def _statusline(event: dict[str, Any], desk: Desk, path: str) -> None:
+    model = event.get("model") if isinstance(event.get("model"), dict) else {}
+    cost = event.get("cost") if isinstance(event.get("cost"), dict) else {}
+    window = event.get("context_window") if isinstance(event.get("context_window"), dict) else {}
+    try:
+        lane = desk.get(path).get("lane")
+    except DeskError:  # no seat row yet: this report creates it, without a lane
+        lane = None
+    report = {
+        "session_id": str(event["session_id"]),
+        "model": model.get("id") if isinstance(model.get("id"), str) else None,
+        "billing": LANE_BILLING.get(lane),
+        "context_used": _number(window.get("total_input_tokens")),
+        "context_window": _number(window.get("context_window_size")),
+        "session_tokens": event.get("session_tokens"),
+        "cost_usd": _number(cost.get("total_cost_usd")),
+    }
+    desk.post(f"{path}/usage", {key: value for key, value in report.items() if value is not None})
+
+
+def _throttled(event: dict[str, Any]) -> bool:
+    """True when this session posted within STATUSLINE_EVERY. Otherwise counts the transcript into
+    event["session_tokens"] and records the attempt first, so a Desk that is down is not retried on
+    every refresh."""
+    session = event.get("session_id")
+    if not session:
+        return True
+    state_path = usage_state(str(session))
+    try:
+        state = json.loads(state_path.read_text())
+    except (OSError, ValueError):
+        state = {}
+    if not isinstance(state, dict):
+        state = {}
+    now = datetime.now(UTC).timestamp()
+    if now - state.get("posted", 0) < STATUSLINE_EVERY:
+        return True
+    state["posted"] = now
+    transcript = event.get("transcript_path")
+    if isinstance(transcript, str) and Path(transcript).is_file():
+        _count_tokens(transcript, state)
+        event["session_tokens"] = state["tokens"]
+    state_path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    partial = state_path.with_suffix(".tmp")
+    partial.write_text(json.dumps(state))
+    partial.replace(state_path)
+    return False
+
+
+HANDLERS = {"session-start": _start, "prompt-submit": _prompt, "stop": _stop, "statusline": _statusline}
 
 
 def _report(name: str, stdin: TextIO, env: Mapping[str, str] | None, transport: Any) -> None:
     event = {} if stdin.isatty() else json.loads(stdin.read() or "{}")
     if not isinstance(event, dict):
         raise ValueError("the hook event is not a JSON object")
+    if name == "statusline" and _throttled(event):
+        return
     config = load(env)
     desk = Desk(config, timeout=HOOK_SECONDS, transport=transport)
     try:
@@ -127,9 +229,11 @@ def run(
     try:
         _report(name, stdin, env, transport)
     except _Deadline:
-        print(f"ashigaru hook {name}: no answer in {HOOK_SECONDS:g}s", file=sys.stderr)
+        if name != "statusline":
+            print(f"ashigaru hook {name}: no answer in {HOOK_SECONDS:g}s", file=sys.stderr)
     except Exception as exc:  # a hook never fails Claude Code
-        print(f"ashigaru hook {name}: {exc}", file=sys.stderr)
+        if name != "statusline":
+            print(f"ashigaru hook {name}: {exc}", file=sys.stderr)
     finally:
         signal.setitimer(signal.ITIMER_REAL, 0)
         signal.signal(signal.SIGALRM, previous)

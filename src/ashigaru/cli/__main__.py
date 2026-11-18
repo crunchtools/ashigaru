@@ -170,7 +170,10 @@ def parser() -> argparse.ArgumentParser:
     revoke.add_argument("code_id", metavar="id")
     revoke.add_argument("--identity", help="the code's identity, if the key sees several")
 
-    hook = sub.add_parser("hook", help="Claude Code hooks: report this seat's turn and task; always exit 0")
+    hook = sub.add_parser(
+        "hook",
+        help="Claude Code hooks and status line: report this seat's turn, task and usage; always exit 0",
+    )
     hook.add_argument("event", choices=hooks.EVENTS)
     return top
 
