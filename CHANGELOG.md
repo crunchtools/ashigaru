@@ -6,6 +6,12 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+- A narrow `single_use_helpers` exception for `CIWaiter._ask`, `_poll`'s twin.
+  The existing `_poll` entry only covered `_ask` because Gourmand ignored its
+  `pattern` and suppressed the whole file; Gourmand is about to honour `pattern`
+  (crunchtools/gourmand#43).
+
 ## [3.3.0] - 2026-11-18
 
 ### Fixed
