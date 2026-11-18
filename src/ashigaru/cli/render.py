@@ -64,7 +64,7 @@ def usage(report: dict[str, Any]) -> str:
     return f"{table(report['seats'], USAGE)}\n\n{table(report['spend'], SPEND)}"
 
 
-def queue(lists: dict[str, list[dict[str, Any]]]) -> str:
+def queue(lists: dict[str, Any]) -> str:
     return f"{table(lists['queued'], QUEUED)}\n\n{table(lists['proposed'], PROPOSED)}"
 
 

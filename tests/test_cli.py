@@ -526,6 +526,15 @@ def test_wait_on_a_commit_rides_out_no_answer() -> None:
     assert clock.slept == [5.0]
 
 
+def test_a_long_poll_outlasts_the_clients_timeout(desk: FakeDesk) -> None:
+    desk.on("GET", "/v1/ci/wait", (200, ci("success")))
+    desk.delay = 0.3
+    client = Desk(config.load(), timeout=0.1)
+    with pytest.raises(Unreachable):
+        client.request("GET", "/v1/ci/wait")
+    assert client.request("GET", "/v1/ci/wait", timeout=2.0)["status"] == "success"
+
+
 def test_wait_on_a_commit_pauses_no_longer_than_its_deadline(desk: FakeDesk) -> None:
     desk.on("GET", "/v1/ci/wait", (503, {"detail": "busy"}))
     clock = Clock()

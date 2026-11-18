@@ -53,10 +53,10 @@ def work(desk: Desk, all: bool = False) -> list[dict[str, Any]]:
     return result
 
 
-def queue(desk: Desk) -> dict[str, list[dict[str, Any]]]:
+def queue(desk: Desk) -> dict[str, Any]:
     """Queued items with the state of each item they wait on (`waits_on`), and agent-filed `proposed`
     children with their expiry."""
-    result: dict[str, list[dict[str, Any]]] = desk.get("/v1/queue")
+    result: dict[str, Any] = desk.get("/v1/queue")
     return result
 
 
