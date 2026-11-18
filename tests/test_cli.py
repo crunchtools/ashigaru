@@ -166,6 +166,12 @@ def test_agents(desk: FakeDesk, capsys: pytest.CaptureFixture[str]) -> None:
     assert lines[1].startswith("Vertex 1") and "a1" in lines[1]
 
 
+def test_agents_shows_the_hold(desk: FakeDesk, capsys: pytest.CaptureFixture[str]) -> None:
+    desk.on("GET", "/v1/seats", (200, [SEAT | {"owner": "Scott", "hold": "busy-manual"}]))
+    assert main(["agents"]) == 0
+    assert "busy-manual" in capsys.readouterr().out
+
+
 def test_json_is_the_desks_answer(desk: FakeDesk, capsys: pytest.CaptureFixture[str]) -> None:
     desk.on("GET", "/v1/seats", (200, [SEAT]))
     assert main(["agents", "--json"]) == 0

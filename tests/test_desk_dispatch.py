@@ -201,8 +201,12 @@ def test_since_is_server_set_so_no_seat_jumps_the_pick_queue(
     )
     assert picked.json()["seat"] == OTHER
     before = client.get(f"/v1/seats/{MINE}", headers=keys[CI]).json()["since"]
-    client.patch(f"/v1/seats/{MINE}", headers=keys[MINE], json={"turn": "active", "task": "x"})
+    client.patch(f"/v1/seats/{MINE}", headers=keys[MINE], json={"turn": "active"})
     assert client.get(f"/v1/seats/{MINE}", headers=keys[CI]).json()["since"] == before
+    # A hold and its release are status changes: the seat goes to the back of the queue, never ahead.
+    client.patch(f"/v1/seats/{MINE}", headers=keys[MINE], json={"turn": "active", "task": "x"})
+    client.patch(f"/v1/seats/{MINE}", headers=keys[MINE], json={"turn": "idle", "task": None})
+    assert client.get(f"/v1/seats/{MINE}", headers=keys[CI]).json()["since"] >= before
 
 
 def test_an_item_with_no_lane_is_assigned_never_claimed(client: TestClient, keys: Keys) -> None:
