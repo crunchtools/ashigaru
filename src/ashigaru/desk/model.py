@@ -11,10 +11,12 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, computed_field, field_validator
 
-GITHUB_URL = re.compile(r"^https?://(?:www\.)?github\.com/([^/\s]+/[^/\s]+)/(?:issues|pull)/(\d+)\b", re.I)
+REPO = r"([a-z\d](?:[a-z\d]|-(?=[a-z\d])){0,38}/[a-z\d_.-]{1,100})"
+"""GitHub's names: an owner is 1-39 letters, digits or single inner hyphens; a repo adds _ and ."""
+GITHUB_URL = re.compile(rf"^https?://(?:www\.)?github\.com/{REPO}/(?:issues|pull)/(\d+)(?![\w.-])", re.I)
 RT_URL = re.compile(r"^https?://\S+/Ticket/\w+\.html\?(?:\S*&)?id=(\d+)\b", re.I)
 RT_REF = re.compile(r"^RT\s*#?\s*(\d+)$", re.I)
-REPO_REF = re.compile(r"^([\w.-]+/[\w.-]+)#(\d+)$")
+REPO_REF = re.compile(rf"^{REPO}#(\d+)$", re.I)
 
 
 def subject_key(ref: str | None) -> str | None:
@@ -177,8 +179,8 @@ class _Fields(BaseModel):
     @field_validator("subject_key")
     @classmethod
     def _one_form(cls, value: str | None) -> str | None:
-        """A ref is stored as its key; any other key (`repo:alert`) as given, and a blank one as none."""
-        return subject_key(value) or (value if value and value.strip() else None)
+        """A ref is stored as its key, any other key (`repo:alert`) trimmed, and a blank one as none."""
+        return subject_key(value) or (value or "").strip() or None
 
 
 class ItemCreate(_Fields):

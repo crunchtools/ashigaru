@@ -192,6 +192,7 @@ def test_a_sweep_after_the_import_is_refused_as_a_duplicate(
         "crunchtools/example#9": "crunchtools/example#9",
         "CrunchTools/Example#10": "crunchtools/example#10",
         "example:disk-full": "example:disk-full",
+        "  example:cpu-hot ": "example:cpu-hot",
         "  ": None,
     }.items():
         created = client.post("/v1/items", headers=josui, json={"task": "t", "subject_key": sent})
@@ -221,5 +222,19 @@ def test_subject_keys_have_one_form() -> None:
     }
     for want, forms in same.items():
         assert {subject_key(form) for form in forms} == {want}
-    for not_a_ref in ("example:disk-full", "https://example.com/issues/5", "a12", "  ", None):
+    not_refs = (
+        "example:disk-full",
+        "https://example.com/issues/5",
+        "https://github.com/-crunchtools/ashigaru/issues/5",
+        "https://github.com/crunch--tools/ashigaru/issues/5",
+        "https://github.com/crunchtools/ash garu/issues/5",
+        "https://github.com/crunchtools/ashigaru/issues/5x",
+        f"{'o' * 40}/ashigaru#5",
+        "crunch_tools/ashigaru#5",
+        "a12",
+        "  ",
+        None,
+    )
+    assert subject_key(f"{'o' * 39}/my_repo.v2#5") == f"{'o' * 39}/my_repo.v2#5"
+    for not_a_ref in not_refs:
         assert subject_key(not_a_ref) is None
