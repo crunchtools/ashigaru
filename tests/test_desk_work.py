@@ -1,10 +1,11 @@
-"""`GET /v1/work` and `POST /v1/work` against the real Desk: the check round and the GitHub catch-up."""
+"""`GET /v1/work` and `POST /v1/work` against the real Desk: the check round and the forge catch-up."""
 
 import sqlite3
 from datetime import UTC, datetime, timedelta
 from http.client import CREATED, FORBIDDEN, NOT_FOUND, OK, UNPROCESSABLE_ENTITY
 from typing import Any
 
+import pytest
 from conftest import Keys
 from fastapi.testclient import TestClient
 
@@ -121,6 +122,16 @@ def test_catch_up_since_moves_the_window(client: TestClient, keys: Keys, conn: s
     assert [row["id"] for row in work(client, keys)["catch_up"]["new"]] == [recent]
     wide = work(client, keys, f"?since={ago(days=4)}")["catch_up"]
     assert [row["id"] for row in wide["new"]] == [old, recent]
+
+
+def test_catch_up_stops_at_its_limit_and_says_so(
+    client: TestClient, keys: Keys, conn: sqlite3.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(dispatch, "QUEUE_LIMIT", 1)
+    first = seen(conn, 1, ago(hours=2))
+    seen(conn, 2, ago(hours=1))
+    caught = work(client, keys)["catch_up"]
+    assert [row["id"] for row in caught["new"]] == [first] and caught["truncated"] is True
 
 
 def test_catch_up_reopened_lists_closed_items_open_at_the_source(

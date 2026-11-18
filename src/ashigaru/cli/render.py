@@ -73,6 +73,8 @@ def work(round_: dict[str, Any]) -> str:
     tally = round_["summary"]
     caught = round_["catch_up"]
     window = f"since {caught['since']}" + (" (sweep mark moved)" if caught.get("advanced") else "")
+    if caught.get("truncated"):
+        window += "; cut at 1000, read on with --since"
     parts = [
         table(round_["items"], WORK),
         table(round_["seats"], AGENTS),

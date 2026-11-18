@@ -210,6 +210,12 @@
             "title": "Since",
             "type": "string"
           },
+          "truncated": {
+            "default": false,
+            "description": "True when either list stopped at its limit of 1000.",
+            "title": "Truncated",
+            "type": "boolean"
+          },
           "until": {
             "description": "When this round read the Desk; `advance` moves the mark here.",
             "title": "Until",

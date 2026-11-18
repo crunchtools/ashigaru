@@ -44,11 +44,11 @@ INTAKE = """
     WHERE json_extract(extra, '$.source') IS NOT NULL AND json_extract(extra, '$.trusted') IS NOT NULL
 """
 """Items the org webhook created: intake records the source and whether it trusts the author."""
-NEW_INTAKE = INTAKE + " AND created_at >= :since AND created_at < :until ORDER BY created_at, id"
+NEW_INTAKE = INTAKE + " AND created_at >= :since AND created_at < :until ORDER BY created_at, id LIMIT :limit"
 REOPENED = (
     INTAKE
     + """ AND json_extract(extra, '$.source_state') = 'open' AND state IN ('done', 'wontdo', 'abandoned')
-    AND updated_at >= :since AND updated_at < :until ORDER BY updated_at, id"""
+    AND updated_at >= :since AND updated_at < :until ORDER BY updated_at, id LIMIT :limit"""
 )
 SWEEP = "sweep"
 CATCH_UP_DEFAULT = timedelta(days=1)
@@ -317,17 +317,21 @@ def _caught(item: dict[str, Any]) -> dict[str, Any]:
 def catch_up(conn: sqlite3.Connection, since: str | None, until: str) -> dict[str, Any]:
     """The org sweep from the Desk's own data: intake subjects first seen between `since` (default
     the sweep mark, else a day back) and `until`, and those reopened at the source while their item
-    is closed. A sweep mark that is not a time raises ValueError."""
+    is closed, the oldest QUEUE_LIMIT of each; `truncated` when either was cut, so a later `since` reads
+    on. A sweep mark that is not a time raises ValueError."""
     if since is None:
         mark = store.get_mark(conn, SWEEP)
         back = stamp(datetime.strptime(until, "%Y-%m-%dT%H:%M:%SZ") - CATCH_UP_DEFAULT)
         since = mark["value"] if mark else back
     window = {"since": instant(since), "until": until}
     found = {
-        name: [_caught(store.decode(row)) for row in conn.execute(query, window)]
+        name: [
+            _caught(store.decode(row)) for row in conn.execute(query, {**window, "limit": QUEUE_LIMIT + 1})
+        ]
         for name, query in (("new", NEW_INTAKE), ("reopened", REOPENED))
     }
-    return {**window, **found}
+    truncated = any(len(rows) > QUEUE_LIMIT for rows in found.values())
+    return {**window, **{name: rows[:QUEUE_LIMIT] for name, rows in found.items()}, "truncated": truncated}
 
 
 def work(conn: sqlite3.Connection, show_all: bool = False, since: str | None = None) -> dict[str, Any]:

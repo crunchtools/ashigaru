@@ -339,6 +339,7 @@ class CatchUp(BaseModel):
     reopened: list[CatchUpRow] = Field(
         description="Subjects open at the source whose item is closed, changed in the window."
     )
+    truncated: bool = Field(False, description="True when either list stopped at its limit of 1000.")
     advanced: bool = Field(False, description="True when this round moved the sweep mark to `until`.")
 
 
