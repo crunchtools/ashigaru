@@ -1,5 +1,5 @@
-"""Dispatch on top of the store: assign, claim and wrap, usage and spend, the queue, seats and
-outcomes views.
+"""Dispatch on top of the store: assign, claim and wrap, usage and spend, the queue, seats, outcomes
+and work views.
 
 Assign and claim run in one BEGIN IMMEDIATE transaction each, so two callers
 racing for one item or one seat get one winner and one Conflict.
@@ -7,7 +7,7 @@ racing for one item or one seat get one winner and one Conflict.
 
 import json
 import sqlite3
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from . import store
@@ -39,6 +39,32 @@ OUTCOMES = """
 
 QUEUE_LIMIT = 1000
 """Items per list in the queue view, GET /v1/items's own cap; a longer queue is paged there."""
+
+CAUGHT = """
+    SELECT * FROM (
+        SELECT e.seq AS event_seq, (SELECT min(seq) FROM events f WHERE f.item_id = e.item_id) AS first_seq,
+               i.*
+        FROM events e JOIN items i ON i.id = e.item_id
+        WHERE e.seq > :after AND e.seq <= :until AND e.source = 'webhook'
+          AND json_extract(i.extra, '$.trusted') IS NOT NULL
+    )
+    WHERE event_seq = first_seq
+       OR (json_extract(extra, '$.source_state') = 'open' AND state IN ('done', 'wontdo', 'abandoned'))
+    ORDER BY event_seq
+    LIMIT :limit
+"""
+"""Intake's events after the cursor that the catch-up reports: an item's first (it is new), or one on
+an item still open at the source while it is closed (it was reopened). `trusted` is set only by
+intake, so an item the API created and a webhook later touched is not one."""
+FROM_TIME = """
+    SELECT coalesce(
+        (SELECT min(seq) FROM events WHERE at >= :since) - 1, (SELECT coalesce(max(seq), 0) FROM events)
+    )
+"""
+"""The cursor for a time: just before the first event stamped at or after it, so an event stamped
+late but committed early is read again rather than skipped."""
+SWEEP = "sweep"
+CATCH_UP_DEFAULT = timedelta(days=1)
 
 UNSEEN_SEATS = """
     SELECT name FROM identities
@@ -277,3 +303,89 @@ def seat(conn: sqlite3.Connection, name: str) -> dict[str, Any] | None:
     found = store.get_seat(conn, name)
     stale = (datetime.now(UTC) - STALE_SEAT).strftime("%Y-%m-%dT%H:%M:%SZ")
     return {**found, "missing": found["updated_at"] < stale} if found else None
+
+
+def stamp(when: datetime) -> str:
+    return when.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def instant(value: str) -> str:
+    """A time as the Desk stores it, so it compares as text, from one without seconds (`T14:00Z`) or
+    with an offset. Raises ValueError for anything that is not a time."""
+    parsed = datetime.fromisoformat(value)
+    return stamp(parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC))
+
+
+def _caught(item: dict[str, Any]) -> dict[str, Any]:
+    extra = item["extra"]
+    return {
+        **{key: item[key] for key in ("id", "ref", "subject_key", "lane", "mode", "state")},
+        "title": extra.get("title"),
+        "filed_by": extra.get("author"),
+        "held": extra.get("trusted") is False,
+    }
+
+
+def cursor(conn: sqlite3.Connection, since: str | None) -> tuple[int, str | None]:
+    """Where a catch-up starts: just before the first event at `since`; else the sweep mark, an event
+    seq that `advance` wrote or a time someone set; else a day back. Returns the seq and the
+    time it was read from, if any. Raises ValueError for a time that is not one."""
+    if since is None:
+        mark = store.get_mark(conn, SWEEP)
+        if mark and mark["value"].isdigit():
+            return int(mark["value"]), None
+        since = mark["value"] if mark else stamp(datetime.now(UTC) - CATCH_UP_DEFAULT)
+    since = instant(since)
+    return int(conn.execute(FROM_TIME, {"since": since}).fetchone()[0]), since
+
+
+def catch_up(conn: sqlite3.Connection, since: str | None = None) -> dict[str, Any]:
+    """The org sweep from the Desk's own data: intake's events after the cursor, as subjects first seen
+    (`new`) and subjects reopened at the source while their item is closed (`reopened`), each item once.
+
+    Events are numbered in commit order (one writer at a time), so `until`, the cursor `advance`
+    stores, loses and repeats nothing: it is the last event read when QUEUE_LIMIT events cut the
+    round short (`truncated`), else the last committed when the round began, so a delivery that
+    commits mid-round is the next round's."""
+    after, read_from = cursor(conn, since)
+    last = int(conn.execute("SELECT coalesce(max(seq), 0) FROM events").fetchone()[0])
+    rows = conn.execute(CAUGHT, {"after": after, "until": last, "limit": QUEUE_LIMIT + 1}).fetchall()
+    truncated = len(rows) > QUEUE_LIMIT
+    rows = rows[:QUEUE_LIMIT]
+    found: dict[str, dict[str, dict[str, Any]]] = {"new": {}, "reopened": {}}
+    for row in rows:
+        item = {
+            key: value for key, value in store.decode(row).items() if key not in ("event_seq", "first_seq")
+        }
+        if row["event_seq"] == row["first_seq"]:
+            found["new"].setdefault(item["id"], _caught(item))
+        elif item["id"] not in found["new"]:
+            found["reopened"].setdefault(item["id"], _caught(item))
+    until = rows[-1]["event_seq"] if truncated else max(last, after)
+    return {
+        "since": read_from,
+        "after": after,
+        "until": until,
+        **{name: list(items.values()) for name, items in found.items()},
+        "truncated": truncated,
+    }
+
+
+def work(conn: sqlite3.Connection, show_all: bool = False, since: str | None = None) -> dict[str, Any]:
+    """`ashigaru work`, the whole check round: the check table, the seats with how many are up and how
+    many items are open, the queue, and the catch-up. The check table stops at QUEUE_LIMIT rows
+    (`truncated`); GET /v1/items pages the rest."""
+    items = store.check(conn, show_all, limit=QUEUE_LIMIT + 1)
+    roster = seats(conn)
+    return {
+        "items": items[:QUEUE_LIMIT],
+        "truncated": len(items) > QUEUE_LIMIT,
+        "seats": roster,
+        "summary": {
+            "up": sum(not seat["missing"] for seat in roster),
+            "seats": len(roster),
+            "open": store.count_open(conn),
+        },
+        "queue": queue(conn),
+        "catch_up": catch_up(conn, since),
+    }

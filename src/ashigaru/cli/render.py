@@ -68,6 +68,28 @@ def queue(lists: dict[str, Any]) -> str:
     return f"{table(lists['queued'], QUEUED)}\n\n{table(lists['proposed'], PROPOSED)}"
 
 
+def work(round_: dict[str, Any]) -> str:
+    """The check table, the seats and their tally, the queue, then what the forge brought in."""
+    tally = round_["summary"]
+    caught = round_["catch_up"]
+    window = f"events {caught['after']} to {caught['until']}"
+    if caught.get("truncated"):
+        window += ", cut at 1000: the next --advance reads on"
+    if caught.get("advanced"):
+        window += " (sweep mark moved)"
+    cut = "\n(the first 1000; ashigaru list pages the rest)" if round_.get("truncated") else ""
+    parts = [
+        table(round_["items"], WORK) + cut,
+        table(round_["seats"], AGENTS),
+        f"{tally['up']} of {tally['seats']} up, {tally['open']} items open",
+        queue(round_["queue"]),
+        f"{table(caught['new'], NEW)}\n{window}",
+    ]
+    if caught["reopened"]:
+        parts.append(table(caught["reopened"], REOPENED))
+    return "\n\n".join(parts)
+
+
 def minted(result: dict[str, Any]) -> str:
     """The URL alone, so `$(ashigaru mcp mint ...)` captures it; or where --out wrote it."""
     if "url" in result:
@@ -154,6 +176,19 @@ OUTCOMES: list[Column] = [
     ("BLOCKED", lambda o: o["blocked"]),
     ("OPEN", lambda o: o["open"]),
 ]
+NEW: list[Column] = [
+    ("NEW", lambda c: c["id"]),
+    ("REF", lambda c: c.get("ref")),
+    ("TITLE", lambda c: clip(c.get("title"), NARROW)),
+    ("LANE", lambda c: "held" if c["held"] else c.get("lane") or "no lane"),
+    ("FILED BY", lambda c: c.get("filed_by")),
+]
+REOPENED: list[Column] = [
+    ("REOPENED", lambda c: c["id"]),
+    ("REF", lambda c: c.get("ref")),
+    ("TITLE", lambda c: clip(c.get("title"), NARROW)),
+    ("STATE", lambda c: c["state"]),
+]
 CODES: list[Column] = [
     ("ID", lambda c: c["code_id"]),
     ("IDENTITY", lambda c: c["identity"]),
@@ -173,13 +208,14 @@ MARK: list[Column] = [
     ("UPDATED", lambda m: m["updated_at"]),
     ("BY", lambda m: m["updated_by"]),
 ]
-LISTS = {"agents": AGENTS, "work": WORK, "outcomes": OUTCOMES, "mcp_list": CODES}
+LISTS = {"agents": AGENTS, "outcomes": OUTCOMES, "mcp_list": CODES}
 VIEWS: dict[str, Callable[[Any], str]] = {
     "list": lambda items: table([_row(item) for item in items], WORK),
     "wait": waited,
     "mark": lambda m: table([m], MARK),
     "usage": usage,
     "queue": queue,
+    "work": work,
     "mcp_mint": minted,
     "mcp_revoke": lambda code: table([code], CODES),
 }

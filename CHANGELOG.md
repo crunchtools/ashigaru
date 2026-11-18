@@ -6,6 +6,40 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### BREAKING
+- The hosted MCP tools are renamed to `desk_<command>` for each `ashigaru`
+  command: `usage`, `agents`, `work`, `queue`, `outcomes`, `assign`, `auto`,
+  `manual` and `wrap` are now `desk_usage` ... `desk_wrap`. The old names are
+  gone; an MCP client calling them gets an unknown tool.
+- `desk_wait` returns `{"result": ...}` around the item or the CI result, so a
+  client reading `structuredContent` unwraps it.
+
+### Added
+- `ashigaru work` runs the whole check round in one call (a335): `GET /v1/work`
+  returns the open items, every seat with `N of M up, K items open`, the queue
+  with `waits_on`, and a GitHub catch-up from the org webhook's intake after
+  the `sweep` mark (`new`, queued or held, and `reopened`), so Prime runs no
+  `gh` sweep. `--advance` (admin, `POST /v1/work`) moves the mark to the last
+  event the round covered: events are numbered in commit order, so a round cut
+  at 1000 reads on next time and a delivery committed mid-round is the next
+  round's. `--since` reads from a time. The check table stops at 1000 rows
+  (`truncated`).
+- `ashigaru claim` and `ashigaru file`, the CLI side of the seats' MCP tools.
+- `tests/test_skill.py` fails when an MCP tool drifts from its CLI command: in
+  name, in arguments (a carried model's fields too), their types, choices and
+  whether each is required; or when a doc names a tool that does not exist.
+
+### Changed
+- `desk_work` returns the round; `desk_get` takes `subject_key` or `ref`;
+  `desk_assign` takes a `record` (`assign --task` and its fields) to record
+  the item first; `desk_wait` takes an `item_id` as well as a `repo` and `sha`.
+- Desk intake trusts the accounts in `ASHIGARU_FORGE_AUTHORS_<FORGE>` as
+  authors of their own issues and PRs (the image sets
+  `ashigaru-crunchtools[bot]`), so Ashigaru's own issues are queued, not held,
+  as the old `gh` sweep recorded them; their lane labels approve nothing.
+- `ashigaru work` and `GET /v1/check` list only open items: `done` rows that
+  were never wrapped (old imports) no longer show without `--all`.
+
 ## [3.4.0] - 2026-11-18
 
 ### Added

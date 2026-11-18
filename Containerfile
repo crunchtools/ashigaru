@@ -39,7 +39,8 @@ ENV PATH=/opt/ashigaru/bin:/usr/bin \
     PYTHONUNBUFFERED=1 \
     ASHIGARU_DESK_DB=/data/desk.db \
     ASHIGARU_BIND=0.0.0.0 \
-    ASHIGARU_PORT=8080
+    ASHIGARU_PORT=8080 \
+    ASHIGARU_FORGE_AUTHORS_GITHUB=ashigaru-crunchtools[bot]
 
 USER 65532
 WORKDIR /data

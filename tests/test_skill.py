@@ -1,24 +1,32 @@
-"""The /ashigaru skill's commands are exactly the CLI's, in both directions.
+"""The /ashigaru skill, the CLI and the Desk's MCP tools are one command set, in every direction.
 
 Scott's rule: no skill-only or renamed verbs, and nothing the CLI has that the
 skill leaves out. The skill names its commands in four places (the backticked
 `## ` headings, the argument-hint, the description and the mcp actions); each
 must equal the parser's set, and every `ashigaru ...` line in it must parse.
+Each CLI command but `mcp` and `hook` is the MCP tool `desk_<command>`, taking
+the same arguments, and no tool is anything else.
 """
 
 import argparse
+import asyncio
 import re
 import shlex
 from pathlib import Path
+from typing import Any, NamedTuple
 
 import pytest
 import yaml
+from pydantic import BaseModel
 
 from ashigaru.cli import hooks
 from ashigaru.cli.__main__ import parser
+from ashigaru.desk.mcp.server import mcp
+from ashigaru.desk.model import ItemCreate, ItemFilter, ItemPatch, NewItem
 
 ROOT = Path(__file__).resolve().parents[1]
 SKILL = (ROOT / "skills" / "ashigaru" / "SKILL.md").read_text()
+CLI_DOC = (ROOT / "docs" / "desk-cli.md").read_text()
 _, FRONT, BODY = SKILL.split("---\n", 2)
 META = yaml.safe_load(FRONT)
 
@@ -87,3 +95,169 @@ def test_every_command_line_in_the_skill_parses(line: str) -> None:
 def test_the_invocations_cover_every_command() -> None:
     used = {shlex.split(line)[1] for line in _invocations()}
     assert used == set(CLI)
+
+
+# The MCP tools
+
+CLI_ONLY = {
+    "mcp": "a hosted MCP URL is a credential, minted only from a terminal",
+    "hook": "runs inside a seat's Claude Code, never over MCP",
+}
+TOOLS = {tool.name: tool for tool in asyncio.run(mcp.list_tools())}
+SHARED = [command for command in CLI if command not in CLI_ONLY]
+MODELS: dict[str, type[BaseModel]] = {
+    "filters": ItemFilter,
+    "record": NewItem,
+    "desk_create": ItemCreate,
+    "desk_update": ItemPatch,
+}
+"""A tool argument that carries a model's fields, as the CLI's flags do one by one: by its name, or
+for `fields`, by the tool's."""
+RENAMED = {"item": {"item_id"}, "target": {"item_id", "repo", "sha"}}
+"""The CLI's positional `item` is the tool's `item_id`; `wait`'s `item | repo sha` is all three."""
+
+
+SEAT = "a seat's own report fields, set by report and update, not at birth"
+MCP_ONLY = {
+    "desk_create": {
+        "seat": "recorded without assign's checks; assign gives an item to a seat",
+        "wrap": "the wrap stage is wrap's, never set at creation",
+        **dict.fromkeys(
+            ("result", "next", "learned", "blocked_reason", "check_after", "memorized", "verified_by"), SEAT
+        ),
+    },
+    "desk_update": {
+        "seat": "an item is handed to a seat by assign, not patched in",
+        "wrap": "the wrap stage moves only through wrap (`--clear wrap` is the CLI's way out)",
+    },
+}
+"""Fields of a carried model the CLI deliberately has no flag for, by tool: a new one fails the test."""
+
+
+TYPE_DIFFERS = {
+    (
+        "desk_wait",
+        "timeout",
+    ): "the CLI's is its whole wait, fractional seconds; the tool's one poll, whole, at most 90",
+}
+"""A tool argument deliberately not the CLI flag's type, with why."""
+
+
+class Arg(NamedTuple):
+    """One argument as JSON schema sees it: its type, its choices (if any), and whether it is required."""
+
+    type: str
+    choices: frozenset[str] | None
+    required: bool
+
+
+_TYPES: dict[object, str] = {int: "integer", float: "number"}
+
+
+def _cli_args(command: str) -> dict[str, Arg]:
+    """Each CLI argument, by the MCP name; `--clear F` is a null for F in the tool's fields."""
+    found = {}
+    for a in CLI[command]._actions:
+        if a.dest in ("help", "json", "clear"):
+            continue
+        scalar = _TYPES.get(a.type, "string")
+        if isinstance(
+            a, (argparse._StoreTrueAction, argparse._StoreFalseAction, argparse.BooleanOptionalAction)
+        ):
+            kind = "boolean"
+        elif isinstance(a, argparse._AppendAction) or a.nargs in ("+", "*"):
+            kind = f"array<{scalar}>"
+        else:
+            kind = scalar
+        required = a.required if a.option_strings else a.nargs not in ("?", "*")
+        arg = Arg(kind, frozenset(a.choices) if a.choices else None, required)
+        if a.dest == "target":  # item | repo sha: each name is one string, none required alone
+            arg = Arg("string", None, False)
+        for name in RENAMED.get(a.dest, {a.dest}):
+            found[name] = arg
+    return found
+
+
+def _type(schema: dict[str, Any], defs: dict[str, Any]) -> tuple[str, frozenset[str] | None]:
+    """A property's non-null type and enum, as `_cli_args` names them: $ref and anyOf resolved."""
+    if "$ref" in schema:
+        return _type(defs[schema["$ref"].rsplit("/", 1)[1]], defs)
+    if "anyOf" in schema:
+        kinds = {_type(branch, defs) for branch in schema["anyOf"] if branch.get("type") != "null"}
+        assert len(kinds) == 1, schema
+        return kinds.pop()
+    if "enum" in schema:
+        return "string", frozenset(map(str, schema["enum"]))
+    if schema["type"] == "array":
+        kind, choices = _type(schema["items"], defs)
+        return f"array<{kind}>", choices
+    return schema["type"], None
+
+
+def _mcp_args(tool: str) -> tuple[dict[str, Arg], dict[str, Arg]]:
+    """The tool's own arguments, and the fields any of them carries as a model."""
+    schema = TOOLS[tool].parameters
+    props, required, defs = (
+        schema.get("properties", {}),
+        set(schema.get("required", [])),
+        schema.get("$defs", {}),
+    )
+    carried = {"fields", "filters", "record"} & set(props)
+    flat = {
+        name: Arg(*_type(prop, defs), name in required) for name, prop in props.items() if name not in carried
+    }
+    fields = {}
+    for name in carried:
+        model = MODELS[tool if name == "fields" else name].model_json_schema()
+        for field, prop in model["properties"].items():
+            fields[field] = Arg(*_type(prop, model.get("$defs", {})), field in model.get("required", []))
+    return flat, fields
+
+
+def test_every_cli_command_is_a_tool_and_every_tool_a_cli_command() -> None:
+    assert sorted(TOOLS) == sorted(f"desk_{command}" for command in SHARED)
+
+
+@pytest.mark.parametrize("command", SHARED)
+def test_each_tool_takes_its_commands_arguments(command: str) -> None:
+    """Names, types and choices agree; a flat argument is required as the CLI's is; a carried model's
+    fields are the CLI's flags and the tool's listed gaps."""
+    flat, carried = _mcp_args(f"desk_{command}")
+    cli = _cli_args(command)
+    gaps = MCP_ONLY.get(f"desk_{command}", {})
+    assert set(flat) <= set(cli), f"MCP only: {sorted(set(flat) - set(cli))}"
+    assert set(cli) - set(flat) == set(carried) - set(gaps) if carried else set(cli) == set(flat), (
+        f"CLI only {sorted(set(cli) - set(flat) - set(carried))}, "
+        f"MCP only {sorted(set(carried) - set(cli) - set(gaps))}"
+    )
+    assert not set(gaps) & set(cli), f"{sorted(set(gaps) & set(cli))} is on the CLI after all"
+    for name, tool in (flat | carried).items():
+        if name not in cli:
+            continue
+        flag = cli[name]
+        if (f"desk_{command}", name) not in TYPE_DIFFERS:
+            assert tool.type == flag.type, f"{name}: MCP {tool.type}, CLI {flag.type}"
+        if flag.choices and tool.choices:
+            assert {c.lower() for c in tool.choices} == {c.lower() for c in flag.choices}, name
+        if name in flat:
+            assert tool.required == flag.required, (
+                f"{name}: required MCP {tool.required}, CLI {flag.required}"
+            )
+
+
+@pytest.mark.parametrize("command", SHARED)
+def test_each_tool_says_which_command_it_is(command: str) -> None:
+    description: Any = TOOLS[f"desk_{command}"].description
+    assert f"`ashigaru {command}`" in description
+
+
+@pytest.mark.parametrize("text", [SKILL, CLI_DOC], ids=["skill", "desk-cli.md"])
+def test_every_tool_the_docs_name_exists(text: str) -> None:
+    named = set(re.findall(r"\bdesk_[a-z]+\b", text))
+    assert named and named <= set(TOOLS), sorted(named - set(TOOLS))
+
+
+def test_the_skill_and_the_cli_doc_name_the_cli_only_commands() -> None:
+    for text in (SKILL, CLI_DOC):
+        assert "desk_<command>" in text
+        assert all(f"`{command}`" in text for command in CLI_ONLY)

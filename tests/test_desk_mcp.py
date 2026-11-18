@@ -79,9 +79,9 @@ def test_initialize_and_list_tools(client: TestClient, urls: dict[str, str]) -> 
     )
     names = {tool["name"] for tool in listed.json()["result"]["tools"]}
     assert names == {
-        "usage", "agents", "work", "queue", "outcomes", "assign", "auto", "manual", "wrap",
-        "desk_list", "desk_get", "desk_create", "desk_claim", "desk_update", "desk_report", "desk_file",
-        "desk_wait", "desk_mark",
+        "desk_usage", "desk_agents", "desk_work", "desk_queue", "desk_outcomes", "desk_list", "desk_get",
+        "desk_create", "desk_update", "desk_mark", "desk_report", "desk_assign", "desk_auto", "desk_manual",
+        "desk_wait", "desk_wrap", "desk_claim", "desk_file",
     }  # fmt: skip
     for tool in listed.json()["result"]["tools"]:
         assert not {"who", "identity", "caller"} & set(tool["inputSchema"].get("properties", {}))
@@ -118,7 +118,7 @@ def test_list_and_revoke_are_admin_or_owner(client: TestClient, keys: Keys) -> N
     assert (
         client.delete(f"/v1/identities/{OTHER}/mcp/{code_id}", headers=keys[OTHER]).status_code == NOT_FOUND
     )
-    assert call(client, url, "agents")["isError"] is False
+    assert call(client, url, "desk_agents")["isError"] is False
     revoked = client.delete(f"/v1/identities/{SEAT}/mcp/{code_id}", headers=keys[SEAT])
     assert revoked.status_code == OK and revoked.json()["revoked_at"]
     assert client.post(url, headers=MCP_HEADERS, json={}).status_code == NOT_FOUND
@@ -154,11 +154,11 @@ CASES: list[tuple[str, dict[str, Any], str, str, dict[str, Any] | None, set[str]
     ("desk_report", {"verb": "DONE", "text": "ok"}, "POST", "/v1/items/{id}/report",
      {"verb": "DONE", "text": "ok"}, OWNER_OR_ADMIN),
     ("desk_file", {"task": "child"}, "POST", "/v1/items/{id}/file", {"task": "child"}, OWNER_OR_ADMIN),
-    ("auto", {}, "PATCH", "/v1/items/{id}", {"mode": "auto"}, ADMIN),
-    ("manual", {}, "PATCH", "/v1/items/{id}", {"mode": "manual"}, ADMIN),
-    ("wrap", {"stage": "wrapping"}, "POST", "/v1/items/{id}/wrap", {"stage": "wrapping"}, ADMIN),
-    ("wrap", {"force": True}, "POST", "/v1/items/{id}/wrap", {"force": True}, ADMIN),
-    ("assign", {"seat": OTHER}, "POST", "/v1/items/{id}/assign", {"seat": OTHER}, ADMIN),
+    ("desk_auto", {}, "PATCH", "/v1/items/{id}", {"mode": "auto"}, ADMIN),
+    ("desk_manual", {}, "PATCH", "/v1/items/{id}", {"mode": "manual"}, ADMIN),
+    ("desk_wrap", {"stage": "wrapping"}, "POST", "/v1/items/{id}/wrap", {"stage": "wrapping"}, ADMIN),
+    ("desk_wrap", {"force": True}, "POST", "/v1/items/{id}/wrap", {"force": True}, ADMIN),
+    ("desk_assign", {"seat": OTHER}, "POST", "/v1/items/{id}/assign", {"seat": OTHER}, ADMIN),
     ("desk_claim", {}, "POST", "/v1/items/{id}/claim", None, SEATS),
 ]  # fmt: skip
 Case = tuple[str, dict[str, Any], str, str, dict[str, Any] | None, set[str]]
@@ -166,7 +166,7 @@ Case = tuple[str, dict[str, Any], str, str, dict[str, Any] | None, set[str]]
 
 def arrange(conn: sqlite3.Connection, tool: str, item_id: str) -> None:
     """An item the action can succeed on for someone: SEAT's working story, or a claimable one."""
-    if tool in ("desk_claim", "assign"):
+    if tool in ("desk_claim", "desk_assign"):
         store.insert_item(conn, {"id": item_id, "task": "t", "lane": "exedore-max", "state": "queued"}, JOSUI)
     else:
         store.insert_item(conn, {"id": item_id, "task": "t", "seat": SEAT, "state": "working"}, JOSUI)
@@ -223,10 +223,9 @@ def test_desk_mark_reads_for_all_and_sets_for_an_admin(
 def test_views_answer_every_identity(client: TestClient, keys: Keys, urls: dict[str, str]) -> None:
     for name in IDENTITIES:
         for tool, path in (
-            ("usage", "/v1/usage"),
-            ("agents", "/v1/seats"),
-            ("work", "/v1/check"),
-            ("outcomes", "/v1/outcomes"),
+            ("desk_usage", "/v1/usage"),
+            ("desk_agents", "/v1/seats"),
+            ("desk_outcomes", "/v1/outcomes"),
         ):
             result = call(client, urls[name], tool)
             rest = client.get(path, headers=keys[name]).json()
@@ -240,7 +239,7 @@ def test_queue_lists_queued_then_proposed(
     store.insert_item(conn, {"id": "a1", "task": "q", "state": "queued", "after": ["a2"]}, JOSUI)
     store.insert_item(conn, {"id": "a2", "task": "p", "state": "proposed"}, JOSUI)
     store.insert_item(conn, {"id": "a3", "task": "w", "state": "working"}, JOSUI)
-    content = call(client, urls[SEAT], "queue")["structuredContent"]
+    content = call(client, urls[SEAT], "desk_queue")["structuredContent"]
     assert [(row["id"], row["waits_on"]) for row in content["queued"]] == [
         ("a1", [{"id": "a2", "state": "proposed"}])
     ]
@@ -271,7 +270,12 @@ def test_no_log_and_no_header_carries_a_code(
 ) -> None:
     """Every request shape under /mcp/<code>, through uvicorn's own logging at its most verbose."""
     secret = urls[SEAT].removeprefix("/mcp/")
-    init = {"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "agents", "arguments": {}}}
+    init = {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "tools/call",
+        "params": {"name": "desk_agents", "arguments": {}},
+    }
     caplog.set_level(1)
     with contextmanager(serve)(db) as base, httpx.Client(base_url=base) as http:
         responses = [
@@ -323,7 +327,85 @@ def test_desk_wait_reads_what_rest_reads(
     query: dict[str, str | int] = {"repo": "crunchtools/ashigaru", "sha": sha, "timeout": 0}
     rest = client.get("/v1/ci/wait", headers=keys[SEAT], params=query).json()
     result = call(client, urls[SEAT], "desk_wait", query)
-    assert not result["isError"] and result["structuredContent"] == rest
+    assert not result["isError"] and result["structuredContent"]["result"] == rest
     assert rest["status"] == "failure" and rest["failing"] == ["CI (push)"]
     refused = call(client, urls[SEAT], "desk_wait", {**query, "sha": sha[:12]})
     assert mcp_status(refused) == UNPROCESSABLE_ENTITY
+
+
+def test_desk_work_is_the_round(
+    client: TestClient, keys: Keys, urls: dict[str, str], conn: sqlite3.Connection
+) -> None:
+    store.insert_item(conn, {"id": "a1", "task": "w", "seat": SEAT, "state": "working"}, JOSUI)
+    store.insert_item(conn, {"id": "a2", "task": "q", "state": "queued"}, JOSUI)
+    for name in IDENTITIES:
+        content = call(client, urls[name], "desk_work")["structuredContent"]
+        assert {"items", "seats", "summary", "queue", "catch_up"} <= set(content)
+        assert content == client.get("/v1/work", headers=keys[name]).json()
+    assert [row["id"] for row in content["queue"]["queued"]] == ["a2"]
+    shown = call(client, urls[SEAT], "desk_work", {"all": True})["structuredContent"]
+    assert shown == client.get("/v1/work", headers=keys[SEAT], params={"all": True}).json()
+
+
+def test_desk_work_advance_is_admin_only_and_moves_the_sweep_mark(
+    client: TestClient, keys: Keys, urls: dict[str, str]
+) -> None:
+    refused = call(client, urls[SEAT], "desk_work", {"advance": True})
+    assert mcp_status(refused) == FORBIDDEN
+    assert mcp_status(call(client, urls[SEAT], "desk_mark", {"name": "sweep"})) == NOT_FOUND
+    advanced = call(client, urls[JOSUI], "desk_work", {"advance": True})["structuredContent"]
+    assert advanced["catch_up"]["advanced"] is True
+    mark = client.get("/v1/marks/sweep", headers=keys[SEAT]).json()
+    assert mark["value"] == str(advanced["catch_up"]["until"])
+
+
+def test_desk_get_by_subject_key_and_ref(
+    client: TestClient, urls: dict[str, str], conn: sqlite3.Connection
+) -> None:
+    store.insert_item(conn, {"id": "a1", "task": "t", "subject_key": "RT#7", "ref": "r/x#1"}, JOSUI)
+    store.insert_item(conn, {"id": "a2", "task": "t", "ref": "r/x#1"}, JOSUI)
+    by_key = call(client, urls[SEAT], "desk_get", {"subject_key": "RT#7"})
+    assert by_key["structuredContent"]["id"] == "a1"
+    by_ref = call(client, urls[SEAT], "desk_get", {"ref": "r/x#1"})
+    assert by_ref["structuredContent"]["id"] in ("a1", "a2")
+    assert call(client, urls[SEAT], "desk_get", {"item_id": "a2"})["structuredContent"]["id"] == "a2"
+    assert mcp_status(call(client, urls[SEAT], "desk_get", {"subject_key": "RT#8"})) == NOT_FOUND
+    assert mcp_status(call(client, urls[SEAT], "desk_get", {"ref": "nope"})) == NOT_FOUND
+    assert mcp_status(call(client, urls[SEAT], "desk_get")) == UNPROCESSABLE_ENTITY
+    both = {"item_id": "a1", "ref": "r/x#1"}
+    assert mcp_status(call(client, urls[SEAT], "desk_get", both)) == UNPROCESSABLE_ENTITY
+
+
+def test_desk_assign_with_a_task_creates_then_assigns(
+    client: TestClient, urls: dict[str, str], conn: sqlite3.Connection
+) -> None:
+    with store.transaction(conn):
+        store.write_seat(conn, SEAT, {"lane": "exedore-max", "status": "free", "item": None})
+    arguments = {"record": {"task": "do it", "done_when": "merged", "subject_key": "RT#9"}, "seat": SEAT}
+    assert mcp_status(call(client, urls[SEAT], "desk_assign", arguments)) == FORBIDDEN
+    item = call(client, urls[JOSUI], "desk_assign", arguments)["structuredContent"]
+    assert (item["task"], item["done_when"], item["subject_key"]) == ("do it", "merged", "RT#9")
+    assert item["seat"] == SEAT and store.get_item(conn, item["id"]) is not None
+    assert mcp_status(call(client, urls[JOSUI], "desk_assign", {"seat": SEAT})) == UNPROCESSABLE_ENTITY
+
+
+def test_desk_wait_on_an_item_reads_it(
+    client: TestClient, urls: dict[str, str], conn: sqlite3.Connection
+) -> None:
+    store.insert_item(conn, {"id": "a1", "task": "t", "seat": SEAT, "state": "working"}, JOSUI)
+    working = call(client, urls[SEAT], "desk_wait", {"item_id": "a1", "timeout": 0})
+    assert not working["isError"] and working["structuredContent"]["result"]["state"] == "working"
+    store.insert_item(conn, {"id": "a2", "task": "t", "seat": SEAT, "state": "review"}, JOSUI)
+    settled = call(client, urls[SEAT], "desk_wait", {"item_id": "a2"})
+    assert settled["structuredContent"]["result"]["state"] == "review"
+    assert mcp_status(call(client, urls[SEAT], "desk_wait", {"item_id": "zz", "timeout": 0})) == NOT_FOUND
+    assert mcp_status(call(client, urls[SEAT], "desk_wait", {"timeout": 0})) == UNPROCESSABLE_ENTITY
+    mixed = {"item_id": "a1", "repo": "o/r", "sha": "a" * 40}
+    assert mcp_status(call(client, urls[SEAT], "desk_wait", mixed)) == UNPROCESSABLE_ENTITY
+
+
+@pytest.mark.parametrize("half", [{"repo": "o/r"}, {"sha": "a" * 40}, {"item_id": "a1", "repo": "o/r"}])
+def test_desk_wait_refuses_half_a_commit(
+    client: TestClient, urls: dict[str, str], half: dict[str, str]
+) -> None:
+    assert mcp_status(call(client, urls[SEAT], "desk_wait", {**half, "timeout": 0})) == UNPROCESSABLE_ENTITY

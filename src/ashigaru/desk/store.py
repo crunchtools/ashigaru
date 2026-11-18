@@ -231,13 +231,11 @@ LIST_ITEMS = """
     LIMIT :limit OFFSET :offset
 """
 
-CHECK_ACTIVE = """
-    SELECT * FROM items
-    WHERE coalesce(wrap, '') != 'cleared' AND state NOT IN ('wontdo', 'abandoned')
-    ORDER BY state = 'blocked' DESC, updated_at DESC, id DESC
-"""
-
-CHECK_ALL = "SELECT * FROM items ORDER BY state = 'blocked' DESC, updated_at DESC, id DESC"
+OPEN = "coalesce(wrap, '') != 'cleared' AND state NOT IN ('done', 'wontdo', 'abandoned')"
+CHECK_ORDER = "ORDER BY state = 'blocked' DESC, updated_at DESC, id DESC LIMIT :limit"
+CHECK_ACTIVE = f"SELECT * FROM items WHERE {OPEN} {CHECK_ORDER}"
+CHECK_ALL = f"SELECT * FROM items {CHECK_ORDER}"
+COUNT_OPEN = f"SELECT count(*) FROM items WHERE {OPEN}"
 
 UPSERT_SEAT = """
     INSERT INTO seats (
@@ -541,9 +539,15 @@ def steered_by_other(conn: sqlite3.Connection, item_id: str, actor: str) -> bool
     return row is not None
 
 
-def check(conn: sqlite3.Connection, show_all: bool = False) -> list[dict[str, Any]]:
-    """The /agents check table: blocked first, then newest. Hides wrapped and dead items by default."""
-    rows = conn.execute(CHECK_ALL if show_all else CHECK_ACTIVE)
+def count_open(conn: sqlite3.Connection) -> int:
+    """How many items the check table shows without `show_all`."""
+    return int(conn.execute(COUNT_OPEN).fetchone()[0])
+
+
+def check(conn: sqlite3.Connection, show_all: bool = False, limit: int = -1) -> list[dict[str, Any]]:
+    """The check table: blocked first, then newest, at most `limit` rows (-1: all). Only open items
+    unless `show_all`: a closed item, or a cleared one, is history."""
+    rows = conn.execute(CHECK_ALL if show_all else CHECK_ACTIVE, {"limit": limit})
     return [
         {
             **{key: item[key] for key in ("id", "seat", "mode", "task", "state", "wrap", "next")},

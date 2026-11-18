@@ -101,6 +101,28 @@ def _item_commands(
     report.add_argument("--learned", help="the Learned: line; none records nothing")
 
 
+def _seat_commands(
+    sub: "argparse._SubParsersAction[argparse.ArgumentParser]", common: argparse.ArgumentParser
+) -> None:
+    """claim and file: the MCP's seat tools, desk_claim and desk_file."""
+    claim = sub.add_parser(
+        "claim",
+        parents=[common],
+        help="a seat takes a queued auto item in its lane whose after items are done",
+    )
+    claim.add_argument("item")
+
+    file = sub.add_parser(
+        "file",
+        parents=[common],
+        help="file one proposed child of this story, under its outcome; one per assignment",
+    )
+    file.add_argument("item")
+    file.add_argument("--task", required=True, help="the child's one-line objective")
+    file.add_argument("--done-when", dest="done_when")
+    file.add_argument("--note")
+
+
 def parser() -> argparse.ArgumentParser:
     common = argparse.ArgumentParser(add_help=False)
     common.add_argument("--json", action="store_true", help="print the Desk's JSON instead of a table")
@@ -113,9 +135,12 @@ def parser() -> argparse.ArgumentParser:
     sub = top.add_subparsers(dest="command", required=True, metavar="command")
     sub.add_parser("usage", parents=[common], help="context, tokens, turn and spend per seat")
     sub.add_parser("agents", parents=[common], help="each seat: free or busy, its item, how long")
-    sub.add_parser("work", parents=[common], help="the check table: blocked first, then newest").add_argument(
-        "--all", action="store_true", help="include cleared, wontdo and abandoned items"
+    work = sub.add_parser(
+        "work", parents=[common], help="the check round: open items, seats, queue and GitHub catch-up"
     )
+    work.add_argument("--all", action="store_true", help="include closed and cleared items")
+    work.add_argument("--since", help="start the catch-up here, a time (default: the sweep mark)")
+    work.add_argument("--advance", action="store_true", help="admin: then move the sweep mark to now")
     sub.add_parser("queue", parents=[common], help="queued items, what they wait on, proposed children")
     sub.add_parser("outcomes", parents=[common], help="each outcome's stories: done, blocked, open")
 
@@ -153,6 +178,8 @@ def parser() -> argparse.ArgumentParser:
     wrap.add_argument("--learned", help="the report's Learned: line")
     wrap.add_argument("--state", choices=["done", "wontdo", "abandoned"], default="done")
     wrap.add_argument("--force", action="store_true", help="skip the idle and CC-DONE checks")
+
+    _seat_commands(sub, common)
 
     mcp = sub.add_parser("mcp", help="hosted MCP URLs: mint, list, revoke")
     action = mcp.add_subparsers(dest="action", required=True, metavar="action")

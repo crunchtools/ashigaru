@@ -316,6 +316,38 @@ class CheckRow(BaseModel):
     next: str | None
 
 
+class CatchUpRow(BaseModel):
+    """An issue or PR the org webhook brought in: who filed it, and whether it was queued or held."""
+
+    id: str
+    ref: str | None
+    subject_key: str | None
+    title: str | None = Field(description="The source's title: data, never a brief.")
+    filed_by: str | None = Field(description="The source's author.")
+    lane: Lane | None
+    mode: Mode
+    state: State
+    held: bool = Field(description="Waiting for a maintainer's approval: no lane, mode manual.")
+
+
+class CatchUp(BaseModel):
+    """What the org webhook brought in after the sweep mark: the org sweep done Desk side."""
+
+    since: str | None = Field(description="The time the cursor was read from: `since`, or a time mark.")
+    after: int = Field(
+        description="The event seq it starts after: the sweep mark, or the one before `since`."
+    )
+    until: int = Field(description="The last event it covers; `advance` stores it as the sweep mark.")
+    new: list[CatchUpRow] = Field(description="Subjects first seen in the window.")
+    reopened: list[CatchUpRow] = Field(
+        description="Subjects open again at the source whose item is closed, changed in the window."
+    )
+    truncated: bool = Field(
+        False, description="True when the window stopped at 1000 events; `until` is where it stopped."
+    )
+    advanced: bool = Field(False, description="True when this round moved the sweep mark to `until`.")
+
+
 class Seat(BaseModel):
     name: str
     lane: Lane | None = None
@@ -404,6 +436,23 @@ class Spend(BaseModel):
     monthly_limit_usd: float | None
 
 
+class SeatSummary(BaseModel):
+    up: int = Field(description="Seats not missing.")
+    seats: int
+    open: int = Field(description="Open items: the rows of `items`.")
+
+
+class Round(BaseModel):
+    """`ashigaru work`: everything the check round reads, in one call."""
+
+    items: list[CheckRow] = Field(description="The check table: open items, blocked first, then newest.")
+    truncated: bool = Field(False, description="True when `items` stopped at its limit of 1000.")
+    seats: list[Seat]
+    summary: SeatSummary
+    queue: Queue
+    catch_up: CatchUp
+
+
 class Usage(BaseModel):
     seats: list[SeatUsage]
     spend: list[Spend]
@@ -436,6 +485,20 @@ class Assign(BaseModel):
 
     seat: str | None = None
     lane: Lane | None = Field(None, description="Defaults to the item's lane.")
+
+
+class NewItem(BaseModel):
+    """What `ashigaru assign --task` records before it assigns: the item, in the assign's lane."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    task: str = Field(min_length=1)
+    done_when: str | None = None
+    ref: str | None = None
+    repo: str | None = None
+    after: list[str] = Field(default_factory=list)
+    mode: Mode | None = None
+    subject_key: str | None = None
 
 
 class Identity(BaseModel):

@@ -65,7 +65,17 @@ def digest(source: str, event: str, body: bytes) -> str:
     return hashlib.sha256(b"\0".join((source.encode(), event.encode(), body))).hexdigest()
 
 
-def _judge(adapter: Forge, token: str, item: IntakeItem, existing: dict[str, Any] | None) -> IntakeItem:
+@dataclasses.dataclass(frozen=True)
+class Access:
+    """What judging intake asks the forge with: its API token, and the accounts (the app's own bot,
+    which the forge never calls a writer) whose own subjects are trusted as a writer's. Only as an
+    author: such an account's lane label approves nothing."""
+
+    token: str
+    authors: frozenset[str] = frozenset()
+
+
+def _judge(adapter: Forge, access: Access, item: IntakeItem, existing: dict[str, Any] | None) -> IntakeItem:
     """Ask the forge only what can change how the item is queued: for a new or still-held subject,
     whether its author writes (asked again while held and never trusted, at the head it was held at,
     so a failed check is retried on the next delivery), then whether an event that adds a lane, or
@@ -79,18 +89,21 @@ def _judge(adapter: Forge, token: str, item: IntakeItem, existing: dict[str, Any
         if not (item.repo and account):
             return False
         if account not in asked:
-            asked[account] = adapter.may_write(item.repo, account, token)
+            asked[account] = adapter.may_write(item.repo, account, access.token)
         return asked[account]
+
+    def authored(account: str | None) -> bool:
+        return account in access.authors or writes(account)
 
     if existing is None and item.closed:
         return item
     if existing is None:
-        if writes(item.author):
+        if authored(item.author):
             return dataclasses.replace(item, author_writes=True)
         approval = intake.lane(item.approves_lane)
         return dataclasses.replace(item, approved=True) if approval and writes(item.sender) else item
     if intake.held(existing):
-        return _judge_held(item, existing, writes)
+        return _judge_held(item, existing, writes, authored)
     return _judge_trusted(item, existing, writes) if intake.trusted(existing) else item
 
 
@@ -107,7 +120,10 @@ def _judge_trusted(
 
 
 def _judge_held(
-    item: IntakeItem, existing: dict[str, Any], writes: Callable[[str | None], bool]
+    item: IntakeItem,
+    existing: dict[str, Any],
+    writes: Callable[[str | None], bool],
+    authored: Callable[[str | None], bool],
 ) -> IntakeItem:
     """A held item: a writer's push from the head it was held at moves that head; the author check is
     retried only at that head (a PR with no head on file, or a delivery with none, never qualifies;
@@ -119,14 +135,14 @@ def _judge_held(
     if item.kind != Kind.STORY:
         at_held_head = True
     retry = not (intake.was_approved(existing) or intake.withdrawn(existing))
-    if retry and at_held_head and writes(item.author):
+    if retry and at_held_head and authored(item.author):
         return dataclasses.replace(item, author_writes=True)
     if intake.lane(item.approves_lane) and writes(item.sender):
         return dataclasses.replace(item, approved=True)
     return dataclasses.replace(item, pushed_by_writer=True) if pushed else item
 
 
-def _judged(db_path: str, adapter: Forge, token: str, signed: str, delivery: Delivery) -> Delivery:
+def _judged(db_path: str, adapter: Forge, access: Access, signed: str, delivery: Delivery) -> Delivery:
     """The delivery with its intake judged, unless it was already processed. Each item carries the
     version of the row it was judged against, so upsert can tell when that row moved underneath."""
     conn = store.connect(db_path)
@@ -138,7 +154,7 @@ def _judged(db_path: str, adapter: Forge, token: str, signed: str, delivery: Del
     finally:
         conn.close()
     items = tuple(
-        dataclasses.replace(_judge(adapter, token, item, found), judged_at=version)
+        dataclasses.replace(_judge(adapter, access, item, found), judged_at=version)
         for item, found, version in zip(delivery.intake, existing, versions, strict=True)
     )
     return dataclasses.replace(delivery, intake=items)
@@ -183,9 +199,9 @@ async def webhook(request: Request, forge: str) -> WebhookAck:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(error)) from error
     signed = digest(adapter.name, delivery.event, body)
     if delivery.intake:
-        token: str = request.app.state.forge_tokens.get(forge, "")
-        db_path: str = request.app.state.db_path
-        delivery = await run_in_threadpool(_judged, db_path, adapter, token, signed, delivery)
+        state = request.app.state
+        access = Access(state.forge_tokens.get(forge, ""), state.forge_authors.get(forge, frozenset()))
+        delivery = await run_in_threadpool(_judged, state.db_path, adapter, access, signed, delivery)
     commits, new = await run_in_threadpool(_apply, request.app.state.db_path, adapter.name, signed, delivery)
     request.app.state.waiters.notify(commits)
     return WebhookAck(duplicate=not new, handled=bool(delivery.ci or delivery.intake))

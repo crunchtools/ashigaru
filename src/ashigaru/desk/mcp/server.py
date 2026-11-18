@@ -9,9 +9,11 @@ the API's, line for line, and the MCP is never a side door: a 403 there is a 403
 here. Stateless, so a revoked code fails on its very next request.
 """
 
+import asyncio
 import logging
 import re
 import sqlite3
+import time
 from collections.abc import AsyncIterator, Iterator
 from contextlib import asynccontextmanager, contextmanager
 from pathlib import Path
@@ -32,7 +34,6 @@ from ..model import (
     MARK_NAME,
     MAX_WAIT,
     Assign,
-    CheckRow,
     CIResult,
     CIWait,
     FileChild,
@@ -44,9 +45,11 @@ from ..model import (
     Mark,
     MarkSet,
     Mode,
+    NewItem,
     OutcomeRow,
     Queue,
     Report,
+    Round,
     Seat,
     Usage,
     Verb,
@@ -58,6 +61,8 @@ from . import codes
 CALLER = "desk_caller"
 SECRET_PATH = re.compile(r"/mcp/[A-Za-z0-9_-]+")
 REDACTED = "/mcp/<code>"
+SETTLED = {"review", "done", "blocked", "wontdo", "abandoned"}
+POLL = 2.0
 DB = "desk_db"
 WAITERS = "desk_waiters"
 ItemId = Annotated[str, Field(description="An item id, e.g. a204.")]
@@ -65,8 +70,9 @@ ItemId = Annotated[str, Field(description="An item id, e.g. a204.")]
 mcp = FastMCP(
     "ashigaru-desk",
     instructions=(
-        "The Ashigaru Desk: one queue of work items and the seats that do them. The tools mirror the "
-        "`ashigaru` CLI. This URL is bound to one identity; a seat writes only its own open items."
+        "The Ashigaru Desk: one queue of work items and the seats that do them. The tools are "
+        "`desk_<command>` for each `ashigaru` command (mcp and hook are CLI-only). This URL is bound to "
+        "one identity; a seat writes only its own open items."
     ),
 )
 
@@ -90,30 +96,38 @@ def desk() -> Iterator[tuple[sqlite3.Connection, auth.Caller]]:
 
 
 @mcp.tool
-def usage() -> Usage:
+def desk_usage() -> Usage:
     """`ashigaru usage`: per seat context, tokens, turn time and model; spend by billing source."""
     with desk() as (conn, who):
         return api.usage(conn, who)
 
 
 @mcp.tool
-def agents() -> list[Seat]:
+def desk_agents() -> list[Seat]:
     """`ashigaru agents`: every seat, free or busy, the item it holds, and since when."""
     with desk() as (conn, who):
         return api.list_seats(conn, who)
 
 
 @mcp.tool
-def work(
-    show_all: Annotated[bool, Field(description="Include cleared, wontdo and abandoned.")] = False,
-) -> list[CheckRow]:
-    """`ashigaru work`: the /agents check table, items blocked first, then newest."""
+def desk_work(
+    all: Annotated[bool, Field(description="Include closed and cleared items.")] = False,
+    since: Annotated[
+        str | None, Field(description="Catch up from this time instead of the sweep mark.")
+    ] = None,
+    advance: Annotated[bool, Field(description="Admin: move the sweep mark to this round's end.")] = False,
+) -> Round:
+    """`ashigaru work`: the whole check round: the check table (open items unless `all`), the seats,
+    the queue, and the forge catch-up since the sweep mark. With `advance`, admin only, the sweep
+    mark then moves to the catch-up's `until`."""
     with desk() as (conn, who):
-        return api.check(conn, who, show_all)
+        if advance:
+            return api.advance(conn, api.admin(who), all, since)
+        return api.work(conn, who, all, since)
 
 
 @mcp.tool
-def queue() -> Queue:
+def desk_queue() -> Queue:
     """`ashigaru queue`: queued items with the state of each item they wait on (`waits_on`), then
     proposed children with their expiry."""
     with desk() as (conn, who):
@@ -121,7 +135,7 @@ def queue() -> Queue:
 
 
 @mcp.tool
-def outcomes() -> list[OutcomeRow]:
+def desk_outcomes() -> list[OutcomeRow]:
     """`ashigaru outcomes`: each outcome with its stories' total, done, blocked and open counts."""
     with desk() as (conn, who):
         return api.outcomes(conn, who)
@@ -136,39 +150,73 @@ def desk_list(filters: ItemFilter | None = None) -> list[Item]:
 
 
 @mcp.tool
-def desk_get(item_id: ItemId) -> Item:
-    """One item, every field."""
+def desk_get(
+    item_id: Annotated[str | None, Field(description="An item id, e.g. a204.")] = None,
+    subject_key: Annotated[str | None, Field(description="The item's unique key, e.g. RT#7.")] = None,
+    ref: Annotated[str | None, Field(description="The most recently updated item with this ref.")] = None,
+) -> Item:
+    """`ashigaru get`: one item, every field, by exactly one of `item_id`, `subject_key` or `ref`."""
+    if sum(x is not None for x in (item_id, subject_key, ref)) != 1:
+        raise ToolError("422: name one of: item_id, subject_key, ref")
     with desk() as (conn, who):
-        return api.get_item(conn, who, item_id)
+        if item_id is not None:
+            return api.get_item(conn, who, item_id)
+        found = api.list_items(
+            conn, who, ItemFilter.model_validate({"subject_key": subject_key, "ref": ref, "limit": 1})
+        )
+        if not found:
+            raise ToolError(
+                f"404: no item with {'subject_key' if subject_key else 'ref'} {subject_key or ref}"
+            )
+        return found[0]
 
 
 # Actions
 
 
 @mcp.tool
-def assign(item_id: ItemId, seat: str | None = None, lane: Lane | None = None) -> Item:
+def desk_assign(
+    item_id: Annotated[
+        str | None, Field(description="An item id; with `record`, the id to record it under.")
+    ] = None,
+    seat: str | None = None,
+    lane: Lane | None = None,
+    record: Annotated[
+        NewItem | None, Field(description="Record this new item first, then assign it.")
+    ] = None,
+) -> Item:
     """`ashigaru assign`, admin only: give the item to `seat`, or to the seat in `lane` (default: the
-    item's) that has been free longest and is not held by Scott."""
+    item's) that has been free longest and is not held by Scott. With `record` (`assign --task`) the
+    item is recorded first, in `lane`."""
+    if seat and lane:
+        raise ToolError("422: name a seat or a lane, not both")
     with desk() as (conn, who):
-        return api.assign(conn, api.admin(who), item_id, Assign(seat=seat, lane=lane))
+        admin = api.admin(who)
+        if record is not None:
+            fields = record.model_dump(exclude_none=True) | {"id": item_id, "lane": lane}
+            new = {key: value for key, value in fields.items() if value is not None}
+            item_id = api.create_item(conn, admin, ItemCreate.model_validate(new)).id
+        if item_id is None:
+            raise ToolError("422: name an item_id, or give a record to create one")
+        return api.assign(conn, admin, item_id, Assign(seat=seat, lane=lane))
 
 
 @mcp.tool
-def auto(item_id: ItemId) -> Item:
+def desk_auto(item_id: ItemId) -> Item:
     """`ashigaru auto`: hand the item to Josui."""
     with desk() as (conn, who):
         return api.patch_item(conn, who, item_id, ItemPatch(mode=Mode.AUTO))
 
 
 @mcp.tool
-def manual(item_id: ItemId) -> Item:
+def desk_manual(item_id: ItemId) -> Item:
     """`ashigaru manual`: hand the item to Scott."""
     with desk() as (conn, who):
         return api.patch_item(conn, who, item_id, ItemPatch(mode=Mode.MANUAL))
 
 
 @mcp.tool
-def wrap(
+def desk_wrap(
     item_id: ItemId,
     stage: Annotated[
         Wrap, Field(description="wrapping once /cc seat is sent; cleared closes.")
@@ -216,7 +264,7 @@ def desk_mark(
 
 @mcp.tool
 def desk_claim(item_id: ItemId) -> Item:
-    """A seat takes a queued, unowned, auto item in its lane whose `after` items are done."""
+    """`ashigaru claim`: a seat takes a queued, unowned, auto item in its lane whose `after` are done."""
     with desk() as (conn, who):
         return api.claim(conn, who, item_id)
 
@@ -253,23 +301,44 @@ def desk_report(
 
 @mcp.tool
 def desk_file(item_id: ItemId, task: str, done_when: str | None = None, note: str | None = None) -> Item:
-    """File one child of this story as proposed, under its outcome; one per assignment."""
+    """`ashigaru file`: file one child of this story as proposed, under its outcome; one per assignment."""
     with desk() as (conn, who):
         return api.file(conn, who, item_id, FileChild(task=task, done_when=done_when, note=note))
 
 
 @mcp.tool
 async def desk_wait(
-    repo: Annotated[str, Field(description="owner/name, e.g. crunchtools/ashigaru.")],
-    sha: Annotated[str, Field(description="The full commit id.")],
+    item_id: Annotated[str | None, Field(description="Wait on this item to settle.")] = None,
+    repo: Annotated[str | None, Field(description="owner/name, e.g. crunchtools/ashigaru.")] = None,
+    sha: Annotated[str | None, Field(description="The full commit id.")] = None,
     timeout: Annotated[int, Field(description="Seconds to wait, at most 90; 0 reads now.")] = MAX_WAIT,
-) -> CIResult:
-    """`ashigaru wait`: the commit's CI result as soon as a webhook delivery settles it, or as it
-    stands after `timeout` (status still `pending`: call again). Nothing polls the forge."""
+) -> Item | CIResult:
+    """`ashigaru wait`: with `item_id`, the item as soon as it is review, done, blocked, wontdo or
+    abandoned; with `repo` and `sha`, the commit's CI result as soon as a webhook delivery settles it.
+    Either way, as it stands after `timeout` (still working or `pending`: call again)."""
+    commit = repo is not None and sha is not None
+    if (repo is None) != (sha is None) or (item_id is not None) == commit:
+        raise ToolError("422: name an item_id, or a repo and a sha")
     with desk() as (conn, who):
-        query = CIWait(repo=repo, sha=sha, timeout=timeout)
+        if item_id is not None:
+            return await wait_item(conn, item_id, min(max(timeout, 0), MAX_WAIT))
+        query = CIWait(repo=repo or "", sha=sha or "", timeout=timeout)
         waiters = get_http_request().scope["state"][WAITERS]
         return await waiters.wait(conn, query.repo, query.sha, query.timeout)
+
+
+async def wait_item(conn: sqlite3.Connection, item_id: str, timeout: int) -> Item:
+    """The item once it has settled, or as it stands after `timeout` seconds."""
+    deadline = time.monotonic() + timeout
+    while True:
+        row = await run_in_threadpool(store.get_item, conn, item_id)
+        if row is None:
+            raise ToolError("404: no such item")
+        item = Item.model_validate(row)
+        left = deadline - time.monotonic()
+        if item.state in SETTLED or left <= 0:
+            return item
+        await asyncio.sleep(min(left, POLL))
 
 
 class Endpoint:
