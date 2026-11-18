@@ -655,6 +655,22 @@ def test_an_approval_recorded_without_a_head_is_held_on_an_outsiders_delivery(
     assert (pr_item(conn)["mode"], pr_item(conn)["extra"]["held_for"]) == ("manual", "head moved")
 
 
+def test_a_writers_delivery_binds_an_approval_recorded_without_a_head(
+    trusting: TestClient, conn: sqlite3.Connection
+) -> None:
+    item = approved_pr(trusting, conn)
+    with store.transaction(conn):
+        legacy = {key: value for key, value in item["extra"].items() if key != "approved_head"}
+        store.update_item(conn, item["id"], {"extra": legacy}, "intake")
+    deliver(trusting, "pull_request", fork_pr("synchronize", "maintainer", PUSHED), "d-3")
+    after = pr_item(conn)
+    assert (after["mode"], after["extra"]["trusted"], after["extra"]["approved_head"]) == (
+        "auto",
+        True,
+        PUSHED,
+    )
+
+
 def test_a_writers_push_moves_the_approval_with_it(trusting: TestClient, conn: sqlite3.Connection) -> None:
     approved_pr(trusting, conn)
     deliver(trusting, "pull_request", fork_pr("synchronize", "maintainer", PUSHED), "d-3")
