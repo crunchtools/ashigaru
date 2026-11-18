@@ -421,6 +421,16 @@ def test_update_sets_and_clears(desk: FakeDesk) -> None:
     assert main(["update", "a1"]) == 1
 
 
+def test_mark_reads_and_sets(desk: FakeDesk, capsys: pytest.CaptureFixture[str]) -> None:
+    mark = {"name": "sweep", "value": "2026-11-18T06:00:00Z", "updated_at": "x", "updated_by": "Josui Prime"}
+    desk.on("GET", "/v1/marks/sweep", (200, mark))
+    desk.on("PUT", "/v1/marks/sweep", (200, mark))
+    assert main(["mark", "sweep"]) == 0
+    assert "2026-11-18T06:00:00Z" in capsys.readouterr().out
+    assert main(["mark", "sweep", "--set", "2026-11-18T06:00:00Z"]) == 0
+    assert desk.calls("PUT", "/v1/marks/sweep")[0].body == {"value": "2026-11-18T06:00:00Z"}
+
+
 def test_report(desk: FakeDesk) -> None:
     desk.on("POST", "/v1/items/a1/report", (200, item(state="review")))
     assert main(["report", "a1", "done", "--text", "PR #5", "--learned", "none"]) == 0

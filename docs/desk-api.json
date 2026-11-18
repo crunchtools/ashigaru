@@ -1305,6 +1305,51 @@
         "title": "Lane",
         "type": "string"
       },
+      "Mark": {
+        "description": "A named watermark Josui keeps on the Desk, such as where the last sweep reached.",
+        "properties": {
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "updated_at": {
+            "title": "Updated At",
+            "type": "string"
+          },
+          "updated_by": {
+            "title": "Updated By",
+            "type": "string"
+          },
+          "value": {
+            "title": "Value",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "value",
+          "updated_at",
+          "updated_by"
+        ],
+        "title": "Mark",
+        "type": "object"
+      },
+      "MarkSet": {
+        "additionalProperties": false,
+        "properties": {
+          "value": {
+            "description": "Usually a time, YYYY-MM-DDTHH:MM:SSZ.",
+            "minLength": 1,
+            "title": "Value",
+            "type": "string"
+          }
+        },
+        "required": [
+          "value"
+        ],
+        "title": "MarkSet",
+        "type": "object"
+      },
       "McpCode": {
         "properties": {
           "code_id": {
@@ -4648,6 +4693,156 @@
         "summary": "Wrap",
         "tags": [
           "items"
+        ]
+      }
+    },
+    "/v1/marks/{name}": {
+      "get": {
+        "description": "A named watermark, such as `sweep`: how far the last sweep reached. 404 until first set.",
+        "operationId": "get_mark_v1_marks__name__get",
+        "parameters": [
+          {
+            "description": "e.g. sweep",
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "description": "e.g. sweep",
+              "pattern": "^[a-z][a-z0-9-]{0,63}$",
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Mark"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Missing, unknown or revoked API key."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "No such item, seat, identity or key."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Mark",
+        "tags": [
+          "views"
+        ]
+      },
+      "put": {
+        "description": "Admin: set a watermark, replacing its value; the Desk stamps when and by whom.",
+        "operationId": "set_mark_v1_marks__name__put",
+        "parameters": [
+          {
+            "description": "e.g. sweep",
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "description": "e.g. sweep",
+              "pattern": "^[a-z][a-z0-9-]{0,63}$",
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MarkSet"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Mark"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Missing, unknown or revoked API key."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The caller's role, or its seat, may not do this."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Set Mark",
+        "tags": [
+          "views"
         ]
       }
     },

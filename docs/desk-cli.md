@@ -3,9 +3,9 @@
 `ashigaru` is a client of the Desk's REST API ([desk-api.md](desk-api.md)).
 Its command set is the one the `/ashigaru` skill and the Desk's MCP tools use:
 the same names, the same arguments (`src/ashigaru/cli/commands.py`). The item
-commands `list`, `get`, `create`, `update`, `report` and `wait <repo> <sha>` are
-the MCP tools `desk_list`, `desk_get`, `desk_create`, `desk_update`,
-`desk_report` and `desk_wait`. Every decision (what `wrap` checks, what
+commands `list`, `get`, `create`, `update`, `report`, `mark` and
+`wait <repo> <sha>` are the MCP tools `desk_list`, `desk_get`, `desk_create`,
+`desk_update`, `desk_report`, `desk_mark` and `desk_wait`. Every decision (what `wrap` checks, what
 `queue` shows) is the Desk's, so a terminal and an MCP client get the same
 answer.
 
@@ -39,6 +39,7 @@ Every view and action prints a table, or the Desk's JSON with `--json`.
 | `get <item> \| --subject-key K \| --ref URL` | one item: by id, by `subject_key`, or the most recently updated with that ref |
 | `create --task T [--id] [--subject-key K] [--kind] [--parent] [--done-when] [--ref] [--repo] [--lane] [--mode] [--state] [--after A]... [--priority] [--note] [--filed-by]` | admin: record an item without assigning it, `queued` unless `--state` says otherwise. A taken `subject_key` or id prints the item that holds it and exits 1 |
 | `update <item> [--state] [--result] [--next] [--note] [--learned] [--blocked-reason] [--check-after] [--[no-]memorized] [...] [--clear FIELD]...` | set an item's fields (`create`'s too, admin only); `--clear` sets one to null. A seat sets only its own open item's `state` (working, review, blocked), `result`, `next`, `learned`, `note`, `blocked_reason`, `memorized`, `check_after` |
+| `mark <name> [--set VALUE]` | a named watermark, such as `sweep`, the time the last sweep reached; `--set` (admin) moves it |
 | `report <item> DONE\|BLOCKED\|WORKING\|CC-DONE [--text T] [--next N] [--learned L]` | the report contract: DONE to review with the text as result, BLOCKED to blocked with it as reason, WORKING to working; CC-DONE marks the learnings memorized; a Learned of `none` records nothing |
 | `assign <item> [--seat S \| --lane L]` | assign; with no seat, the Desk picks the lane's seat free longest. `--task` (with `--subject-key`, `--done-when`, `--ref`, `--repo`, `--after`, `--mode`) records a new item first; if that `subject_key` is taken, or the assign is refused, it prints the item and exits 1, so the id is never lost. Sending the brief stays with Josui |
 | `auto <item>`, `manual <item>` | hand an item to Josui or to Scott |

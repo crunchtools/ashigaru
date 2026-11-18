@@ -54,7 +54,7 @@ def _fields(command: argparse.ArgumentParser, options: tuple[tuple[str, str | No
 def _item_commands(
     sub: "argparse._SubParsersAction[argparse.ArgumentParser]", common: argparse.ArgumentParser
 ) -> None:
-    """list, get, create, update and report: the MCP's desk_* item tools."""
+    """list, get, create, update, mark and report: the MCP's desk_* tools."""
     listing = sub.add_parser("list", parents=[common], help="items, newest first, by any filters")
     listing.add_argument("--state", action="append", help="any of these states (repeatable)")
     for flag in ("--seat", "--lane", "--kind", "--mode", "--parent", "--subject-key", "--ref"):
@@ -86,6 +86,10 @@ def _item_commands(
     update.add_argument("--memorized", action=argparse.BooleanOptionalAction)
     update.add_argument("--clear", action="append", default=[], choices=CLEARABLE, metavar="FIELD")
     _fields(update, FIELDS + UPDATE_ONLY)
+
+    mark = sub.add_parser("mark", parents=[common], help="a named watermark, e.g. sweep; --set to move it")
+    mark.add_argument("name")
+    mark.add_argument("--set", dest="value", metavar="VALUE", help="admin: set it to this, usually a time")
 
     report = sub.add_parser("report", parents=[common], help="DONE, BLOCKED, WORKING or CC-DONE on an item")
     report.add_argument("item")

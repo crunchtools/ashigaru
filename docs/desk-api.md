@@ -56,6 +56,8 @@ can return.
 | `GET /items/{id}/events` | the item's history, ledger lines included, oldest first; pages of `limit` (200, at most 1000) after `after` (a seq) |
 | `GET /ci/wait` | `desk_wait`: `repo` (owner/name) and full `sha`; the commit's CI result as soon as it is not `pending`, else as it stands after `timeout` seconds (default and most 90; 0 reads now). A client waits again on `pending` |
 | `GET /check` | the `/agents check` table: id, seat, mode, task, state, wrap, result or blocker, next. Blocked first, then newest; `?all=true` includes cleared, wontdo and abandoned |
+| `GET /marks/{name}` | a named watermark (`sweep`: how far the last sweep reached): value, updated_at, updated_by; 404 until first set |
+| `PUT /marks/{name}` | admin: `{value}` sets it; names are `[a-z][a-z0-9-]*` |
 | `GET /queue` | `ashigaru queue`: the newest 1000 `queued` items, each with `waits_on` (every `after` id and its state, `unknown` for no such item), and the newest 1000 `proposed` children; `truncated` is true when either list was cut |
 | `GET /seats`, `GET /seats/{name}` | seat state: free/busy, owner, `hold` (`free`, `busy-auto` or `busy-manual`), turn, task, item, since, and the last usage report. `missing` is true for a seat whose row has not changed in 24 hours; the list ends with each seat identity that never checked in, `missing` with a null `updated_at` |
 | `PATCH /seats/{name}` | created on first call; a seat sends `turn` and `task`. `since` is server-set when `status` changes, `turn_started_at` when the turn goes active. The Desk infers Scott's hold (below) |
@@ -84,8 +86,8 @@ redact the path the same way.
 
 The tools are the shared command set: `usage`, `agents`, `work`, `queue`,
 `outcomes`, `assign`, `auto`, `manual`, `wrap`, plus `desk_list`, `desk_get`,
-`desk_create`, `desk_claim`, `desk_update`, `desk_report`, `desk_file` and
-`desk_wait` (the `GET /ci/wait` long-poll). Each calls the REST route's own
+`desk_create`, `desk_claim`, `desk_update`, `desk_report`, `desk_file`,
+`desk_mark` and `desk_wait` (the `GET /ci/wait` long-poll). Each calls the REST route's own
 function with the code's identity, so authority is the API's: a refusal comes
 back as a tool error carrying the same status and detail.
 

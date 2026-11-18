@@ -98,6 +98,16 @@ def get(
     return found[0]
 
 
+def mark(desk: Desk, name: str, value: str | None = None) -> dict[str, Any]:
+    """A named watermark, such as `sweep`; with a `value` (admin), set it to that. The MCP tool is
+    desk_mark."""
+    path = f"/v1/marks/{quote(name, safe='')}"
+    result: dict[str, Any] = (
+        desk.get(path) if value is None else desk.request("PUT", path, body={"value": value})
+    )
+    return result
+
+
 # Actions
 
 
@@ -275,7 +285,7 @@ def mcp_revoke(desk: Desk, code_id: str, identity: str | None = None) -> dict[st
 COMMANDS: dict[str, Callable[..., Any]] = {
     command.__name__: command
     for command in (
-        *(usage, agents, work, queue, outcomes, get),
+        *(usage, agents, work, queue, outcomes, get, mark),
         *(create, update, report, assign, auto, manual, wait, wrap),
         *(mcp_mint, mcp_list, mcp_revoke),
     )

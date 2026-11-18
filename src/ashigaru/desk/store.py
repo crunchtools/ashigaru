@@ -171,6 +171,14 @@ MIGRATIONS: tuple[str, ...] = (
     );
     CREATE INDEX deliveries_received ON deliveries(received_at);
     """,
+    """
+    CREATE TABLE marks (
+        name TEXT PRIMARY KEY,
+        value TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        updated_by TEXT NOT NULL
+    );
+    """,
 )
 
 ITEM_DEFAULTS: dict[str, Any] = {
@@ -671,3 +679,20 @@ def ci_checks(conn: sqlite3.Connection, repo: str, sha: str) -> list[dict[str, A
 def item_by_subject(conn: sqlite3.Connection, subject_key: str) -> dict[str, Any] | None:
     row = conn.execute("SELECT * FROM items WHERE subject_key = ?", (subject_key,)).fetchone()
     return decode(row) if row else None
+
+
+# Marks
+
+
+def get_mark(conn: sqlite3.Connection, name: str) -> dict[str, Any] | None:
+    row = conn.execute("SELECT * FROM marks WHERE name = ?", (name,)).fetchone()
+    return dict(row) if row else None
+
+
+def set_mark(conn: sqlite3.Connection, name: str, value: str, actor: str) -> None:
+    conn.execute(
+        "INSERT INTO marks (name, value, updated_at, updated_by) VALUES (?, ?, ?, ?)"
+        " ON CONFLICT (name) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at,"
+        " updated_by = excluded.updated_by",
+        (name, value, now(), actor),
+    )

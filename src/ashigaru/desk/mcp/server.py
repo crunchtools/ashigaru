@@ -40,6 +40,8 @@ from ..model import (
     ItemFilter,
     ItemPatch,
     Lane,
+    Mark,
+    MarkSet,
     Mode,
     OutcomeRow,
     Queue,
@@ -197,6 +199,18 @@ def desk_create(
     a 409 that names the item holding it."""
     with desk() as (conn, who):
         return api.create_item(conn, api.admin(who), ItemCreate.model_validate(fields))
+
+
+@mcp.tool
+def desk_mark(
+    name: Annotated[str, Field(description="The watermark, e.g. sweep.")],
+    value: Annotated[str | None, Field(description="Set it to this (admin); omit to read it.")] = None,
+) -> Mark:
+    """`ashigaru mark`: read a named watermark, such as how far the last sweep reached, or set it."""
+    with desk() as (conn, who):
+        if value is None:
+            return api.get_mark(conn, who, name)
+        return api.set_mark(conn, api.admin(who), name, MarkSet(value=value))
 
 
 @mcp.tool

@@ -529,3 +529,18 @@ class WebhookAck(BaseModel):
         description="True when the same signed delivery (forge, event and body) was already processed."
     )
     handled: bool = Field(description="True when an adapter mapped the event to CI or intake.")
+
+
+class Mark(BaseModel):
+    """A named watermark Josui keeps on the Desk, such as where the last sweep reached."""
+
+    name: str
+    value: str
+    updated_at: str
+    updated_by: str
+
+
+class MarkSet(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    value: str = Field(min_length=1, description="Usually a time, YYYY-MM-DDTHH:MM:SSZ.")

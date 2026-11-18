@@ -167,10 +167,17 @@ CHECKS: list[Column] = [
     ("VERDICT", lambda c: c["verdict"]),
     ("URL", lambda c: c.get("url")),
 ]
+MARK: list[Column] = [
+    ("MARK", lambda m: m["name"]),
+    ("VALUE", lambda m: m["value"]),
+    ("UPDATED", lambda m: m["updated_at"]),
+    ("BY", lambda m: m["updated_by"]),
+]
 LISTS = {"agents": AGENTS, "work": WORK, "outcomes": OUTCOMES, "mcp_list": CODES}
 VIEWS: dict[str, Callable[[Any], str]] = {
     "list": lambda items: table([_row(item) for item in items], WORK),
     "wait": waited,
+    "mark": lambda m: table([m], MARK),
     "usage": usage,
     "queue": queue,
     "mcp_mint": minted,

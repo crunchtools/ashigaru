@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query, Request, status
+from fastapi import Path as PathParam
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 
@@ -34,6 +35,8 @@ from .model import (
     ItemFilter,
     ItemPatch,
     KeyCreate,
+    Mark,
+    MarkSet,
     MintedKey,
     OutcomeRow,
     Problem,
@@ -351,6 +354,22 @@ def claim(conn: Conn, who: Who, item_id: str) -> Item:
     except store.Conflict as error:
         raise _conflict(error) from error
     return Item.model_validate(store.get_item(conn, item_id))
+
+
+MarkName = Annotated[str, PathParam(pattern=r"^[a-z][a-z0-9-]{0,63}$", description="e.g. sweep")]
+
+
+@router.get("/v1/marks/{name}", tags=["views"], responses=errors(401, 404))
+def get_mark(conn: Conn, who: Who, name: MarkName) -> Mark:
+    """A named watermark, such as `sweep`: how far the last sweep reached. 404 until first set."""
+    return Mark.model_validate(_found(store.get_mark(conn, name), "mark"))
+
+
+@router.put("/v1/marks/{name}", tags=["views"], responses=errors(401, 403))
+def set_mark(conn: Conn, who: Admin, name: MarkName, body: MarkSet) -> Mark:
+    """Admin: set a watermark, replacing its value; the Desk stamps when and by whom."""
+    store.set_mark(conn, name, body.value, who.name)
+    return Mark.model_validate(store.get_mark(conn, name))
 
 
 @router.get("/v1/identities", tags=["identities"], responses=errors(401, 403))

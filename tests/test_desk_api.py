@@ -231,6 +231,23 @@ def test_seats_show_the_missing(client: TestClient, keys: Keys, conn: sqlite3.Co
     assert client.get(f"/v1/seats/{SEAT}", headers=keys["ci"]).json()["missing"] is True
 
 
+def test_marks_are_read_by_all_and_set_by_an_admin(client: TestClient, keys: Keys) -> None:
+    assert client.get("/v1/marks/sweep", headers=keys["ci"]).status_code == NOT_FOUND
+    stamp = {"value": "2026-11-18T06:00:00Z"}
+    assert client.put("/v1/marks/sweep", headers=keys[SEAT], json=stamp).status_code == FORBIDDEN
+    assert (
+        client.put("/v1/marks/Bad_Name", headers=keys[JOSUI], json=stamp).status_code == UNPROCESSABLE_ENTITY
+    )
+    assert (
+        client.put("/v1/marks/sweep", headers=keys[JOSUI], json={"value": ""}).status_code
+        == UNPROCESSABLE_ENTITY
+    )
+    client.put("/v1/marks/sweep", headers=keys[JOSUI], json={"value": "2026-11-17T06:00:00Z"})
+    moved = client.put("/v1/marks/sweep", headers=keys[JOSUI], json=stamp).json()
+    assert (moved["value"], moved["updated_by"]) == (stamp["value"], JOSUI)
+    assert client.get("/v1/marks/sweep", headers=keys["ci"]).json() == moved
+
+
 def test_check_hides_cleared_and_dead_items_and_puts_blocked_first(client: TestClient, keys: Keys) -> None:
     def make(**fields: object) -> str:
         return str(client.post("/v1/items", headers=keys[JOSUI], json={"task": "t", **fields}).json()["id"])
