@@ -187,6 +187,17 @@ def test_check_runs_paginate(monkeypatch: pytest.MonkeyPatch) -> None:
     assert sum("check-runs" in url for url in api.asked) == PAGES
 
 
+def test_commit_statuses_paginate(monkeypatch: pytest.MonkeyPatch) -> None:
+    def page(url: str) -> dict[str, Any]:
+        n = 100 if url.endswith("page=1") else 1
+        entries = [{"context": f"{url[-1]}-{i}", "state": "success"} for i in range(n)]
+        return {"total_count": TOTAL, "statuses": entries}
+
+    api = install(monkeypatch, **{f"commits__{SHA}__status": page})
+    assert len(github.reported(REPO, SHA, "token")) == TOTAL
+    assert sum("/status?" in url for url in api.asked) == PAGES
+
+
 def test_required_without_a_report_is_pending(monkeypatch: pytest.MonkeyPatch) -> None:
     install(
         monkeypatch,

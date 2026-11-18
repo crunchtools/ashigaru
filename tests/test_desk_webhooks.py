@@ -505,6 +505,8 @@ def test_required_checks_that_cannot_be_read_never_make_success(
     found = result(hooked, keys)
     assert found["status"] == "pending" and "could not be read" in found["unverified"]
     assert found["required"] is None
+    required_checks.refusal = urllib.error.HTTPError("u", 403, "Forbidden", Message(), io.BytesIO())
+    assert result(hooked, keys)["unverified"] == "the required checks could not be read (HTTP 403)"
 
 
 def test_a_pending_commit_asks_the_forge_only_at_the_end(

@@ -172,27 +172,31 @@ def _combine(verdicts: list[Verdict]) -> Verdict:
     return next((v for v in verdicts if v in PASSING), Verdict.FAILURE)
 
 
+def _pages(url: str, key: str, token: str) -> list[Mapping[str, Any]]:
+    """Every entry under `key` across the pages of `url` (which takes `&page=`), up to `total_count`."""
+    entries: list[Mapping[str, Any]] = []
+    page = 1
+    while True:
+        found = _get(f"{url}&page={page}", token)
+        batch = _items(found, key)
+        entries += batch
+        total = found.get("total_count") if isinstance(found, Mapping) else None
+        if len(batch) < PAGE or (isinstance(total, int) and len(entries) >= total):
+            return entries
+        page += 1
+
+
 def reported(repo: str, sha: str, token: str) -> dict[str, Verdict]:
     """What each check name has reported on the commit: check runs (latest) and commit statuses.
     Never cached."""
     repo = _valid(repo, token)
     base = f"{API}/repos/{repo}/commits/{urllib.parse.quote(sha, safe='')}"
     seen: dict[str, list[Verdict]] = {}
-    collected = 0
-    page = 1
-    while True:
-        found = _get(f"{base}/check-runs?per_page={PAGE}&filter=latest&page={page}", token)
-        runs = _items(found, "check_runs")
-        for run in runs:
-            if isinstance(name := run.get("name"), str):
-                seen.setdefault(name, []).append(_verdict(run.get("status"), run.get("conclusion")))
-        collected += len(runs)
-        total = found.get("total_count") if isinstance(found, Mapping) else None
-        if not runs or (isinstance(total, int) and collected >= total) or len(runs) < PAGE:
-            break
-        page += 1
+    for run in _pages(f"{base}/check-runs?per_page={PAGE}&filter=latest", "check_runs", token):
+        if isinstance(name := run.get("name"), str):
+            seen.setdefault(name, []).append(_verdict(run.get("status"), run.get("conclusion")))
     # The combined status: GitHub already keeps only the latest status of each context.
-    for status in _items(_get(f"{base}/status?per_page={PAGE}", token), "statuses"):
+    for status in _pages(f"{base}/status?per_page={PAGE}", "statuses", token):
         if isinstance(context := status.get("context"), str):
             seen.setdefault(context, []).append(STATUSES.get(str(status.get("state")), Verdict.FAILURE))
     return {name: _combine(verdicts) for name, verdicts in seen.items()}

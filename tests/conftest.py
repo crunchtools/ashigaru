@@ -24,13 +24,14 @@ class RequiredChecks:
         self.rules: dict[str, tuple[str, ...] | None] = {}
         self.reported: dict[str, Verdict] = {}
         self.asked: list[tuple[str, str, str | None]] = []
+        self.refusal: OSError = OSError("unreadable")
 
     def __call__(self, repo: str, sha: str, branch: str | None, token: str) -> tuple[str, dict[str, Verdict]]:
         self.asked.append((repo, sha, branch))
         branch = branch or "main"
         names = self.rules.get(branch, ())
         if names is None:
-            raise OSError("unreadable")
+            raise self.refusal
         return branch, {name: self.reported.get(name, Verdict.PENDING) for name in names}
 
 

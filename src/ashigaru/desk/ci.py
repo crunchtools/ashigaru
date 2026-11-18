@@ -17,6 +17,7 @@ import contextlib
 import logging
 import sqlite3
 import time
+import urllib.error
 from collections.abc import Callable, Iterable
 
 from starlette.concurrency import run_in_threadpool
@@ -75,11 +76,10 @@ def gate(current: CIResult, required: Required, branch: str | None) -> CIResult:
     try:
         branch, verdicts = required(current.repo, current.sha, branch)
     except (OSError, ValueError) as error:
-        LOG.warning(
-            "required checks of %s@%s unread: %s", current.repo, current.sha[:12], type(error).__name__
-        )
+        why = f"HTTP {error.code}" if isinstance(error, urllib.error.HTTPError) else type(error).__name__
+        LOG.warning("required checks of %s@%s unread: %s", current.repo, current.sha[:12], why)
         held = CIStatus.PENDING if current.status == CIStatus.SUCCESS else current.status
-        unverified = f"the required checks could not be read ({type(error).__name__})"
+        unverified = f"the required checks could not be read ({why})"
         return current.model_copy(update={"status": held, "unverified": unverified})
     waiting = sorted(name for name, verdict in verdicts.items() if verdict == Verdict.PENDING)
     failed = sorted(name for name, verdict in verdicts.items() if verdict in FAILED)
