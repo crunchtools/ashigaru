@@ -152,10 +152,13 @@ def _number(value: Any) -> Any:
     return value if isinstance(value, int | float) and not isinstance(value, bool) else None
 
 
+def _part(event: dict[str, Any], key: str) -> dict[str, Any]:
+    value = event.get(key)
+    return value if isinstance(value, dict) else {}
+
+
 def _statusline(event: dict[str, Any], desk: Desk, path: str) -> None:
-    model = event.get("model") if isinstance(event.get("model"), dict) else {}
-    cost = event.get("cost") if isinstance(event.get("cost"), dict) else {}
-    window = event.get("context_window") if isinstance(event.get("context_window"), dict) else {}
+    model, cost, window = _part(event, "model"), _part(event, "cost"), _part(event, "context_window")
     try:
         lane = desk.get(path).get("lane")
     except DeskError:  # no seat row yet: this report creates it, without a lane
