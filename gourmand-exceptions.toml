@@ -53,3 +53,14 @@ path = "scripts/relock.py"
 item = "relock"
 justification = "matched only against hooks._throttled, a status line throttle with no shared logic; the similarity is a run of guards and early returns"
 classification = "gourmand_bug"
+
+# _combine is GitHub's rule for several reports of one check (pending wins,
+# then a failure, then a pass). `reported` applies it per name and App and
+# `GitHub.required` per requirement; Gourmand misses the call in `reported`'s
+# dict comprehension and counts one caller.
+[[exceptions]]
+check = "single_use_helpers"
+path = "src/ashigaru/desk/forges/github.py"
+pattern = "_combine"
+justification = "the one rule for several reports of a check, called from both reported and GitHub.required; Gourmand misses the comprehension call site"
+classification = "gourmand_bug"

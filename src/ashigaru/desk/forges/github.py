@@ -11,8 +11,9 @@ Intake comes from `issues` (an outcome) and `pull_request` (a story), keyed
 `lane:<lane>` is the lane hint.
 
 `required_checks` names the status checks a branch requires (rulesets, org ones included, and classic
-protection) and `reported` what each name has said on a commit; `GitHub.required` joins them, a required
-name nobody has reported being pending. Errors propagate: the caller turns them into "could not read".
+protection), each with the App it must come from, and `reported` what each name and App has said on a
+commit; `GitHub.required` joins them by exact name and App, a required check nobody has reported being
+pending. Errors propagate: the caller turns them into "could not read".
 """
 
 import hashlib
@@ -88,11 +89,22 @@ def _items(found: Any, key: str | None = None) -> list[Mapping[str, Any]]:
     return [item for item in found if isinstance(item, Mapping)] if isinstance(found, list) else []
 
 
-def _contexts(found: Any) -> list[str]:
-    return [c for item in _items(found) if isinstance(c := item.get("context"), str)]
+Requirement = tuple[str, int | None]
+"""A required check: its exact name, and the App that must report it (None: any App or a commit status)."""
 
 
-_rules: dict[tuple[str, str | None], tuple[float, tuple[str, tuple[str, ...]]]] = {}
+def _app(value: Any) -> int | None:
+    """A required App id; absent, null or -1 (GitHub's "any source") is any."""
+    return value if isinstance(value, int) and not isinstance(value, bool) and value > 0 else None
+
+
+def _contexts(found: Any, app: str) -> list[Requirement]:
+    """Each `{context, <app>}` entry as a Requirement: ruleset entries name the App `integration_id`,
+    classic protection's `app_id`."""
+    return [(c, _app(item.get(app))) for item in _items(found) if isinstance(c := item.get("context"), str)]
+
+
+_rules: dict[tuple[str, str | None], tuple[float, tuple[str, tuple[Requirement, ...]]]] = {}
 _clock = time.monotonic
 
 
@@ -111,22 +123,22 @@ def _default_branch(base: str, token: str) -> str:
     return name
 
 
-def _ruleset_checks(base: str, quoted: str, token: str) -> set[str]:
+def _ruleset_checks(base: str, quoted: str, token: str) -> set[Requirement]:
     """Every `required_status_checks` rule on the branch, repo and org rulesets alike, all pages."""
-    names: set[str] = set()
+    names: set[Requirement] = set()
     page = 1
     while True:
         rules = _items(_get(f"{base}/rules/branches/{quoted}?per_page={PAGE}&page={page}", token))
         for rule in rules:
             parameters = rule.get("parameters")
             if rule.get("type") == "required_status_checks" and isinstance(parameters, Mapping):
-                names.update(_contexts(parameters.get("required_status_checks")))
+                names.update(_contexts(parameters.get("required_status_checks"), "integration_id"))
         if len(rules) < PAGE:
             return names
         page += 1
 
 
-def _classic_checks(base: str, quoted: str, token: str) -> set[str]:
+def _classic_checks(base: str, quoted: str, token: str) -> set[Requirement]:
     """The branch's classic protection: its `contexts` and `checks`; none when it is unprotected."""
     found = _get(f"{base}/branches/{quoted}", token)
     protection = found.get("protection") if isinstance(found, Mapping) else None
@@ -134,13 +146,16 @@ def _classic_checks(base: str, quoted: str, token: str) -> set[str]:
     if not isinstance(classic, Mapping):
         return set()
     contexts = classic.get("contexts")
-    names = {c for c in contexts if isinstance(c, str)} if isinstance(contexts, list) else set()
-    return names | set(_contexts(classic.get("checks")))
+    names: set[Requirement] = (
+        {(c, None) for c in contexts if isinstance(c, str)} if isinstance(contexts, list) else set()
+    )
+    return names | set(_contexts(classic.get("checks"), "app_id"))
 
 
-def required_checks(repo: str, branch: str | None, token: str) -> tuple[str, tuple[str, ...]]:
-    """The branch (the default one when None) and the sorted check names it requires, by ruleset
-    (org rulesets included) or classic protection; remembered for RULES_TTL seconds."""
+def required_checks(repo: str, branch: str | None, token: str) -> tuple[str, tuple[Requirement, ...]]:
+    """The branch (the default one when None) and the sorted checks it requires, by ruleset (org
+    rulesets included) or classic protection, each with the App it must come from; remembered for
+    RULES_TTL seconds."""
     repo = _valid(repo, token)
     now = _clock()
     hit = _rules.get((repo, branch))
@@ -150,7 +165,7 @@ def required_checks(repo: str, branch: str | None, token: str) -> tuple[str, tup
     name = _default_branch(base, token) if branch is None else branch
     quoted = urllib.parse.quote(name, safe="")
     names = _ruleset_checks(base, quoted, token) | _classic_checks(base, quoted, token)
-    result = (name, tuple(sorted(names)))
+    result = (name, tuple(sorted(names, key=lambda need: (need[0], need[1] or 0))))
     _rules[(repo, branch)] = (now, result)
     return result
 
@@ -186,19 +201,22 @@ def _pages(url: str, key: str, token: str) -> list[Mapping[str, Any]]:
         page += 1
 
 
-def reported(repo: str, sha: str, token: str) -> dict[str, Verdict]:
-    """What each check name has reported on the commit: check runs (latest) and commit statuses.
-    Never cached."""
+def reported(repo: str, sha: str, token: str) -> dict[Requirement, Verdict]:
+    """What each check has reported on the commit, by name and the App that ran it: check runs
+    (latest) and commit statuses (App None). Never cached."""
     repo = _valid(repo, token)
     base = f"{API}/repos/{repo}/commits/{urllib.parse.quote(sha, safe='')}"
-    seen: dict[str, list[Verdict]] = {}
+    seen: dict[Requirement, list[Verdict]] = {}
     for run in _pages(f"{base}/check-runs?per_page={PAGE}&filter=latest", "check_runs", token):
         if isinstance(name := run.get("name"), str):
-            seen.setdefault(name, []).append(_verdict(run.get("status"), run.get("conclusion")))
+            app = _app(payload_get(run, "app", "id"))
+            seen.setdefault((name, app), []).append(_verdict(run.get("status"), run.get("conclusion")))
     # The combined status: GitHub already keeps only the latest status of each context.
     for status in _pages(f"{base}/status?per_page={PAGE}", "statuses", token):
         if isinstance(context := status.get("context"), str):
-            seen.setdefault(context, []).append(STATUSES.get(str(status.get("state")), Verdict.FAILURE))
+            seen.setdefault((context, None), []).append(
+                STATUSES.get(str(status.get("state")), Verdict.FAILURE)
+            )
     return {name: _combine(verdicts) for name, verdicts in seen.items()}
 
 
@@ -366,10 +384,16 @@ class GitHub:
         return isinstance(found, Mapping) and found.get("permission") in WRITERS
 
     def required(self, repo: str, sha: str, branch: str | None, token: str) -> tuple[str, dict[str, Verdict]]:
-        """The branch and each required check's verdict on `sha`; one nobody has reported is pending."""
+        """The branch and each required check's verdict on `sha`; one nobody has reported is pending.
+        Names match exactly, and a check required from an App counts only that App's check runs, as
+        GitHub's merge gate does: a same-named status or another App's run does not satisfy it."""
         name, wanted = required_checks(repo, branch, token)
         said = reported(repo, sha, token) if wanted else {}
-        return name, {check: said.get(check, Verdict.PENDING) for check in wanted}
+        verdicts: dict[str, list[Verdict]] = {}
+        for check, app in wanted:
+            matched = [v for (n, a), v in said.items() if n == check and (app is None or a == app)]
+            verdicts.setdefault(check, []).append(_combine(matched) if matched else Verdict.PENDING)
+        return name, {check: _combine(found) for check, found in verdicts.items()}
 
 
 FORGE = GitHub()

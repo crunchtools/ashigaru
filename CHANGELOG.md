@@ -12,7 +12,9 @@ All notable changes to this project are documented here. The format follows
   The Desk reads the branch's required checks from GitHub (repo and org
   rulesets, and classic protection) and the commit's check runs and statuses;
   one that never started keeps the commit `pending`, one that failed fails it,
-  and when they cannot be read the result is never `success`. At its timeout,
+  and when they cannot be read the result is never `success`. Names match
+  exactly, and a check required from an App (`integration_id`, `app_id`) counts
+  only that App's runs. At its timeout,
   `wait` prints `pending: <names>` and exits 1. New `--branch` (default the
   repo's). The Desk's GitHub token now also needs read access to metadata,
   checks and commit statuses.

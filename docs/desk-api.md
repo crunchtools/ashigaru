@@ -168,8 +168,11 @@ no conclusion yet (never started counts) keeps it `pending` and is named in
 carries `branch` and `required`; when the forge cannot say (no token, an
 error), `unverified` says why and the status is never `success`. GitHub: the
 union of `GET /repos/{repo}/rules/branches/{branch}` (repo and org rulesets)
-and the branch's classic protection, held 60 seconds; each matched by name
-against the commit's check runs and commit statuses, read fresh.
+and the branch's classic protection, held 60 seconds; each matched against the
+commit's check runs and commit statuses, read fresh, by exact name (`CI / sdlc
+ci` is not `sdlc ci`). A check required from an App (the ruleset's
+`integration_id`, protection's `app_id`) counts only that App's check runs, as
+GitHub's merge gate does; without one, any run or status of that name counts.
 
 **Intake.** An issue or PR becomes an item keyed `owner/repo#N`, lower case as
 GitHub's names are case-insensitive (`crunchtools/ashigaru#190`): an issue a
