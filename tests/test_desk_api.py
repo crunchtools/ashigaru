@@ -120,6 +120,7 @@ def test_list_by_several_states_learned_memorized_subject_key_and_ref(client: Te
     assert ids("state=done&state=blocked") == [blocked, done]
     assert ids("state=done&state=blocked&learned=true&memorized=false") == [done]
     assert ids("subject_key=RT%231") == ids("ref=https://rt.example/1") == [done]
+    assert ids("subject_key=rt%20%231") == [done]
     assert len(ids("learned=false")) == 1
 
 

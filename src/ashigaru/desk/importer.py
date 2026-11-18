@@ -9,6 +9,9 @@ Idempotent: a line is keyed by its number and its SHA-256, and a line already
 imported is skipped. Re-running on the same file changes nothing; running on a
 ledger that has grown applies only the new lines.
 
+Each open item gets the subject_key its `ref` implies (key_subjects), so the
+Desk's dedupe sees the ledger's work; a re-import backfills ones imported before.
+
 Ledger fields with no column of their own are kept, not dropped: `assigned`,
 `queued`, `wrapped`, `closed` and `blocker` become timestamps, wrap-up and
 blocked_reason; anything else, and any value outside the Desk's enums (a lane
@@ -24,7 +27,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from . import store
-from .model import Lane, Mode, State, Wrap
+from .model import CLOSED, Lane, Mode, State, Wrap, subject_key
 
 ACTOR = "ledger-import"
 MINUTES = re.compile(r"^\d{4}-\d\d-\d\dT\d\d:\d\dZ$")
@@ -33,6 +36,12 @@ TEXT = ("task", "done_when", "ref", "seat", "result", "next", "learned", "note",
 ENUMS: dict[str, type[Lane] | type[Mode] | type[State]] = {"lane": Lane, "mode": Mode, "state": State}
 RENAMED = {"assigned": "assigned_at", "queued": "queued_at", "blocker": "blocked_reason"}
 WHEN = ("at", "assigned", "queued", "wrapped", "closed")
+UNKEYED = """
+    SELECT id, ref, state, updated_at FROM items
+    WHERE subject_key IS NULL AND ref IS NOT NULL
+      AND id IN (SELECT item_id FROM events WHERE actor = :actor)
+    ORDER BY updated_at, CAST(substr(id, 2) AS INTEGER), id
+"""
 
 
 @dataclass
@@ -42,6 +51,7 @@ class Summary:
     skipped: int = 0
     created: list[str] = field(default_factory=list)
     updated: set[str] = field(default_factory=set)
+    keyed: list[str] = field(default_factory=list)
     last_seen: str | None = None
     """The newest time on any line so far, for an untimed line that starts an item."""
 
@@ -134,6 +144,27 @@ def apply(conn: sqlite3.Connection, number: int, raw: str, summary: Summary) -> 
     summary.applied += 1
 
 
+def key_subjects(conn: sqlite3.Connection, summary: Summary) -> None:
+    """Give imported items the subject_key their ref implies, so the Desk's 409 dedupe covers them.
+
+    Runs on every import, so a re-import backfills items imported before keys were set. A key
+    already set, or already held by another item, is never touched. Of the items one key could
+    go to, only an open one gets it, the newest if there are several: the key is unique, and it
+    is the open item a sweep must not queue a second time. Ties on updated_at go to the later id.
+    """
+    wanting: dict[str, list[sqlite3.Row]] = {}
+    for row in conn.execute(UNKEYED, {"actor": ACTOR}).fetchall():
+        key = subject_key(row["ref"]) if row["state"] not in CLOSED else None
+        if key:
+            wanting.setdefault(key, []).append(row)
+    for key, items in wanting.items():
+        if conn.execute("SELECT 1 FROM items WHERE subject_key = ?", (key,)).fetchone():
+            continue
+        item = items[-1]
+        store.update_item(conn, item["id"], {"subject_key": key, "at": item["updated_at"]}, ACTOR, "backfill")
+        summary.keyed.append(item["id"])
+
+
 def import_ledger(conn: sqlite3.Connection, lines: Iterable[str]) -> Summary:
     """Fold the ledger into the Desk in one transaction: all of it lands, or none of it."""
     summary = Summary()
@@ -142,4 +173,5 @@ def import_ledger(conn: sqlite3.Connection, lines: Iterable[str]) -> Summary:
             if raw.strip():
                 summary.lines += 1
                 apply(conn, number, raw.strip(), summary)
+        key_subjects(conn, summary)
     return summary

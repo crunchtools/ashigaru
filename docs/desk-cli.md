@@ -58,8 +58,9 @@ soon as a webhook delivery settles the commit, or with `pending` after 90
 seconds, when the CLI asks again; a blip is retried after 5 seconds. A Desk
 that does not serve the route yet answers 404, and `wait` says so.
 
-`subject_key` is matched exactly as stored (`owner/repo#N`, `RT#N`); the Desk
-does not normalise it yet.
+`subject_key` is normalised wherever it is written or looked up: an issue or PR
+URL and `owner/repo#N` in any case are `owner/repo#N` in lowercase, an RT URL or
+`RT #N` is `RT#N`.
 
 ## Claude Code hooks
 

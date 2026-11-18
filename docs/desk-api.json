@@ -3496,7 +3496,7 @@
             }
           },
           {
-            "description": "Exactly as stored, e.g. crunchtools/ashigaru#12.",
+            "description": "A key or a ref, normalised as a write stores it: an issue URL finds owner/repo#N.",
             "in": "query",
             "name": "subject_key",
             "required": false,
@@ -3509,7 +3509,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Exactly as stored, e.g. crunchtools/ashigaru#12.",
+              "description": "A key or a ref, normalised as a write stores it: an issue URL finds owner/repo#N.",
               "title": "Subject Key"
             }
           },
