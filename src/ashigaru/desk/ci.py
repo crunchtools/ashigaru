@@ -4,24 +4,35 @@ Forge adapters write checks (forges/); this module reads them back as one
 CIResult and wakes whoever waits on that commit. A waiter holds no thread: it
 awaits an event the webhook sets once its delivery commits, and rereads SQLite
 every RECHECK seconds in case another process took the delivery.
+
+A commit's own checks are workflows; a branch requires jobs ("sdlc ci"), and a
+workflow the forge never started sends no delivery at all. So a result that would
+be success is first held against what the target branch requires, read from the
+forge: until every required check has a conclusion it stays pending, and when
+those cannot be read it is never success.
 """
 
 import asyncio
 import contextlib
+import logging
 import sqlite3
 import time
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 
 from starlette.concurrency import run_in_threadpool
 
 from . import store
-from .forges import CIUpdate
+from .forges import CIUpdate, Forge
 from .model import MAX_WAIT, Check, CIResult, CIStatus, Verdict
 
 RECHECK = 15.0
 FAILED = frozenset({Verdict.FAILURE, Verdict.CANCELLED})
 
 Key = tuple[str, str]
+Required = Callable[[str, str, str | None], tuple[str, dict[str, Verdict]]]
+"""(repo, sha, branch or None for the default) -> (the branch, the verdict of each check it requires,
+pending for one that has not reported). Raises OSError or ValueError when the forge cannot say."""
+LOG = logging.getLogger(__name__)
 
 
 def key(repo: str, sha: str) -> Key:
@@ -45,6 +56,44 @@ def result(conn: sqlite3.Connection, repo: str, sha: str) -> CIResult:
         status=status_of(check.verdict for check in checks),
         checks=checks,
         failing=[check.name for check in checks if check.verdict in FAILED],
+        pending=[check.name for check in checks if check.verdict == Verdict.PENDING],
+    )
+
+
+def from_forge(forge: Forge, token: str) -> Required:
+    """The forge's required-check lookup, with its API token."""
+
+    def required(repo: str, sha: str, branch: str | None) -> tuple[str, dict[str, Verdict]]:
+        return forge.required(repo, sha, branch, token)
+
+    return required
+
+
+def gate(current: CIResult, required: Required, branch: str | None) -> CIResult:
+    """`current` held against the checks `branch` requires: success only when each has a conclusion
+    and none failed. A required check that has not reported joins `pending`."""
+    try:
+        branch, verdicts = required(current.repo, current.sha, branch)
+    except (OSError, ValueError) as error:
+        LOG.warning(
+            "required checks of %s@%s unread: %s", current.repo, current.sha[:12], type(error).__name__
+        )
+        held = CIStatus.PENDING if current.status == CIStatus.SUCCESS else current.status
+        unverified = f"the required checks could not be read ({type(error).__name__})"
+        return current.model_copy(update={"status": held, "unverified": unverified})
+    waiting = sorted(name for name, verdict in verdicts.items() if verdict == Verdict.PENDING)
+    failed = sorted(name for name, verdict in verdicts.items() if verdict in FAILED)
+    status: CIStatus = current.status
+    if status == CIStatus.SUCCESS:
+        status = CIStatus.FAILURE if failed else CIStatus.PENDING if waiting else CIStatus.SUCCESS
+    return current.model_copy(
+        update={
+            "status": status,
+            "branch": branch,
+            "required": sorted(verdicts),
+            "pending": current.pending + [name for name in waiting if name not in current.pending],
+            "failing": current.failing + [name for name in failed if name not in current.failing],
+        }
     )
 
 
@@ -69,9 +118,11 @@ def record(conn: sqlite3.Connection, update: CIUpdate, source: str) -> Key:
 
 
 class Waiters:
-    """Who waits on which commit. Lives on the event loop; notify() only from it."""
+    """Who waits on which commit, and how to read what a branch requires. Lives on the event loop;
+    notify() only from it."""
 
-    def __init__(self) -> None:
+    def __init__(self, required: Required) -> None:
+        self.required = required
         self._waiting: dict[Key, set[asyncio.Event]] = {}
 
     def notify(self, keys: Iterable[Key]) -> None:
@@ -79,8 +130,11 @@ class Waiters:
             for event in self._waiting.get(commit, ()):
                 event.set()
 
-    async def wait(self, conn: sqlite3.Connection, repo: str, sha: str, timeout: float) -> CIResult:
-        """The result as soon as it is no longer pending, or as it stands after `timeout` seconds."""
+    async def wait(
+        self, conn: sqlite3.Connection, repo: str, sha: str, timeout: float, branch: str | None = None
+    ) -> CIResult:
+        """The result as soon as it is no longer pending, or as it stands after `timeout` seconds. The
+        forge is asked what `branch` requires only once the commit's own checks pass, or at the end."""
         commit = key(repo, sha)
         deadline = time.monotonic() + min(timeout, MAX_WAIT)
         event = asyncio.Event()
@@ -91,6 +145,9 @@ class Waiters:
                 event.clear()
                 current = await run_in_threadpool(result, conn, *commit)
                 left = deadline - time.monotonic()
+                if current.status == CIStatus.SUCCESS or left <= 0 and current.status == CIStatus.PENDING:
+                    current = await run_in_threadpool(gate, current, self.required, branch)
+                    left = deadline - time.monotonic()
                 if current.status != CIStatus.PENDING or left <= 0:
                     return current
                 with contextlib.suppress(TimeoutError):

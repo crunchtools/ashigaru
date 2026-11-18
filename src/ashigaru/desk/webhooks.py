@@ -210,7 +210,8 @@ async def webhook(request: Request, forge: str) -> WebhookAck:
 @router.get("/v1/ci/wait", tags=["ci"], responses=errors(401))
 async def ci_wait(request: Request, conn: Conn, who: Who, query: Annotated[CIWait, Param()]) -> CIResult:
     """desk_wait: the commit's CI result as soon as it is no longer pending, or as it stands when
-    `timeout` runs out (status still `pending`; wait again). Nothing polls the forge: a CI webhook
-    delivery for the commit is what ends the wait."""
+    `timeout` runs out (status still `pending`; wait again). A CI webhook delivery for the commit is
+    what ends the wait; the forge is asked only which checks `branch` requires and what they reported,
+    before a result is success."""
     waiters: ci.Waiters = request.app.state.waiters
-    return await waiters.wait(conn, query.repo, query.sha, query.timeout)
+    return await waiters.wait(conn, query.repo, query.sha, query.timeout, query.branch)

@@ -96,6 +96,12 @@ class Forge(Protocol):
         answer, an error, a name it would not ask about)."""
         ...
 
+    def required(self, repo: str, sha: str, branch: str | None, token: str) -> tuple[str, dict[str, Verdict]]:
+        """The branch (`branch`, else the repo's default) and the verdict on `sha` of each check it
+        requires, pending for one that has not reported. Raises OSError or ValueError when the forge
+        cannot say."""
+        ...
+
 
 def payload_get(payload: Any, *path: str) -> Any:
     """payload[path[0]][path[1]]..., or None where any step is missing or not a mapping."""

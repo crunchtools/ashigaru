@@ -103,10 +103,14 @@ def _row(item: dict[str, Any]) -> dict[str, Any]:
 
 
 def waited(result: dict[str, Any]) -> str:
-    """A settled item's row, or a commit's CI: its status, then each check."""
+    """A settled item's row, or a commit's CI: its status, what it still waits on, then each check."""
     if "status" not in result:
         return table([_row(result)], WORK)
     head = f"{result['repo']}@{result['sha'][:12]}  {result['status']}"
+    if result.get("pending"):
+        head += f"\npending: {', '.join(result['pending'])}"
+    if result.get("unverified"):
+        head += f"\n{result['unverified']}"
     return f"{head}\n\n{table(result['checks'], CHECKS)}" if result.get("checks") else head
 
 

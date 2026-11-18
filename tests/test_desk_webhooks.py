@@ -25,7 +25,7 @@ from typing import Any
 
 import httpx
 import pytest
-from conftest import Keys
+from conftest import Keys, RequiredChecks
 from fastapi.testclient import TestClient
 
 import common
@@ -206,6 +206,10 @@ def test_a_completed_workflow_run_is_the_commits_result(hooked: TestClient, keys
         "status": "pending",
         "checks": [],
         "failing": [],
+        "pending": [],
+        "branch": "main",
+        "required": [],
+        "unverified": None,
     }
     assert deliver(hooked, "workflow_run", payload("workflow_run")).json() == {
         "duplicate": False,
@@ -441,6 +445,83 @@ def test_wait_times_out_with_the_result_as_it_stands(hooked: TestClient, keys: K
     deliver(hooked, "workflow_run", payload("workflow_run", status="in_progress", conclusion=None))
     found = result(hooked, keys, timeout=1)
     assert found["status"] == "pending" and found["checks"][0]["verdict"] == "pending"
+
+
+# Required checks
+
+
+def test_a_required_check_that_never_started_is_not_success(
+    hooked: TestClient, keys: Keys, required_checks: RequiredChecks
+) -> None:
+    """memory#45: only another App's suite reported; the ruleset's "sdlc ci" never ran."""
+    required_checks.rules["main"] = ("sdlc ci",)
+    deliver(hooked, "check_suite", payload("check_suite", conclusion="success"))
+    found = result(hooked, keys)
+    assert found["status"] == "pending" and found["checks"][0]["verdict"] == "success"
+    assert found["pending"] == ["sdlc ci"] and found["required"] == ["sdlc ci"] and found["branch"] == "main"
+    required_checks.reported["sdlc ci"] = Verdict.SUCCESS
+    found = result(hooked, keys)
+    assert found["status"] == "success" and found["pending"] == []
+
+
+def test_a_required_check_that_failed_fails_the_commit(
+    hooked: TestClient, keys: Keys, required_checks: RequiredChecks
+) -> None:
+    required_checks.rules["main"] = ("sdlc ci", "lint")
+    required_checks.reported.update({"sdlc ci": Verdict.FAILURE, "lint": Verdict.SKIPPED})
+    deliver(hooked, "workflow_run", payload("workflow_run"))
+    found = result(hooked, keys)
+    assert found["status"] == "failure" and found["failing"] == ["sdlc ci"]
+
+
+def test_the_branch_named_is_the_one_whose_checks_count(
+    hooked: TestClient, keys: Keys, required_checks: RequiredChecks
+) -> None:
+    required_checks.rules["release"] = ("sdlc ci",)
+    deliver(hooked, "workflow_run", payload("workflow_run"))
+    assert result(hooked, keys)["status"] == "success"
+    found = result(hooked, keys, branch="release")
+    assert found["status"] == "pending" and found["branch"] == "release"
+    assert required_checks.asked[-1] == (REPO, SHA, "release")
+    bad = hooked.get("/v1/ci/wait", headers=keys["ci"], params={"repo": REPO, "sha": SHA, "branch": "a b"})
+    assert bad.status_code == UNPROCESSABLE_ENTITY
+
+
+def test_required_checks_that_cannot_be_read_never_make_success(
+    hooked: TestClient, keys: Keys, required_checks: RequiredChecks
+) -> None:
+    required_checks.rules["main"] = None
+    deliver(hooked, "workflow_run", payload("workflow_run"))
+    found = result(hooked, keys)
+    assert found["status"] == "pending" and "could not be read" in found["unverified"]
+    assert found["required"] is None
+
+
+def test_a_pending_commit_asks_the_forge_only_at_the_end(
+    hooked: TestClient, keys: Keys, required_checks: RequiredChecks
+) -> None:
+    required_checks.rules["main"] = ("sdlc ci",)
+    deliver(hooked, "workflow_run", payload("workflow_run", status="in_progress", conclusion=None))
+    found = result(hooked, keys, timeout=1)
+    assert found["status"] == "pending" and found["pending"] == ["CI (push)", "sdlc ci"]
+    assert len(required_checks.asked) == 1
+
+
+def test_the_desk_reads_required_checks_with_its_forge_token(
+    db: Path, keys: Keys, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    seen: list[str] = []
+
+    def required(repo: str, sha: str, branch: str | None, token: str) -> tuple[str, dict[str, Verdict]]:
+        seen.append(token)
+        return "main", {}
+
+    monkeypatch.setattr(github.FORGE, "required", required)
+    with TestClient(
+        create_app(db, webhook_secrets={"github": [SECRET]}, forge_tokens={"github": "tok"})
+    ) as app:
+        deliver(app, "workflow_run", payload("workflow_run"))
+        assert result(app, keys)["status"] == "success" and seen == ["tok"]
 
 
 # Intake

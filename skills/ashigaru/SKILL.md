@@ -274,7 +274,8 @@ then on. Given a seat, take the item `agents` shows it holding.
 
 `ashigaru wait a7 --timeout 3600` blocks until the item reaches `review` or
 closes. `ashigaru wait crunchtools/ashigaru 8d2682f --timeout 900` blocks until
-that commit's CI ends. Use them instead of polling when Prime has nothing else
+that commit's CI ends and every check its target branch requires (`--branch`,
+default the repo's) has reported; at the timeout it names what is still pending. Use them instead of polling when Prime has nothing else
 to do.
 
 ## `wrap`

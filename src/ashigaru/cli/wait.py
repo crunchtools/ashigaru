@@ -82,12 +82,15 @@ class CIWaiter:
     ) -> None:
         self.desk, self.pause, self.sleep, self.clock = desk, pause, sleep, clock
 
-    def _ask(self, repo: str, sha: str, seconds: int) -> dict[str, Any] | None:
+    def _ask(self, repo: str, sha: str, seconds: int, branch: str | None) -> dict[str, Any] | None:
+        params: dict[str, str | int] = {"repo": repo, "sha": sha, "timeout": seconds}
+        if branch is not None:
+            params["branch"] = branch
         try:
             result: dict[str, Any] = self.desk.request(
                 "GET",
                 "/v1/ci/wait",
-                params={"repo": repo, "sha": sha, "timeout": seconds},
+                params=params,
                 timeout=seconds + SLACK,
             )
         except Unreachable:
@@ -100,18 +103,30 @@ class CIWaiter:
             return None
         return result
 
-    def wait(self, repo: str, sha: str, timeout: float | None) -> dict[str, Any]:
+    def wait(self, repo: str, sha: str, timeout: float | None, branch: str | None = None) -> dict[str, Any]:
+        """The commit's CI result once it is not pending. At the timeout, a TimeoutError naming what is
+        still pending: success is never reported while a required check has not."""
         end = None if timeout is None else self.clock() + timeout
+        last: dict[str, Any] | None = None
         while True:
             left = MAX_WAIT if end is None else max(0, min(MAX_WAIT, int(end - self.clock())))
-            result = self._ask(repo, sha, left)
+            result = self._ask(repo, sha, left, branch)
             if result is not None and result["status"] != CI_PENDING:
                 return result
+            last = result or last
             if result is None:
                 # A blip: pause, but never past the deadline.
                 self.sleep(self.pause if end is None else max(0.0, min(self.pause, end - self.clock())))
             if end is not None and end - self.clock() < 1:
-                raise TimeoutError(f"{repo}@{sha[:12]} CI is still pending after {timeout:g}s")
+                raise TimeoutError(f"{repo}@{sha[:12]} after {timeout:g}s, {still(last)}")
+
+
+def still(result: dict[str, Any] | None) -> str:
+    """`pending: <names>`, or why nothing more can be said."""
+    names = (result or {}).get("pending") or []
+    unverified = (result or {}).get("unverified")
+    said = f"pending: {', '.join(names)}" if names else "pending: no check has reported"
+    return f"{said}; {unverified}" if unverified else said
 
 
 def waiter_for(desk: "Desk") -> Waiter:

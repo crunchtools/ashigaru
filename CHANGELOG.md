@@ -6,6 +6,17 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+- `ashigaru wait <repo> <sha>` (and `desk_wait`) no longer says `success` while
+  a check the target branch requires has not reported (crunchtools/ashigaru#215).
+  The Desk reads the branch's required checks from GitHub (repo and org
+  rulesets, and classic protection) and the commit's check runs and statuses;
+  one that never started keeps the commit `pending`, one that failed fails it,
+  and when they cannot be read the result is never `success`. At its timeout,
+  `wait` prints `pending: <names>` and exits 1. New `--branch` (default the
+  repo's). The Desk's GitHub token now also needs read access to metadata,
+  checks and commit statuses.
+
 ## [4.0.1] - 2026-11-18
 
 ### Fixed
