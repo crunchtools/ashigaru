@@ -34,10 +34,18 @@ class Desk:
         )
 
     def request(
-        self, method: str, path: str, *, params: dict[str, Any] | None = None, body: Any = None
+        self,
+        method: str,
+        path: str,
+        *,
+        params: dict[str, Any] | None = None,
+        body: Any = None,
+        timeout: float | None = None,
     ) -> Any:
+        """`timeout` replaces the client's for this request, for a long-poll."""
+        wait = httpx.USE_CLIENT_DEFAULT if timeout is None else httpx.Timeout(timeout)
         try:
-            response = self._http.request(method, path, params=params, json=body)
+            response = self._http.request(method, path, params=params, json=body, timeout=wait)
         except httpx.TransportError as exc:
             raise Unreachable(str(exc) or type(exc).__name__) from exc
         if response.is_redirect:

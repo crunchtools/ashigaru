@@ -6,6 +6,14 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- The `ashigaru` CLI closes the gaps the `/ashigaru` skill hit (a253): `create` records an item without assigning it, with `subject_key`, and on a taken key or id prints the item holding it; `assign --task` takes `--subject-key` and prints the item it recorded when the assign is refused; `get` finds an item by id, `subject_key` or ref; `list` filters by several states, `subject_key`, `ref`, `learned` and `memorized`; `update` sets and clears fields; `report` is the CLI's `desk_report`; `wait <repo> <sha>` long-polls `GET /v1/ci/wait`. Desk: `GET /v1/items` takes those filters, `GET /v1/queue` and `POST /v1/items/{id}/wrap` move `queue`'s `waits_on` and `wrap`'s CC-DONE and idle checks to the server so the CLI and MCP give one answer, the MCP gains `desk_create`, an admin may set `filed_by`, a 409 on a taken `subject_key` names the item holding it, and `GET /v1/seats` marks `missing` seats, including seat identities that never checked in.
+
+### Changed
+
+- `wrap` means one thing in the CLI and MCP: `--stage wrapping` (MCP `stage: wrapping`) records that `/cc seat` was sent, and `cleared`, now the default on both, checks CC-DONE and an idle turn before it clears and closes. The MCP `wrap` tool no longer clears without those checks unless `force` is passed, and the MCP `queue` returns `{queued, proposed}` with `waits_on`, as the CLI's does.
+
 ## [3.0.0] - 2026-11-18
 
 ### Changed

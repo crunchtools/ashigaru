@@ -15,7 +15,7 @@ import sqlite3
 from collections.abc import AsyncIterator, Iterator
 from contextlib import asynccontextmanager, contextmanager
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 from fastapi import HTTPException
 from fastmcp import FastMCP
@@ -33,17 +33,19 @@ from ..model import (
     CheckRow,
     FileChild,
     Item,
+    ItemCreate,
     ItemFilter,
     ItemPatch,
     Lane,
     Mode,
     OutcomeRow,
+    Queue,
     Report,
     Seat,
-    State,
     Usage,
     Verb,
     Wrap,
+    WrapUp,
 )
 from . import codes
 
@@ -104,14 +106,11 @@ def work(
 
 
 @mcp.tool
-def queue() -> list[Item]:
-    """`ashigaru queue`: queued items with what each waits on (`after`), then proposed children
-    with their expiry."""
+def queue() -> Queue:
+    """`ashigaru queue`: queued items with the state of each item they wait on (`waits_on`), then
+    proposed children with their expiry."""
     with desk() as (conn, who):
-        return [
-            *api.list_items(conn, who, ItemFilter.model_validate({"state": State.QUEUED})),
-            *api.list_items(conn, who, ItemFilter.model_validate({"state": State.PROPOSED})),
-        ]
+        return api.queue(conn, who)
 
 
 @mcp.tool
@@ -123,7 +122,8 @@ def outcomes() -> list[OutcomeRow]:
 
 @mcp.tool
 def desk_list(filters: ItemFilter | None = None) -> list[Item]:
-    """Items, newest first; each filter given must match. Pages of `limit` from `offset`."""
+    """`ashigaru list`: items, newest first; each filter given must match, `state` any of a list.
+    Find an item by `subject_key` or `ref` here. Pages of `limit` from `offset`."""
     with desk() as (conn, who):
         return api.list_items(conn, who, filters or ItemFilter.model_validate({}))
 
@@ -163,11 +163,35 @@ def manual(item_id: ItemId) -> Item:
 @mcp.tool
 def wrap(
     item_id: ItemId,
-    stage: Annotated[Wrap, Field(description="wrapping once /cc seat is sent, cleared once the seat is.")],
+    stage: Annotated[
+        Wrap, Field(description="wrapping once /cc seat is sent; cleared closes.")
+    ] = Wrap.CLEARED,
+    learned: Annotated[str | None, Field(description="The report's Learned: line.")] = None,
+    state: Literal["done", "wontdo", "abandoned"] = "done",
+    force: Annotated[bool, Field(description="Skip the CC-DONE and idle checks.")] = False,
 ) -> Item:
-    """`ashigaru wrap`: record the item's wrap-up stage."""
+    """`ashigaru wrap`, admin only. `wrapping` records that /cc seat was sent. `cleared` refuses until
+    CC-DONE (or a `learned`) and an idle turn, unless `force`; then clears the wrap and closes the
+    item in `state`, which frees the seat."""
     with desk() as (conn, who):
-        return api.patch_item(conn, who, item_id, ItemPatch(wrap=stage))
+        body = WrapUp(stage=stage, learned=learned, state=state, force=force)
+        return api.wrap(conn, api.admin(who), item_id, body)
+
+
+@mcp.tool
+def desk_create(
+    fields: Annotated[
+        dict[str, Any],
+        Field(
+            description="The item: `task` and any of id, kind, parent, subject_key, done_when, ref, repo, "
+            "lane, mode, state (default queued), after, priority, note, filed_by. No seat is assigned."
+        ),
+    ],
+) -> Item:
+    """`ashigaru create`, admin only: record an item without assigning it. A taken id or subject_key is
+    a 409 that names the item holding it."""
+    with desk() as (conn, who):
+        return api.create_item(conn, api.admin(who), ItemCreate.model_validate(fields))
 
 
 @mcp.tool
@@ -188,7 +212,7 @@ def desk_update(
         ),
     ],
 ) -> Item:
-    """Change an item's fields, as PATCH /v1/items/{id}."""
+    """`ashigaru update`: change an item's fields, as PATCH /v1/items/{id}."""
     with desk() as (conn, who):
         return api.patch_item(conn, who, item_id, ItemPatch.model_validate(fields))
 
@@ -201,8 +225,8 @@ def desk_report(
     next: str | None = None,
     learned: Annotated[str | None, Field(description="The Learned: line; 'none' when nothing was.")] = None,
 ) -> Item:
-    """The report contract: DONE moves to review, BLOCKED to blocked, WORKING to working; CC-DONE marks
-    the learnings memorized."""
+    """`ashigaru report`, the report contract: DONE moves to review, BLOCKED to blocked, WORKING to
+    working; CC-DONE marks the learnings memorized."""
     with desk() as (conn, who):
         return api.report(conn, who, item_id, Report(verb=verb, text=text, next=next, learned=learned))
 

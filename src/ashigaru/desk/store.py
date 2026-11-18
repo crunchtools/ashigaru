@@ -187,9 +187,13 @@ UPDATE_ITEM = """
 
 LIST_ITEMS = """
     SELECT * FROM items
-    WHERE (:state IS NULL OR state = :state) AND (:seat IS NULL OR seat = :seat)
+    WHERE (:state IS NULL OR state IN (SELECT value FROM json_each(:state)))
+      AND (:seat IS NULL OR seat = :seat)
       AND (:lane IS NULL OR lane = :lane) AND (:kind IS NULL OR kind = :kind)
       AND (:mode IS NULL OR mode = :mode) AND (:parent IS NULL OR parent = :parent)
+      AND (:subject_key IS NULL OR subject_key = :subject_key) AND (:ref IS NULL OR ref = :ref)
+      AND (:learned IS NULL OR (coalesce(learned, '') != '') = :learned)
+      AND (:memorized IS NULL OR memorized = :memorized)
     ORDER BY updated_at DESC, id DESC
     LIMIT :limit OFFSET :offset
 """
@@ -234,7 +238,9 @@ RELEASE_SEAT = """
 MANUAL_OWNER = "Scott"
 HOLD_SEAT = "UPDATE seats SET owner = :owner, updated_at = :at WHERE item = :item"
 
-ITEM_FILTERS = ("state", "seat", "lane", "kind", "mode", "parent")
+ITEM_FILTERS = (
+    "state", "seat", "lane", "kind", "mode", "parent", "subject_key", "ref", "learned", "memorized"
+)  # fmt: skip
 ITEM_JSON = ("after", "extra")
 ITEM_BOOL = ("memorized",)
 TIMESTAMP_FOR_STATE = {State.ASSIGNED: "assigned_at", State.QUEUED: "queued_at"}
@@ -321,11 +327,15 @@ def get_item(conn: sqlite3.Connection, item_id: str) -> dict[str, Any] | None:
 
 
 def list_items(
-    conn: sqlite3.Connection, limit: int = -1, offset: int = 0, **filters: str | None
+    conn: sqlite3.Connection, limit: int = -1, offset: int = 0, **filters: Any
 ) -> list[dict[str, Any]]:
-    """Items equal to every filter given (state, seat, lane, kind, mode, parent); newest first.
-    A limit of -1 is SQLite's no limit."""
+    """Items matching every filter given (ITEM_FILTERS); newest first. `state` is one state or a list
+    of them, any of which matches; `learned` true means a Learned line is recorded. A limit of -1 is
+    SQLite's no limit."""
     params = {key: filters.get(key) for key in ITEM_FILTERS}
+    state = params["state"]
+    if state is not None:
+        params["state"] = json.dumps([state] if isinstance(state, str) else list(state))
     rows = conn.execute(LIST_ITEMS, {**params, "limit": limit, "offset": offset})
     return [decode(row) for row in rows]
 
@@ -359,6 +369,15 @@ def _record(conn: sqlite3.Connection, item_id: str, actor: str, source: str, pat
     )
 
 
+def _taken(conn: sqlite3.Connection, fields: dict[str, Any]) -> str | None:
+    """Which item already holds the new item's id or subject_key, said so a client can find it."""
+    if get_item(conn, fields["id"]) is not None:
+        return f"id {fields['id']} is taken"
+    key = fields.get("subject_key")
+    row = conn.execute("SELECT id FROM items WHERE subject_key = ?", (key,)).fetchone() if key else None
+    return f"subject_key {key} is taken by {row[0]}" if row else None
+
+
 def insert_item(conn: sqlite3.Connection, fields: dict[str, Any], actor: str, source: str = "api") -> str:
     """Insert one item; the caller holds the transaction. Raises Conflict on a taken id or subject_key."""
     fields = dict(fields)
@@ -371,7 +390,7 @@ def insert_item(conn: sqlite3.Connection, fields: dict[str, Any], actor: str, so
     try:
         conn.execute(INSERT_ITEM, _encode({**ITEM_DEFAULTS, **fields}))
     except sqlite3.IntegrityError as error:
-        raise Conflict(str(error)) from error
+        raise Conflict(_taken(conn, fields) or str(error)) from error
     _record(conn, fields["id"], actor, source, fields)
     return str(fields["id"])
 

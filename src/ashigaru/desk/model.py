@@ -5,6 +5,7 @@ The item carries every field and state the /agents ledger uses (ashigaru-3.md,
 repo, priority).
 """
 
+from datetime import timedelta
 from enum import StrEnum
 from typing import Any, Literal
 
@@ -151,6 +152,7 @@ class _Fields(BaseModel):
     verified_by: str | None = None
     priority: int | None = None
     wrap: Wrap | None = None
+    filed_by: str | None = None
 
 
 class ItemCreate(_Fields):
@@ -170,16 +172,51 @@ SEAT_FIELDS = frozenset(
 
 
 class ItemFilter(BaseModel):
-    """GET /v1/items query parameters; each one given must match."""
+    """GET /v1/items query parameters; each one given must match. `state` may repeat: any of them."""
 
-    state: State | None = None
+    state: list[State] | None = None
     seat: str | None = None
     lane: Lane | None = None
     kind: Kind | None = None
     mode: Mode | None = None
     parent: str | None = None
+    subject_key: str | None = Field(None, description="Exactly as stored, e.g. crunchtools/ashigaru#12.")
+    ref: str | None = None
+    learned: bool | None = Field(None, description="true: has a Learned line; false: has none.")
+    memorized: bool | None = None
     limit: int = Field(200, ge=1, le=1000)
     offset: int = Field(0, ge=0)
+
+
+class WaitsOn(BaseModel):
+    id: str
+    state: State | Literal["unknown"] = Field(description="unknown when no such item exists.")
+
+
+class QueuedItem(Item):
+    waits_on: list[WaitsOn] = Field(default_factory=list, description="Each `after` item and its state.")
+
+
+class Queue(BaseModel):
+    """`ashigaru queue`: queued items with what each waits on, then agent-filed proposed children."""
+
+    queued: list[QueuedItem]
+    proposed: list[Item]
+
+
+class WrapUp(BaseModel):
+    """`ashigaru wrap`, one meaning for the CLI and MCP. `wrapping` records that /cc seat was sent.
+    `cleared` refuses until the item is memorized (CC-DONE) or `learned` is given, and its seat's turn
+    is idle, unless `force`; then it clears the wrap and closes the item in `state`, freeing the seat."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    stage: Wrap = Wrap.CLEARED
+    learned: str | None = Field(None, description="The report's Learned: line.")
+    state: Literal["done", "wontdo", "abandoned"] = Field(
+        "done", description="The closed state for an open item; a closed one keeps its own."
+    )
+    force: bool = Field(False, description="Skip the CC-DONE and idle checks.")
 
 
 class Report(BaseModel):
@@ -241,7 +278,7 @@ class Seat(BaseModel):
     task: str | None = Field(None, description="The session's first prompt.")
     item: str | None = Field(None, description="The item the seat holds.")
     since: str | None = Field(None, description="When status last changed.")
-    updated_at: str
+    updated_at: str | None = Field(None, description="Its last check-in; null if it never checked in.")
     model: str | None = None
     billing: Billing | None = None
     context_used: int | None = Field(None, description="Tokens in the context window now.")
@@ -250,6 +287,11 @@ class Seat(BaseModel):
     session_tokens: int | None = Field(None, description="Tokens used this session.")
     session_cost_usd: float = 0.0
     turn_started_at: str | None = Field(None, description="When the turn last went active.")
+    missing: bool = Field(
+        False,
+        description="In `GET /seats`: a seat identity that never checked in, or whose row has not "
+        "changed in STALE_SEAT.",
+    )
 
     @computed_field(description="free, busy-auto (Josui's item) or busy-manual (Scott's hold).")
     def hold(self) -> Literal["free", "busy-auto", "busy-manual"]:
@@ -270,6 +312,9 @@ class SeatPatch(BaseModel):
     task: str | None = None
     item: str | None = None
 
+
+STALE_SEAT = timedelta(hours=24)
+"""A seat whose row has not changed for this long is shown as missing."""
 
 SEAT_ROW_FIELDS = frozenset({"turn", "task"})
 """`since` is in neither: the Desk stamps it when status changes, so no one can jump the pick queue."""

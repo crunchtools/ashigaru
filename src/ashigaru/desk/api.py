@@ -37,6 +37,7 @@ from .model import (
     MintedKey,
     OutcomeRow,
     Problem,
+    Queue,
     Report,
     Role,
     Seat,
@@ -46,6 +47,7 @@ from .model import (
     UsageReport,
     Verb,
     Wrap,
+    WrapUp,
 )
 
 VERSION = "3.0.0-dev"
@@ -149,8 +151,8 @@ ERRORS = {
     403: "The caller's role, or its seat, may not do this.",
     404: "No such item, seat, identity or key.",
     409: (
-        "A taken id or subject_key, an existing identity, a second child in one assignment, or an item"
-        " or seat not in a state to assign or claim."
+        "A taken id or subject_key (the detail names the item holding it), an existing identity, a"
+        " second child in one assignment, or an item or seat not in a state to assign, claim or wrap."
     ),
 }
 
@@ -247,14 +249,23 @@ def check(conn: Conn, who: Who, show_all: Annotated[bool, Query(alias="all")] = 
     return [CheckRow.model_validate(row) for row in store.check(conn, show_all)]
 
 
+@router.get("/v1/queue", tags=["views"], responses=errors(401))
+def queue(conn: Conn, who: Who) -> Queue:
+    """`ashigaru queue`: queued items with the state of each item they wait on, then proposed children
+    with their expiry."""
+    return Queue.model_validate(dispatch.queue(conn))
+
+
 @router.get("/v1/seats", tags=["seats"], responses=errors(401))
 def list_seats(conn: Conn, who: Who) -> list[Seat]:
-    return [Seat.model_validate(row) for row in store.list_seats(conn)]
+    """Every seat, then each seat identity that never checked in. `missing` marks those, and any seat
+    whose row has not changed in a day."""
+    return [Seat.model_validate(row) for row in dispatch.seats(conn)]
 
 
 @router.get("/v1/seats/{name}", tags=["seats"], responses=errors(401, 404))
 def get_seat(conn: Conn, who: Who, name: str) -> Seat:
-    return Seat.model_validate(_found(store.get_seat(conn, name), "seat"))
+    return Seat.model_validate(_found(dispatch.seat(conn, name), "seat"))
 
 
 @router.patch("/v1/seats/{name}", tags=["seats"], responses=errors(401, 403))
@@ -309,6 +320,20 @@ def assign(conn: Conn, who: Admin, item_id: str, body: Assign) -> Item:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "no such item") from error
     except store.Conflict as error:
         raise _conflict(error) from error
+    return Item.model_validate(store.get_item(conn, item_id))
+
+
+@router.post("/v1/items/{item_id}/wrap", tags=["items"], responses=errors(401, 403, 404, 409))
+def wrap(conn: Conn, who: Admin, item_id: str, body: WrapUp) -> Item:
+    """Admin: `wrapping` records that /cc seat was sent. `cleared` (the default) refuses with 409
+    until the item is memorized (CC-DONE) or `learned` is sent, and while its seat is mid-turn,
+    unless `force`; then it clears the wrap and closes an open item in `state`, freeing the seat."""
+    try:
+        dispatch.wrap(conn, item_id, body.model_dump(), who.name)
+    except KeyError as error:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "no such item") from error
+    except dispatch.Refused as error:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(error)) from error
     return Item.model_validate(store.get_item(conn, item_id))
 
 

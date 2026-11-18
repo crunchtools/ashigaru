@@ -3,7 +3,7 @@
 import json
 import sqlite3
 import stat
-from http.client import CONFLICT, CREATED, NOT_FOUND, OK, UNPROCESSABLE_ENTITY
+from http.client import CONFLICT, CREATED, FORBIDDEN, NOT_FOUND, OK, UNPROCESSABLE_ENTITY
 from pathlib import Path
 
 import pytest
@@ -76,6 +76,104 @@ def test_filters_and_state_timestamps(client: TestClient, keys: Keys) -> None:
     assert client.get("/v1/items?limit=0", headers=keys["ci"]).status_code == UNPROCESSABLE_ENTITY
     assert client.get("/v1/items?state=nonsense", headers=keys["ci"]).status_code == UNPROCESSABLE_ENTITY
     assert client.get("/v1/items/zzz", headers=keys["ci"]).status_code == NOT_FOUND
+
+
+SEAT = "Exedore 1 - Max"
+
+
+def test_a_taken_subject_key_names_its_item(client: TestClient, keys: Keys) -> None:
+    body = {"task": "t", "subject_key": "RT#9"}
+    first = client.post("/v1/items", headers=keys[JOSUI], json=body).json()
+    again = client.post("/v1/items", headers=keys[JOSUI], json=body)
+    assert (
+        again.status_code == CONFLICT
+        and again.json()["detail"] == f"subject_key RT#9 is taken by {first['id']}"
+    )
+    taken = client.post("/v1/items", headers=keys[JOSUI], json={"task": "t", "id": first["id"]})
+    assert taken.json()["detail"] == f"id {first['id']} is taken"
+
+
+def test_an_admin_sets_filed_by_and_a_seat_does_not(client: TestClient, keys: Keys) -> None:
+    item = client.post(
+        "/v1/items",
+        headers=keys[JOSUI],
+        json={"task": "t", "seat": SEAT, "state": "working", "filed_by": SEAT},
+    ).json()
+    assert item["filed_by"] == SEAT
+    path = f"/v1/items/{item['id']}"
+    assert client.patch(path, headers=keys[JOSUI], json={"filed_by": "Scott"}).json()["filed_by"] == "Scott"
+    assert client.patch(path, headers=keys[SEAT], json={"filed_by": SEAT}).status_code == FORBIDDEN
+
+
+def test_list_by_several_states_learned_memorized_subject_key_and_ref(client: TestClient, keys: Keys) -> None:
+    def make(**fields: object) -> str:
+        return str(client.post("/v1/items", headers=keys[JOSUI], json={"task": "t", **fields}).json()["id"])
+
+    done = make(state="done", learned="poll less", ref="https://rt.example/1", subject_key="RT#1")
+    blocked = make(state="blocked", learned="ask first", memorized=True)
+    make(state="wontdo")
+    make(state="working", learned="x")
+
+    def ids(query: str) -> list[str]:
+        return [row["id"] for row in client.get(f"/v1/items?{query}", headers=keys["ci"]).json()]
+
+    assert ids("state=done&state=blocked") == [blocked, done]
+    assert ids("state=done&state=blocked&learned=true&memorized=false") == [done]
+    assert ids("subject_key=RT%231") == ids("ref=https://rt.example/1") == [done]
+    assert len(ids("learned=false")) == 1
+
+
+def test_queue_names_the_state_of_what_each_item_waits_on(client: TestClient, keys: Keys) -> None:
+    client.post("/v1/items", headers=keys[JOSUI], json={"id": "a1", "task": "t", "state": "working"})
+    client.post("/v1/items", headers=keys[JOSUI], json={"id": "a2", "task": "t", "after": ["a1", "a9"]})
+    client.post("/v1/items", headers=keys[JOSUI], json={"id": "a3", "task": "t", "state": "proposed"})
+    view = client.get("/v1/queue", headers=keys["ci"]).json()
+    assert [(row["id"], row["waits_on"]) for row in view["queued"]] == [
+        ("a2", [{"id": "a1", "state": "working"}, {"id": "a9", "state": "unknown"}])
+    ]
+    assert [row["id"] for row in view["proposed"]] == ["a3"]
+
+
+def test_wrap_marks_wrapping_then_clears_once_memorized_and_idle(client: TestClient, keys: Keys) -> None:
+    client.patch(f"/v1/seats/{SEAT}", headers=keys[JOSUI], json={"lane": "exedore-max"})
+    item = client.post("/v1/items", headers=keys[JOSUI], json={"task": "t", "lane": "exedore-max"}).json()
+    path = f"/v1/items/{item['id']}"
+    client.post(f"{path}/assign", headers=keys[JOSUI], json={"seat": SEAT})
+    client.post(f"{path}/report", headers=keys[SEAT], json={"verb": "DONE", "text": "PR #1"})
+    assert client.post(f"{path}/wrap", headers=keys[SEAT], json={}).status_code == FORBIDDEN
+    wrapping = client.post(f"{path}/wrap", headers=keys[JOSUI], json={"stage": "wrapping"}).json()
+    assert (wrapping["wrap"], wrapping["state"]) == ("wrapping", "review")
+
+    early = client.post(f"{path}/wrap", headers=keys[JOSUI], json={})
+    assert early.status_code == CONFLICT and "/cc seat" in early.json()["detail"]
+    client.post(f"{path}/report", headers=keys[SEAT], json={"verb": "CC-DONE"})
+    client.patch(f"/v1/seats/{SEAT}", headers=keys[SEAT], json={"turn": "active"})
+    busy = client.post(f"{path}/wrap", headers=keys[JOSUI], json={})
+    assert busy.status_code == CONFLICT and "mid-turn" in busy.json()["detail"]
+
+    client.patch(f"/v1/seats/{SEAT}", headers=keys[SEAT], json={"turn": "idle"})
+    cleared = client.post(f"{path}/wrap", headers=keys[JOSUI], json={"learned": "small PRs"}).json()
+    assert (cleared["wrap"], cleared["state"], cleared["learned"]) == ("cleared", "done", "small PRs")
+    assert client.get(f"/v1/seats/{SEAT}", headers=keys["ci"]).json()["status"] == "free"
+
+
+def test_wrap_force_keeps_a_closed_state(client: TestClient, keys: Keys) -> None:
+    item = client.post("/v1/items", headers=keys[JOSUI], json={"task": "t", "state": "wontdo"}).json()
+    path = f"/v1/items/{item['id']}/wrap"
+    assert client.post(path, headers=keys[JOSUI], json={"state": "done"}).status_code == CONFLICT
+    forced = client.post(path, headers=keys[JOSUI], json={"state": "done", "force": True}).json()
+    assert (forced["wrap"], forced["state"]) == ("cleared", "wontdo")
+    assert client.post("/v1/items/nope/wrap", headers=keys[JOSUI], json={}).status_code == NOT_FOUND
+
+
+def test_seats_show_the_missing(client: TestClient, keys: Keys, conn: sqlite3.Connection) -> None:
+    client.patch(f"/v1/seats/{SEAT}", headers=keys[SEAT], json={"turn": "idle"})
+    rows = {row["name"]: row for row in client.get("/v1/seats", headers=keys["ci"]).json()}
+    assert set(rows) == {SEAT, "Exedore 2 - Max"}
+    assert rows[SEAT]["missing"] is False
+    assert rows["Exedore 2 - Max"]["missing"] is True and rows["Exedore 2 - Max"]["updated_at"] is None
+    conn.execute("UPDATE seats SET updated_at = '2000-01-01T00:00:00Z' WHERE name = ?", (SEAT,))
+    assert client.get(f"/v1/seats/{SEAT}", headers=keys["ci"]).json()["missing"] is True
 
 
 def test_check_hides_cleared_and_dead_items_and_puts_blocked_first(client: TestClient, keys: Keys) -> None:
