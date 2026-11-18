@@ -126,7 +126,7 @@ GitHub catch-up after the `sweep` mark, then moves the mark to the last event
 the round covered. A round cut at 1000 (`truncated`) reads on from there next
 time, so nothing is lost or repeated. Without `--advance` the mark stays put,
 so Scott can look without eating the window (any view of the queue still
-abandons expired proposed children); `--since` reads from a time instead. Scott's untracked work is already
+abandons expired proposed children); `--since` reads from a time instead, and never with `--advance`. Scott's untracked work is already
 there as a `manual` item.
 
 The catch-up is the Desk's own record of the org webhook, so no `gh` sweep

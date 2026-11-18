@@ -28,8 +28,9 @@ import pytest
 from conftest import Keys
 from fastapi.testclient import TestClient
 
+import common
 from ashigaru.desk import __main__ as desk_main
-from ashigaru.desk import ci, store, webhooks
+from ashigaru.desk import ci, intake, store, webhooks
 from ashigaru.desk.api import create_app
 from ashigaru.desk.forges import FORGES, CIUpdate, github
 from ashigaru.desk.model import Verdict
@@ -1036,6 +1037,42 @@ def test_the_apps_lane_label_approves_nobody_elses_issue(
         trusting_the_bot, "issues", {**outsider("labeled", by=BOT), "label": {"name": "lane:vertex"}}, "d-2"
     )
     assert "approved_by" not in held_item(conn)["extra"]
+
+
+@pytest.mark.parametrize("record", sorted(intake.RECORDS))
+def test_the_apps_record_issues_are_never_queued(
+    trusting_the_bot: TestClient, conn: sqlite3.Connection, record: str
+) -> None:
+    """The inbox lists strangers' titles: trusted as the bot's own, it would be claimable work."""
+    labels = [{"name": record}, {"name": "lane:dolza-max"}]
+    deliver(trusting_the_bot, "issues", payload("issues", user={"login": BOT}, labels=labels))
+    assert store.item_by_subject(conn, f"{REPO}#190") is None
+
+
+def test_records_are_the_issues_the_sweep_keeps() -> None:
+    """The record labels are scripts/common.py's, so a new record issue can't drift past intake."""
+    assert {common.INBOX, common.RELEASES, common.RED, common.OBSERVE} == intake.RECORDS
+
+
+def test_a_record_issue_queued_before_is_held_on_its_next_delivery(
+    trusting_the_bot: TestClient, conn: sqlite3.Connection
+) -> None:
+    deliver(trusting_the_bot, "issues", payload("issues", user={"login": BOT}), "d-1")
+    labels = [{"name": "ashigaru-inbox"}, {"name": "lane:dolza-max"}]
+    deliver(trusting_the_bot, "issues", payload("issues", user={"login": BOT}, labels=labels), "d-2")
+    item = held_item(conn)
+    assert (item["lane"], item["mode"], item["extra"]["held_for"]) == (None, "manual", "record issue")
+    history = store.last_event(conn, item["id"])
+    deliver(trusting_the_bot, "issues", payload("issues", user={"login": BOT}, labels=labels), "d-3")
+    approve = {
+        **payload("issues", user={"login": BOT}, labels=labels),
+        "action": "labeled",
+        "sender": {"login": "maintainer"},
+        "label": {"name": "lane:vertex"},
+    }
+    deliver(trusting_the_bot, "issues", approve, "d-4")
+    again = held_item(conn)
+    assert "approved_by" not in again["extra"] and store.last_event(conn, item["id"]) == history
 
 
 def test_trusted_authors_come_from_their_variable(monkeypatch: pytest.MonkeyPatch) -> None:

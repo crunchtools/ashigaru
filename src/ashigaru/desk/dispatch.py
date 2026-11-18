@@ -43,19 +43,28 @@ QUEUE_LIMIT = 1000
 CAUGHT = """
     SELECT * FROM (
         SELECT e.seq AS event_seq, (SELECT min(seq) FROM events f WHERE f.item_id = e.item_id) AS first_seq,
+               json_extract(e.patch, '$.extra.source_state') AS event_state,
                i.*
         FROM events e JOIN items i ON i.id = e.item_id
         WHERE e.seq > :after AND e.seq <= :until AND e.source = 'webhook'
           AND json_extract(i.extra, '$.trusted') IS NOT NULL
-    )
+    ) c
     WHERE event_seq = first_seq
-       OR (json_extract(extra, '$.source_state') = 'open' AND state IN ('done', 'wontdo', 'abandoned'))
+       OR CASE WHEN event_state = 'open' AND state IN ('done', 'wontdo', 'abandoned') THEN (
+              SELECT json_extract(p.patch, '$.extra.source_state') FROM events p
+              WHERE p.item_id = c.id AND p.seq < c.event_seq AND p.source = 'webhook'
+                AND json_extract(p.patch, '$.extra.source_state') IS NOT NULL
+              ORDER BY p.seq DESC LIMIT 1
+          ) = 'closed' ELSE 0 END
     ORDER BY event_seq
     LIMIT :limit
 """
-"""Intake's events after the cursor that the catch-up reports: an item's first (it is new), or one on
-an item still open at the source while it is closed (it was reopened). `trusted` is set only by
-intake, so an item the API created and a webhook later touched is not one."""
+"""Intake's events after the cursor that the catch-up reports: an item's first (it is new), or the one
+that flipped its source state from closed to open while the item is closed (it was reopened), so a
+later delivery on an item closed here and open there is not reported again. `trusted` is set only by
+intake, so an item the API created and a webhook later touched is not one. The history is read back
+only for an open-at-the-source event on a closed item, so most events cost no lookup."""
+CAUGHT_ONLY = ("event_seq", "first_seq", "event_state")
 FROM_TIME = """
     SELECT coalesce(
         (SELECT min(seq) FROM events WHERE at >= :since) - 1, (SELECT coalesce(max(seq), 0) FROM events)
@@ -371,9 +380,7 @@ def catch_up(conn: sqlite3.Connection, since: str | None = None) -> dict[str, An
     rows = rows[:QUEUE_LIMIT]
     found: dict[str, dict[str, dict[str, Any]]] = {"new": {}, "reopened": {}}
     for row in rows:
-        item = {
-            key: value for key, value in store.decode(row).items() if key not in ("event_seq", "first_seq")
-        }
+        item = {key: value for key, value in store.decode(row).items() if key not in CAUGHT_ONLY}
         if row["event_seq"] == row["first_seq"]:
             found["new"].setdefault(item["id"], _caught(item))
         elif item["id"] not in found["new"]:

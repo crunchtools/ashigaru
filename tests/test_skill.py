@@ -27,6 +27,7 @@ from ashigaru.desk.model import ItemCreate, ItemFilter, ItemPatch, NewItem
 ROOT = Path(__file__).resolve().parents[1]
 SKILL = (ROOT / "skills" / "ashigaru" / "SKILL.md").read_text()
 CLI_DOC = (ROOT / "docs" / "desk-cli.md").read_text()
+API_DOC = (ROOT / "docs" / "desk-api.md").read_text()
 _, FRONT, BODY = SKILL.split("---\n", 2)
 META = yaml.safe_load(FRONT)
 
@@ -141,14 +142,41 @@ TYPE_DIFFERS = {
     ): "the CLI's is its whole wait, fractional seconds; the tool's one poll, whole, at most 90",
 }
 """A tool argument deliberately not the CLI flag's type, with why."""
+CHOICES_DIFFER: dict[tuple[str, str], str] = {}
+"""A tool argument whose choices the CLI flag does not declare, with why."""
+REQUIRED_DIFFERS = {
+    ("desk_assign", "task"): "the record's task is for a new item; assign by `item` needs none",
+}
+"""An argument or carried field required on one side only, with why."""
+OMITTED = "the CLI leaves it out when unset and the Desk fills it in; the tool states the Desk's value"
+NULL_DIFFERS = {
+    ("desk_list", "limit"): OMITTED,
+    ("desk_list", "offset"): OMITTED,
+    ("desk_assign", "task"): "the record's task is for a new item; assign by `item` needs none",
+    ("desk_assign", "after"): "the CLI's unset is None; the record's is an empty list",
+    (
+        "desk_wait",
+        "timeout",
+    ): "the CLI's None goes to the waiter, which waits as long as it takes; the tool's is 90",
+}
+"""An argument `T | None` on one side and `T` on the other, with why."""
+DEFAULT_DIFFERS = {
+    ("desk_list", "limit"): OMITTED,
+    ("desk_list", "offset"): OMITTED,
+    ("desk_wait", "timeout"): "the CLI waits as long as it takes; the tool polls once, 90 seconds at most",
+}
+"""An argument whose default deliberately differs between the CLI and the tool, with why."""
 
 
 class Arg(NamedTuple):
-    """One argument as JSON schema sees it: its type, its choices (if any), and whether it is required."""
+    """One argument as JSON schema sees it: its type, choices (if any), whether it may be null, whether
+    it is required, and its default (None for "none")."""
 
     type: str
     choices: frozenset[str] | None
+    nullable: bool
     required: bool
+    default: Any
 
 
 _TYPES: dict[object, str] = {int: "integer", float: "number"}
@@ -170,28 +198,30 @@ def _cli_args(command: str) -> dict[str, Arg]:
         else:
             kind = scalar
         required = a.required if a.option_strings else a.nargs not in ("?", "*")
-        arg = Arg(kind, frozenset(a.choices) if a.choices else None, required)
+        nullable = not required and a.default is None
+        arg = Arg(kind, frozenset(a.choices) if a.choices else None, nullable, required, a.default)
         if a.dest == "target":  # item | repo sha: each name is one string, none required alone
-            arg = Arg("string", None, False)
+            arg = Arg("string", None, True, False, None)
         for name in RENAMED.get(a.dest, {a.dest}):
             found[name] = arg
     return found
 
 
-def _type(schema: dict[str, Any], defs: dict[str, Any]) -> tuple[str, frozenset[str] | None]:
-    """A property's non-null type and enum, as `_cli_args` names them: $ref and anyOf resolved."""
+def _type(schema: dict[str, Any], defs: dict[str, Any]) -> tuple[str, frozenset[str] | None, bool]:
+    """A property's non-null type, enum and nullability as `_cli_args` names them: $ref, anyOf resolved."""
     if "$ref" in schema:
         return _type(defs[schema["$ref"].rsplit("/", 1)[1]], defs)
     if "anyOf" in schema:
-        kinds = {_type(branch, defs) for branch in schema["anyOf"] if branch.get("type") != "null"}
+        branches = [branch for branch in schema["anyOf"] if branch.get("type") != "null"]
+        kinds = {_type(branch, defs)[:2] for branch in branches}
         assert len(kinds) == 1, schema
-        return kinds.pop()
+        return *kinds.pop(), len(branches) < len(schema["anyOf"])
     if "enum" in schema:
-        return "string", frozenset(map(str, schema["enum"]))
+        return "string", frozenset(map(str, schema["enum"])), False
     if schema["type"] == "array":
-        kind, choices = _type(schema["items"], defs)
-        return f"array<{kind}>", choices
-    return schema["type"], None
+        kind, choices, _ = _type(schema["items"], defs)
+        return f"array<{kind}>", choices, False
+    return schema["type"], None, False
 
 
 def _mcp_args(tool: str) -> tuple[dict[str, Arg], dict[str, Arg]]:
@@ -204,13 +234,16 @@ def _mcp_args(tool: str) -> tuple[dict[str, Arg], dict[str, Arg]]:
     )
     carried = {"fields", "filters", "record"} & set(props)
     flat = {
-        name: Arg(*_type(prop, defs), name in required) for name, prop in props.items() if name not in carried
+        name: Arg(*_type(prop, defs), name in required, prop.get("default"))
+        for name, prop in props.items()
+        if name not in carried
     }
     fields = {}
     for name in carried:
         model = MODELS[tool if name == "fields" else name].model_json_schema()
         for field, prop in model["properties"].items():
-            fields[field] = Arg(*_type(prop, model.get("$defs", {})), field in model.get("required", []))
+            required_here = field in model.get("required", [])
+            fields[field] = Arg(*_type(prop, model.get("$defs", {})), required_here, prop.get("default"))
     return flat, fields
 
 
@@ -218,10 +251,14 @@ def test_every_cli_command_is_a_tool_and_every_tool_a_cli_command() -> None:
     assert sorted(TOOLS) == sorted(f"desk_{command}" for command in SHARED)
 
 
+def _lower(choices: frozenset[str] | None) -> frozenset[str] | None:
+    return choices and frozenset(c.lower() for c in choices)
+
+
 @pytest.mark.parametrize("command", SHARED)
 def test_each_tool_takes_its_commands_arguments(command: str) -> None:
-    """Names, types and choices agree; a flat argument is required as the CLI's is; a carried model's
-    fields are the CLI's flags and the tool's listed gaps."""
+    """Names, types, choices, required-ness, nullability and defaults agree, bar the listed differences; a
+    carried model's fields are the CLI's flags and the tool's listed gaps."""
     flat, carried = _mcp_args(f"desk_{command}")
     cli = _cli_args(command)
     gaps = MCP_ONLY.get(f"desk_{command}", {})
@@ -237,12 +274,52 @@ def test_each_tool_takes_its_commands_arguments(command: str) -> None:
         flag = cli[name]
         if (f"desk_{command}", name) not in TYPE_DIFFERS:
             assert tool.type == flag.type, f"{name}: MCP {tool.type}, CLI {flag.type}"
-        if flag.choices and tool.choices:
-            assert {c.lower() for c in tool.choices} == {c.lower() for c in flag.choices}, name
-        if name in flat:
+        key = (f"desk_{command}", name)
+        if key not in CHOICES_DIFFER:
+            assert _lower(tool.choices) == _lower(flag.choices), (
+                f"{name}: choices MCP {_lower(tool.choices)}, CLI {_lower(flag.choices)}"
+            )
+        if key not in REQUIRED_DIFFERS:
             assert tool.required == flag.required, (
                 f"{name}: required MCP {tool.required}, CLI {flag.required}"
             )
+        if key not in NULL_DIFFERS:
+            assert tool.nullable == flag.nullable, f"{name}: null MCP {tool.nullable}, CLI {flag.nullable}"
+        if key not in DEFAULT_DIFFERS:
+            assert tool.default == flag.default, f"{name}: default MCP {tool.default!r}, CLI {flag.default!r}"
+
+
+@pytest.mark.parametrize(
+    ("listed", "field"),
+    [(CHOICES_DIFFER, "choices"), (REQUIRED_DIFFERS, "required"), (NULL_DIFFERS, "nullable"),
+     (DEFAULT_DIFFERS, "default")],
+)  # fmt: skip
+def test_every_listed_difference_still_differs(listed: dict[tuple[str, str], str], field: str) -> None:
+    """An entry whose difference was fixed is stale: it would hide the next drift."""
+    for tool, name in listed:
+        flat, carried = _mcp_args(tool)
+        mcp, cli = (flat | carried)[name], _cli_args(tool.removeprefix("desk_"))[name]
+        assert getattr(mcp, field) != getattr(cli, field), f"{tool} {name}: {field} agrees now"
+
+
+def test_every_listed_gap_is_still_a_gap() -> None:
+    """A stale TYPE_DIFFERS, MCP_ONLY, RENAMED or CLI_ONLY entry would hide the next drift."""
+    for tool, name in TYPE_DIFFERS:
+        flat, carried = _mcp_args(tool)
+        mcp, cli = (flat | carried)[name], _cli_args(tool.removeprefix("desk_"))[name]
+        assert mcp.type != cli.type, f"{tool} {name}: type agrees now"
+    for tool, gaps in MCP_ONLY.items():
+        flags = _cli_args(tool.removeprefix("desk_"))
+        _, carried = _mcp_args(tool)
+        assert set(gaps) <= set(carried), f"{tool}: {sorted(set(gaps) - set(carried))} is not a field"
+        assert not set(gaps) & set(flags), f"{tool}: {sorted(set(gaps) & set(flags))} is on the CLI"
+    for command in CLI_ONLY:
+        assert f"desk_{command}" not in TOOLS, f"{command} is a tool now"
+    for dest, names in RENAMED.items():
+        used = {a.dest for command in SHARED for a in CLI[command]._actions}
+        assert dest in used, f"no CLI argument is named {dest}"
+        flats = set().union(*(_mcp_args(f"desk_{command}")[0] for command in SHARED))
+        assert names <= flats, f"{dest}: no tool argument {sorted(names - flats)}"
 
 
 @pytest.mark.parametrize("command", SHARED)
@@ -251,9 +328,9 @@ def test_each_tool_says_which_command_it_is(command: str) -> None:
     assert f"`ashigaru {command}`" in description
 
 
-@pytest.mark.parametrize("text", [SKILL, CLI_DOC], ids=["skill", "desk-cli.md"])
+@pytest.mark.parametrize("text", [SKILL, CLI_DOC, API_DOC], ids=["skill", "desk-cli.md", "desk-api.md"])
 def test_every_tool_the_docs_name_exists(text: str) -> None:
-    named = set(re.findall(r"\bdesk_[a-z]+\b", text))
+    named = set(re.findall(r"\bdesk_[a-z0-9_]+\b", text))
     assert named and named <= set(TOOLS), sorted(named - set(TOOLS))
 
 

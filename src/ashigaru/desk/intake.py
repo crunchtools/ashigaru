@@ -15,7 +15,10 @@ Approval, retry and withdrawal change lane and mode only while the item is
 queued and seatless and nobody but intake has set them: a hold Josui chose
 wins. Otherwise later deliveries never touch what Josui owns (task, lane, mode,
 state, seat): they refresh the ref, and the source's title, labels and open or
-closed state under `extra`. A subject first seen closed is not queued.
+closed state under `extra`. A subject first seen closed is not queued, nor is one of the record issues
+the sweep keeps (RECORDS): the inbox and the red issue carry strangers' text, and their author, the
+app's bot, would make them trusted and claimable. One queued before that is held on its next delivery,
+for good: nothing it carries can trust it again.
 """
 
 import dataclasses
@@ -28,6 +31,8 @@ from .model import Kind, Lane, Mode, State
 
 ACTOR = "intake"
 SOURCE = "webhook"
+RECORDS = frozenset({"ashigaru-inbox", "ashigaru-releases", "ashigaru-red", "ashigaru-observe"})
+"""The labels of the issues the sweep keeps as records (scripts/common.py), which are never work."""
 
 
 def held(existing: dict[str, Any]) -> bool:
@@ -125,6 +130,16 @@ def _trust(
     return {"lane": None, "mode": Mode.MANUAL} if _ours(conn, existing) else {}
 
 
+def _unrecord(
+    conn: sqlite3.Connection, existing: dict[str, Any], item: IntakeItem, extra: dict[str, Any]
+) -> dict[str, Any]:
+    """A record issue queued before RECORDS: held as withdrawn, so no author check or label trusts it."""
+    if withdrawn(existing) and not trusted(existing):
+        return {}
+    extra.update(_withdrawal(item, "record issue"))
+    return {"lane": None, "mode": Mode.MANUAL} if _ours(conn, existing) else {}
+
+
 def _unless_moved(conn: sqlite3.Connection, existing: dict[str, Any], item: IntakeItem) -> IntakeItem:
     """The item, stripped of what its judging granted when the row has changed since it was judged."""
     if item.judged_at == store.last_event(conn, existing["id"]):
@@ -133,11 +148,11 @@ def _unless_moved(conn: sqlite3.Connection, existing: dict[str, Any], item: Inta
 
 
 def upsert(conn: sqlite3.Connection, item: IntakeItem) -> str | None:
-    """The id of the item the subject maps to, or None when it was closed on first sight. The caller
-    holds the transaction; an item is written only when something changed."""
+    """The id of the item the subject maps to, or None when it was closed or a record on first sight.
+    The caller holds the transaction; an item is written only when something changed."""
     existing = store.item_by_subject(conn, item.subject_key)
     if existing is None:
-        if item.closed:
+        if item.closed or RECORDS & set(item.labels):
             return None
         return store.insert_item(
             conn,
@@ -172,7 +187,10 @@ def upsert(conn: sqlite3.Connection, item: IntakeItem) -> str | None:
     item = _unless_moved(conn, existing, item)
     patch: dict[str, Any] = {}
     extra = {**existing["extra"], **_seen(item)}
-    patch.update(_trust(conn, existing, item, extra))
+    if RECORDS & set(item.labels):
+        patch.update(_unrecord(conn, existing, item, extra))
+    else:
+        patch.update(_trust(conn, existing, item, extra))
     if extra != existing["extra"]:
         patch["extra"] = extra
     if item.ref != existing["ref"]:
