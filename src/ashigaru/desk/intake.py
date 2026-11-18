@@ -6,13 +6,19 @@ to follow. An item is claimable (mode auto) only when its author may write to
 the repo, with the lane hint as its lane, or once a maintainer approves it: an
 event that adds a lane (the adapter says which) from a sender who may write.
 Anything else, including an edit, reopen or comment by a writer, leaves it
-held, no lane and mode manual, for Josui to assign; who approved, and when, is
-recorded under `extra`. Otherwise later deliveries never touch what Josui owns
-(task, lane, mode, state, seat): they refresh the ref, and the source's title,
-labels and open or closed state under `extra`. A subject first seen closed is
-not queued.
+held, no lane and mode manual, for Josui to assign; who approved, when, and the
+head it was approved at are recorded under `extra`. While held, the author is
+asked about again, so a check that failed is retried. An approval is withdrawn
+(held again) when a writer removes the approved lane, or when anyone who may not
+write moves the head it was approved at; a writer moving it moves the approval.
+Approval, retry and withdrawal change lane and mode only while the item is
+queued and seatless and nobody but intake has set them: a hold Josui chose
+wins. Otherwise later deliveries never touch what Josui owns (task, lane, mode,
+state, seat): they refresh the ref, and the source's title, labels and open or
+closed state under `extra`. A subject first seen closed is not queued.
 """
 
+import dataclasses
 import sqlite3
 from typing import Any
 
@@ -27,6 +33,11 @@ SOURCE = "webhook"
 def held(existing: dict[str, Any]) -> bool:
     """An intake item still waiting for a maintainer's approval."""
     return existing["extra"].get("trusted") is False
+
+
+def was_approved(existing: dict[str, Any]) -> bool:
+    """An intake item a maintainer has approved, whether or not the approval still stands."""
+    return "approved_by" in existing["extra"]
 
 
 def lane(hint: str | None) -> str | None:
@@ -50,7 +61,53 @@ def _seen(item: IntakeItem) -> dict[str, Any]:
 
 
 def _approval(item: IntakeItem) -> dict[str, Any]:
-    return {"approved_by": item.sender, "approved_at": store.now(), "approved_lane": lane(item.approves_lane)}
+    return {
+        "approved_by": item.sender,
+        "approved_at": store.now(),
+        "approved_lane": lane(item.approves_lane),
+        "approved_head": item.head,
+    }
+
+
+def _withdrawal(item: IntakeItem, why: str) -> dict[str, Any]:
+    return {"trusted": False, "held_by": item.sender, "held_at": store.now(), "held_for": why}
+
+
+def _ours(conn: sqlite3.Connection, existing: dict[str, Any]) -> bool:
+    """Lane and mode are intake's to set: the item is queued and seatless, and nobody else has set
+    either (Josui's hold, or Josui's lane, wins over a label)."""
+    if existing["state"] != State.QUEUED or existing["seat"] is not None:
+        return False
+    return not store.steered_by_other(conn, existing["id"], ACTOR)
+
+
+def _trust(
+    conn: sqlite3.Connection, existing: dict[str, Any], item: IntakeItem, extra: dict[str, Any]
+) -> dict[str, Any]:
+    """Approve, retry or withdraw the existing item's trust in `extra`; the lane and mode that follow."""
+    if held(existing) and (item.author_writes or item.approved):
+        extra.update(trusted=True, **({} if item.author_writes else _approval(item)))
+        hint = item.lane_hint if item.author_writes else item.approves_lane
+        return {"lane": lane(hint), "mode": Mode.AUTO} if _ours(conn, existing) else {}
+    if not was_approved(existing) or held(existing):
+        return {}
+    if item.revoked:
+        why = "lane removed"
+    elif item.head is not None and item.head != extra.get("approved_head") and not item.pushed_by_writer:
+        why = "head moved"
+    else:
+        if item.head is not None:
+            extra["approved_head"] = item.head
+        return {}
+    extra.update(_withdrawal(item, why))
+    return {"lane": None, "mode": Mode.MANUAL} if _ours(conn, existing) else {}
+
+
+def _unless_moved(conn: sqlite3.Connection, existing: dict[str, Any], item: IntakeItem) -> IntakeItem:
+    """The item, stripped of what its judging granted when the row has changed since it was judged."""
+    if item.judged_at == store.last_event(conn, existing["id"]):
+        return item
+    return dataclasses.replace(item, author_writes=False, approved=False, pushed_by_writer=False)
 
 
 def upsert(conn: sqlite3.Connection, item: IntakeItem) -> str | None:
@@ -84,12 +141,10 @@ def upsert(conn: sqlite3.Connection, item: IntakeItem) -> str | None:
             ACTOR,
             SOURCE,
         )
+    item = _unless_moved(conn, existing, item)
     patch: dict[str, Any] = {}
     extra = {**existing["extra"], **_seen(item)}
-    if item.approved and held(existing):
-        extra.update(trusted=True, **_approval(item))
-        if existing["state"] == State.QUEUED and existing["seat"] is None:
-            patch.update(lane=lane(item.approves_lane), mode=Mode.AUTO)
+    patch.update(_trust(conn, existing, item, extra))
     if extra != existing["extra"]:
         patch["extra"] = extra
     if item.ref != existing["ref"]:
