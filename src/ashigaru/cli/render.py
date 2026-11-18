@@ -68,12 +68,17 @@ def queue(lists: dict[str, list[dict[str, Any]]]) -> str:
     return f"{table(lists['queued'], QUEUED)}\n\n{table(lists['proposed'], PROPOSED)}"
 
 
+def minted(result: dict[str, Any]) -> str:
+    """The URL alone, so `$(ashigaru mcp mint ...)` captures it; or where --out wrote it."""
+    if "url" in result:
+        return str(result["url"])
+    return f"wrote the MCP URL for {result['identity']} (code {result['code_id']}) to {result['out']}"
+
+
 def view(command: str, result: Any) -> str:
     """The table for a command's result: a view's own, or one work row for an action's item."""
-    if command == "usage":
-        return usage(result)
-    if command == "queue":
-        return queue(result)
+    if command in VIEWS:
+        return VIEWS[command](result)
     if command in LISTS:
         return table(result, LISTS[command])
     return table(
@@ -137,4 +142,18 @@ OUTCOMES: list[Column] = [
     ("BLOCKED", lambda o: o["blocked"]),
     ("OPEN", lambda o: o["open"]),
 ]
-LISTS = {"agents": AGENTS, "work": WORK, "outcomes": OUTCOMES}
+CODES: list[Column] = [
+    ("ID", lambda c: c["code_id"]),
+    ("IDENTITY", lambda c: c["identity"]),
+    ("LABEL", lambda c: c.get("label")),
+    ("CREATED", lambda c: c["created_at"]),
+    ("LAST USED", lambda c: c.get("last_used_at")),
+    ("REVOKED", lambda c: c.get("revoked_at")),
+]
+LISTS = {"agents": AGENTS, "work": WORK, "outcomes": OUTCOMES, "mcp_list": CODES}
+VIEWS: dict[str, Callable[[Any], str]] = {
+    "usage": usage,
+    "queue": queue,
+    "mcp_mint": minted,
+    "mcp_revoke": lambda code: table([code], CODES),
+}
