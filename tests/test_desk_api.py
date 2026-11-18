@@ -157,6 +157,20 @@ def test_wrap_marks_wrapping_then_clears_once_memorized_and_idle(client: TestCli
     assert client.get(f"/v1/seats/{SEAT}", headers=keys["ci"]).json()["status"] == "free"
 
 
+def test_wrap_force_clears_a_seat_mid_turn(client: TestClient, keys: Keys) -> None:
+    client.patch(f"/v1/seats/{SEAT}", headers=keys[JOSUI], json={"lane": "exedore-max"})
+    item = client.post("/v1/items", headers=keys[JOSUI], json={"task": "t", "lane": "exedore-max"}).json()
+    path = f"/v1/items/{item['id']}"
+    client.post(f"{path}/assign", headers=keys[JOSUI], json={"seat": SEAT})
+    client.patch(f"/v1/seats/{SEAT}", headers=keys[SEAT], json={"turn": "active"})
+    assert client.post(f"{path}/wrap", headers=keys[JOSUI], json={}).status_code == CONFLICT
+    forced = client.post(
+        f"{path}/wrap", headers=keys[JOSUI], json={"state": "abandoned", "force": True}
+    ).json()
+    assert (forced["wrap"], forced["state"]) == ("cleared", "abandoned")
+    assert client.get(f"/v1/seats/{SEAT}", headers=keys["ci"]).json()["status"] == "free"
+
+
 def test_wrap_force_keeps_a_closed_state(client: TestClient, keys: Keys) -> None:
     item = client.post("/v1/items", headers=keys[JOSUI], json={"task": "t", "state": "wontdo"}).json()
     path = f"/v1/items/{item['id']}/wrap"

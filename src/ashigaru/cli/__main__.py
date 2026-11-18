@@ -26,7 +26,6 @@ FIELDS = (
     ("--lane", None),
     ("--mode", "auto or manual"),
     ("--state", None),
-    ("--priority", None),
     ("--note", None),
     ("--filed-by", "admin: the identity that filed it"),
 )
@@ -48,7 +47,8 @@ CLEARABLE = (
 
 def _fields(command: argparse.ArgumentParser, options: tuple[tuple[str, str | None], ...]) -> None:
     for flag, text in options:
-        command.add_argument(flag, type=int if flag == "--priority" else str, help=text)
+        command.add_argument(flag, help=text)
+    command.add_argument("--priority", type=int)
 
 
 def _item_commands(

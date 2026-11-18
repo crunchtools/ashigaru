@@ -82,14 +82,17 @@ def items(
     return result
 
 
-def get(desk: Desk, item: str | None = None, subject_key: str | None = None, ref: str | None = None) -> Any:
+def get(
+    desk: Desk, item: str | None = None, subject_key: str | None = None, ref: str | None = None
+) -> dict[str, Any]:
     """One item: by id, by subject_key (unique), or the newest with this ref. The MCP tool is desk_get,
     and desk_list finds one by subject_key or ref."""
     if sum(x is not None for x in (item, subject_key, ref)) != 1:
         raise CommandError("name one of: an item, --subject-key, --ref")
     if item is not None:
-        return desk.get(_item(item))
-    found = desk.get("/v1/items", subject_key=subject_key, ref=ref, limit=1)
+        one: dict[str, Any] = desk.get(_item(item))
+        return one
+    found: list[dict[str, Any]] = desk.get("/v1/items", subject_key=subject_key, ref=ref, limit=1)
     if not found:
         raise CommandError(f"no item with {'subject_key' if subject_key else 'ref'} {subject_key or ref}")
     return found[0]
