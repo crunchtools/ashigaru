@@ -15,7 +15,17 @@ jobs:
     # No ASHIGARU_ENABLED switch: this job runs no model, and it is a required
     # check, so a skipped run would count as passed (constitution XII). The
     # switch stops the workflows that run a model (docs/authority.md).
-    runs-on: ubuntu-latest
+    # Our own runners (crunchtools/gha-runner on exedore) for same-repo PRs and
+    # pushes; forks and Dependabot stay on GitHub's machines. Clearing the org
+    # variable CACHED_RUNNER_LABEL or UNCACHED_RUNNER_LABEL is the kill switch.
+    runs-on: >-
+      ${{ github.event_name == 'pull_request'
+          && github.event.pull_request.head.repo.full_name == github.repository
+          && github.event.pull_request.user.login != 'dependabot[bot]'
+          && (vars.CACHED_RUNNER_LABEL || 'ubuntu-latest')
+          || github.event_name != 'pull_request'
+          && (vars.UNCACHED_RUNNER_LABEL || 'ubuntu-latest')
+          || 'ubuntu-latest' }}
     # The replaced job had `timeout-minutes: 10`. Without one a hung check
     # holds a runner until GitHub's six-hour default.
     timeout-minutes: 20
