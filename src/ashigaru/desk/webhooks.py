@@ -67,9 +67,10 @@ def digest(source: str, event: str, body: bytes) -> str:
 
 def _judge(adapter: Forge, token: str, item: IntakeItem, existing: dict[str, Any] | None) -> IntakeItem:
     """Ask the forge only what can change how the item is queued: for a new or still-held subject,
-    whether its author writes (asked again while held, so a failed check is retried on the next
-    delivery), then whether an event that adds a lane comes from a writer; for an approved one,
-    whether the sender of a push from the approved head, or of an event removing its lane, writes.
+    whether its author writes (asked again while held and never trusted, so a failed check is
+    retried on the next delivery), then whether an event that adds a lane comes from a writer; for
+    a trusted one, whether the sender of a push from the approved head, or of an event removing its
+    lane, writes.
     Whether a head withdraws an approval is upsert's call, against the row it writes."""
     asked: dict[str, bool] = {}
 
@@ -83,11 +84,12 @@ def _judge(adapter: Forge, token: str, item: IntakeItem, existing: dict[str, Any
     if existing is None and item.closed:
         return item
     if existing is None or intake.held(existing):
-        if (existing is None or not intake.was_approved(existing)) and writes(item.author):
+        retry = existing is None or not (intake.was_approved(existing) or intake.withdrawn(existing))
+        if retry and writes(item.author):
             return dataclasses.replace(item, author_writes=True)
         approval = intake.lane(item.approves_lane)
         return dataclasses.replace(item, approved=True) if approval and writes(item.sender) else item
-    if not intake.was_approved(existing):
+    if not intake.trusted(existing):
         return item
     extra = existing["extra"]
     unlabeled = item.revokes_lane is not None and item.revokes_lane == extra.get("approved_lane")

@@ -35,6 +35,16 @@ def held(existing: dict[str, Any]) -> bool:
     return existing["extra"].get("trusted") is False
 
 
+def trusted(existing: dict[str, Any]) -> bool:
+    """An intake item that is claimable on its own merits: its author writes, or an approval stands."""
+    return existing["extra"].get("trusted") is True
+
+
+def withdrawn(existing: dict[str, Any]) -> bool:
+    """An intake item whose trust was withdrawn: only a maintainer's approval restores it."""
+    return "held_for" in existing["extra"]
+
+
 def was_approved(existing: dict[str, Any]) -> bool:
     """An intake item a maintainer has approved, whether or not the approval still stands."""
     return "approved_by" in existing["extra"]
@@ -69,6 +79,11 @@ def _approval(item: IntakeItem) -> dict[str, Any]:
     }
 
 
+def _authored(item: IntakeItem) -> dict[str, Any]:
+    """A writer's own subject is tied to its head like an approval, so a push by anyone else holds it."""
+    return {"approved_head": item.head} if item.head is not None else {}
+
+
 def _withdrawal(item: IntakeItem, why: str) -> dict[str, Any]:
     return {"trusted": False, "held_by": item.sender, "held_at": store.now(), "held_for": why}
 
@@ -86,10 +101,10 @@ def _trust(
 ) -> dict[str, Any]:
     """Approve, retry or withdraw the existing item's trust in `extra`; the lane and mode that follow."""
     if held(existing) and (item.author_writes or item.approved):
-        extra.update(trusted=True, **({} if item.author_writes else _approval(item)))
+        extra.update(trusted=True, **(_authored(item) if item.author_writes else _approval(item)))
         hint = item.lane_hint if item.author_writes else item.approves_lane
         return {"lane": lane(hint), "mode": Mode.AUTO} if _ours(conn, existing) else {}
-    if not was_approved(existing) or held(existing):
+    if not trusted(existing):
         return {}
     if item.revoked:
         why = "lane removed"
@@ -135,7 +150,7 @@ def upsert(conn: sqlite3.Connection, item: IntakeItem) -> str | None:
                     **_seen(item),
                     "author": item.author,
                     "trusted": item.author_writes or item.approved,
-                    **(_approval(item) if item.approved and not item.author_writes else {}),
+                    **(_authored(item) if item.author_writes else _approval(item) if item.approved else {}),
                 },
             },
             ACTOR,

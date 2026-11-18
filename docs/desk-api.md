@@ -160,7 +160,8 @@ an outsider's issue) leaves it held, no lane and mode `manual`, for Josui.
 While it is held, each delivery asks about the author again, so a check that
 failed is retried. An approval is recorded under `extra` as `approved_by`,
 `approved_at`, `approved_lane` and, for a PR, `approved_head`: approval is tied
-to that commit. It is withdrawn (held again, `trusted` false, with `held_by`,
+to that commit. A PR trusted because its author writes is tied to its head the
+same way, as `approved_head`, and once withdrawn only an approval restores it. It is withdrawn (held again, `trusted` false, with `held_by`,
 `held_at` and `held_for`: `lane removed` or `head moved`) when a writer removes
 the approved `lane:` label, or when any delivery, a writer's included, carries a
 head other than `approved_head` (a PR approved before heads were recorded has

@@ -6,6 +6,10 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- Desk intake: a PR trusted because its author writes now records `approved_head` too, so a push by anyone who may not write (a collaborator on the writer's fork) holds it like an approved PR; once held, only a maintainer's approval restores it, not the author check. A writer-authored PR queued before this release has no head on file and is held on its next delivery.
+
 ### Changed
 
 - Desk intake approval (#196): a PR's approval is tied to its head commit, and any delivery at another head holds it again unless it is a writer's push from the approved head; a judgment made against a row that changed before it was applied grants nothing; a writer removing the approved `lane:` label holds it again; a held item's author is asked about again on each delivery, so a timed-out permission check is retried; and a hold or lane Josui set wins over a maintainer's label, which is then recorded only. Withdrawals are recorded under `extra` as `held_by`, `held_at` and `held_for`.
