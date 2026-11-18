@@ -21,12 +21,13 @@ def subject_key(ref: str | None) -> str | None:
     """The dedup key a ref names: `owner/repo#N` for a GitHub issue or PR, `RT#N` for a ticket.
 
     An issue's URL and its `owner/repo#N` key come out the same, so a writer that sends the
-    URL, one that sends the key and the ledger import all dedupe against each other. A key
-    already in that form comes back unchanged; anything else is not a ref, and is None.
+    URL, one that sends the key and the ledger import all dedupe against each other. GitHub
+    names are case-insensitive, so owner/repo is lowercased, a key already in that form
+    included; anything else is not a ref, and is None.
     """
     ref = (ref or "").strip()
     if github := GITHUB_URL.match(ref) or REPO_REF.match(ref):
-        return f"{github[1]}#{github[2]}"
+        return f"{github[1].lower()}#{github[2]}"
     if rt := RT_URL.match(ref) or RT_REF.match(ref):
         return f"RT#{rt[1]}"
     return None

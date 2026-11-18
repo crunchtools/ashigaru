@@ -190,6 +190,7 @@ def test_a_sweep_after_the_import_is_refused_as_a_duplicate(
     for sent, stored in {
         " https://github.com/crunchtools/example/pull/8/ ": "crunchtools/example#8",
         "crunchtools/example#9": "crunchtools/example#9",
+        "CrunchTools/Example#10": "crunchtools/example#10",
         "example:disk-full": "example:disk-full",
         "  ": None,
     }.items():
@@ -206,6 +207,9 @@ def test_subject_keys_have_one_form() -> None:
             "https://github.com/crunchtools/ashigaru/pull/5/files",
             "http://www.github.com/crunchtools/ashigaru/issues/5#issuecomment-1",
             " crunchtools/ashigaru#5 ",
+            "https://github.com/CrunchTools/Ashigaru/issues/5",
+            "crunchtools/Ashigaru#5",
+            "CRUNCHTOOLS/ASHIGARU#5",
         ],
         "RT#1500": [
             "RT#1500",
