@@ -74,8 +74,8 @@ jobs:
       pull-requests: read
       checks: read
       actions: read
-    uses: crunchtools/ashigaru/.github/workflows/router.yml@v3
-    # By name, not `inherit`: whoever can move v3 can read only these three,
+    uses: crunchtools/ashigaru/.github/workflows/router.yml@v4
+    # By name, not `inherit`: whoever can move v4 can read only these three,
     # not every secret this repository holds. The router hands each workflow
     # only the ones it declares.
     secrets:

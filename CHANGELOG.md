@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [4.0.0] - 2026-11-18
+
 ### BREAKING
 - The hosted MCP tools are renamed to `desk_<command>` for each `ashigaru`
   command: `usage`, `agents`, `work`, `queue`, `outcomes`, `assign`, `auto`,
