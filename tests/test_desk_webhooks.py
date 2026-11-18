@@ -702,7 +702,7 @@ def test_a_push_by_someone_else_holds_a_writers_pr_until_approved(
     deliver(trusting, "pull_request", writer_pr(), "d-1")
     assert (pr_item(conn)["mode"], pr_item(conn)["extra"]["approved_head"]) == ("auto", FORK_HEAD)
     deliver(trusting, "pull_request", writer_pr("synchronize", "stranger", PUSHED), "d-2")
-    deliver(trusting, "pull_request", writer_pr("edited", "stranger", PUSHED), "d-3")
+    deliver(trusting, "pull_request", writer_pr("edited", head=PUSHED), "d-3")  # the author's own event
     item = pr_item(conn)
     assert (item["mode"], item["extra"]["trusted"], item["extra"]["held_for"]) == (
         "manual",
