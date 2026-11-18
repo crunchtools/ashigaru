@@ -60,7 +60,7 @@ depend on. Changing one is a MAJOR release.
 
 ## Release Coupling
 
-A called workflow cannot name its own ref. Callers use the major tag (`v2`) and
+A called workflow cannot name its own ref. Callers use the major tag (`v3`) and
 each reusable workflow fetches the scripts at that same literal tag;
 `tests/test_workflows.py` holds the workflows, the example and this repo's
 caller to it. Publishing a release moves the major tag, so a release reaches

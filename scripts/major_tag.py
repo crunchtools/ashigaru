@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Move the major tag to a release that was just published.
 
-Enrolled repositories call the workflows at the major tag (`v2`), so moving it
+Enrolled repositories call the workflows at the major tag (`v3`), so moving it
 is what delivers a release to them. It moves only forward: publishing an older
 release of the same major, a late patch to a previous minor, leaves it alone.
 """
