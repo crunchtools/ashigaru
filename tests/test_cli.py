@@ -11,6 +11,7 @@ from typing import Any, cast
 import pytest
 from fake_desk import FakeDesk, Seen, serve
 
+from ashigaru import __version__
 from ashigaru.cli import commands, config, hooks
 from ashigaru.cli.__main__ import main
 from ashigaru.cli.client import Desk, DeskError, Unreachable
@@ -112,6 +113,13 @@ def test_there_is_no_key_argument() -> None:
     with pytest.raises(SystemExit) as exit_:
         main(["agents", "--api-key", KEY])
     assert exit_.value.code == USAGE_ERROR
+
+
+def test_version_prints_the_package_version(capsys: pytest.CaptureFixture[str]) -> None:
+    with pytest.raises(SystemExit) as exit_:
+        main(["--version"])
+    assert exit_.value.code == 0
+    assert capsys.readouterr().out == f"{__version__}\n"
 
 
 # Client

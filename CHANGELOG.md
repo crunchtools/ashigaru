@@ -6,6 +6,9 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- `ashigaru --version` prints the installed package version and exits 0 (#206).
+
 ### Fixed
 - A narrow `single_use_helpers` exception for `CIWaiter._ask`, `_poll`'s twin.
   The existing `_poll` entry only covered `_ask` because Gourmand ignored its
