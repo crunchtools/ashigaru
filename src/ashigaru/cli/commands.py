@@ -107,11 +107,11 @@ def create(desk: Desk, **fields: Any) -> dict[str, Any]:
     except DeskError as exc:
         if exc.status != HTTPStatus.CONFLICT:
             raise
-        # The item holding the taken subject_key, else the taken id.
+        # A create's only conflicts: the subject_key is taken, else the id is.
         found = (
             desk.get("/v1/items", subject_key=body["subject_key"], limit=1) if body.get("subject_key") else []
         )
-        if not found and body.get("id") and "taken" in exc.detail:
+        if not found and body.get("id"):
             found = [desk.get(_item(body["id"]))]
         if not found:
             raise

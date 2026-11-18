@@ -37,6 +37,9 @@ OUTCOMES = """
     ORDER BY o.updated_at DESC, o.id DESC
 """
 
+QUEUE_LIMIT = 1000
+"""Items per list in the queue view, GET /v1/items's own cap; a longer queue is paged there."""
+
 UNSEEN_SEATS = """
     SELECT name FROM identities
     WHERE role = :role AND disabled_at IS NULL AND name NOT IN (SELECT name FROM seats)
@@ -238,11 +241,11 @@ def wrap(conn: sqlite3.Connection, item_id: str, request: dict[str, Any], actor:
 
 
 def queue(conn: sqlite3.Connection) -> dict[str, Any]:
-    """`ashigaru queue`: queued items, each with the state of every item it waits on (`unknown` for
-    an id with no item), then the proposed children with their expiry."""
+    """`ashigaru queue`: the newest QUEUE_LIMIT queued items, each with the state of every item it
+    waits on (`unknown` for an id with no item), then as many proposed children with their expiry."""
     store.expire_proposed(conn)
-    queued = store.list_items(conn, state=State.QUEUED)
-    proposed = store.list_items(conn, state=State.PROPOSED)
+    queued = store.list_items(conn, limit=QUEUE_LIMIT, state=State.QUEUED)
+    proposed = store.list_items(conn, limit=QUEUE_LIMIT, state=State.PROPOSED)
     wanted = sorted({after for item in queued for after in item["after"]})
     states = {
         row[0]: row[1]
