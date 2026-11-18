@@ -70,8 +70,8 @@ def from_forge(forge: Forge, token: str) -> Required:
 
 
 def gate(current: CIResult, required: Required, branch: str | None) -> CIResult:
-    """`current` held against the checks `branch` requires: success only when each has a conclusion
-    and none failed. A required check that has not reported joins `pending`."""
+    """`current` held against the checks `branch` requires: success only when each has a conclusion,
+    failure as soon as one failed. A required check that has not reported joins `pending`."""
     try:
         branch, verdicts = required(current.repo, current.sha, branch)
     except (OSError, ValueError) as error:
@@ -84,8 +84,10 @@ def gate(current: CIResult, required: Required, branch: str | None) -> CIResult:
     waiting = sorted(name for name, verdict in verdicts.items() if verdict == Verdict.PENDING)
     failed = sorted(name for name, verdict in verdicts.items() if verdict in FAILED)
     status: CIStatus = current.status
-    if status == CIStatus.SUCCESS:
-        status = CIStatus.FAILURE if failed else CIStatus.PENDING if waiting else CIStatus.SUCCESS
+    if failed:
+        status = CIStatus.FAILURE
+    elif waiting and status == CIStatus.SUCCESS:
+        status = CIStatus.PENDING
     return current.model_copy(
         update={
             "status": status,

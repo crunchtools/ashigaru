@@ -191,6 +191,7 @@ def reported(repo: str, sha: str, token: str) -> dict[str, Verdict]:
         if not runs or (isinstance(total, int) and collected >= total) or len(runs) < PAGE:
             break
         page += 1
+    # The combined status: GitHub already keeps only the latest status of each context.
     for status in _items(_get(f"{base}/status?per_page={PAGE}", token), "statuses"):
         if isinstance(context := status.get("context"), str):
             seen.setdefault(context, []).append(STATUSES.get(str(status.get("state")), Verdict.FAILURE))

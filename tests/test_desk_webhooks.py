@@ -474,6 +474,16 @@ def test_a_required_check_that_failed_fails_the_commit(
     assert found["status"] == "failure" and found["failing"] == ["sdlc ci"]
 
 
+def test_a_failed_required_check_fails_a_commit_still_pending_at_the_end(
+    hooked: TestClient, keys: Keys, required_checks: RequiredChecks
+) -> None:
+    required_checks.rules["main"] = ("sdlc ci",)
+    required_checks.reported["sdlc ci"] = Verdict.FAILURE
+    deliver(hooked, "workflow_run", payload("workflow_run", status="in_progress", conclusion=None))
+    found = result(hooked, keys)
+    assert found["status"] == "failure" and found["failing"] == ["sdlc ci"]
+
+
 def test_the_branch_named_is_the_one_whose_checks_count(
     hooked: TestClient, keys: Keys, required_checks: RequiredChecks
 ) -> None:
