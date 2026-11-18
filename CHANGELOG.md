@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [3.3.0] - 2026-11-18
+
 ### Fixed
 
 - Desk intake: a PR trusted because its author writes now records `approved_head` too, so a push by anyone who may not write (a collaborator on the writer's fork) holds it like an approved PR; once held, only a maintainer's approval restores it, not the author check. A writer-authored PR queued before this release has no head on file and is held on its next delivery.
