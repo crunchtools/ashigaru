@@ -391,16 +391,25 @@ def create_app(db_path: str | Path, trusted_proxies: Sequence[str] = ()) -> Fast
     The client address and scheme come from X-Forwarded-For and X-Forwarded-Proto only when the
     request arrives from one of `trusted_proxies` (addresses or CIDRs); with none, never.
     """
+    from . import mcp  # imported here: its tools call this module's routes
+    from .mcp import routes as mcp_routes
+
     conn = store.connect(db_path)
     store.migrate(conn)
     conn.close()
+    mcp_lifespan, mcp_route = mcp.install(db_path)
     app = FastAPI(
         title="Ashigaru Desk",
         version=VERSION,
         description="One queue for every source of change, one owner per item (docs/design/ashigaru-3.md).",
+        lifespan=mcp_lifespan,
     )
     app.state.db_path = str(db_path)
     app.include_router(router)
+    app.include_router(mcp_routes.router)
+    app.state.mcp = mcp_route is not None
+    if mcp_route is not None:
+        app.router.routes.append(mcp_route)
     if trusted_proxies:
         app.add_middleware(ProxyHeadersMiddleware, trusted_hosts=list(trusted_proxies))
     return app

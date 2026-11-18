@@ -13,11 +13,11 @@ RUN pip install --no-cache-dir uv==0.13.7
 WORKDIR /src
 COPY pyproject.toml uv.lock VERSION README.md LICENSE ./
 COPY src/ src/
-RUN uv export --frozen --no-dev --no-emit-project --extra desk --format requirements-txt -o /tmp/requirements.txt \
+RUN uv export --frozen --no-dev --no-emit-project --extra desk --extra mcp --format requirements-txt -o /tmp/requirements.txt \
     && python3 -m venv /opt/ashigaru \
     && /opt/ashigaru/bin/pip install --no-cache-dir --no-deps -r /tmp/requirements.txt \
     && /opt/ashigaru/bin/pip install --no-cache-dir --no-deps . \
-    && /opt/ashigaru/bin/python -c "import ashigaru.desk.api" \
+    && /opt/ashigaru/bin/python -c "import ashigaru.desk.api, ashigaru.desk.mcp.server" \
     && mkdir -p /data && chown 65532:65532 /data
 
 FROM quay.io/hummingbird/python:3.14

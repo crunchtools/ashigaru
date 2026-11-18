@@ -6,6 +6,8 @@
 #
 # The service's web stack is the `desk` extra, so the CLI installs without it
 # (the `ashigaru` RPM; `ashigaru-desk` adds it, packaging/ashigaru.spec). The
+# hosted MCP is the `mcp` extra, in the image only: Fedora and EPEL do not
+# package fastmcp, so the RPM Desk serves no /mcp. The
 # version is VERSION's, so the wheel, the RPM and the release tag agree.
 [project]
 name = "ashigaru"
@@ -16,6 +18,7 @@ dependencies = ["httpx>=0.28", "pydantic>=2.9"]
 
 [project.optional-dependencies]
 desk = ["fastapi>=0.115", "uvicorn>=0.32"]
+mcp = ["fastmcp>=4.2"]
 
 [project.scripts]
 ashigaru = "ashigaru.cli.__main__:main"
@@ -33,7 +36,7 @@ pattern = "(?P<version>[^\\s]+)"
 packages = ["src/ashigaru"]
 
 [dependency-groups]
-dev = ["ashigaru[desk]", "mypy>=1.14", "pytest>=8.3", "pyyaml>=6.0.3"]
+dev = ["ashigaru[desk,mcp]", "mypy>=1.14", "pytest>=8.3", "pyyaml>=6.0.3"]
 
 [tool.ruff]
 line-length = 110

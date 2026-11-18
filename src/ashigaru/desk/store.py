@@ -134,6 +134,18 @@ MIGRATIONS: tuple[str, ...] = (
         updated_at TEXT NOT NULL
     );
     """,
+    """
+    CREATE TABLE mcp_codes (
+        code_id TEXT PRIMARY KEY,
+        identity TEXT NOT NULL REFERENCES identities(name),
+        secret_sha256 TEXT NOT NULL,
+        label TEXT,
+        created_at TEXT NOT NULL,
+        revoked_at TEXT,
+        last_used_at TEXT
+    );
+    CREATE INDEX mcp_codes_identity ON mcp_codes(identity);
+    """,
 )
 
 ITEM_DEFAULTS: dict[str, Any] = {
