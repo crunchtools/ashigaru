@@ -2,6 +2,7 @@
 
 import io
 import json
+import stat
 import time
 from collections.abc import Iterator
 from pathlib import Path
@@ -482,3 +483,80 @@ def test_the_hook_subcommand_reads_stdin(seat: FakeDesk, monkeypatch: pytest.Mon
     monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps({"hook_event_name": "Stop"})))
     assert main(["hook", "stop"]) == 0
     assert patches(seat) == [{"turn": "idle"}]
+
+
+# Hosted MCP URLs
+
+CODE = {
+    "code_id": "c0de01",
+    "identity": "Vertex 1",
+    "label": "phone",
+    "created_at": "2026-11-18T00:00:00Z",
+    "revoked_at": None,
+    "last_used_at": "2026-11-18T01:00:00Z",
+}
+URL = "https://desk.example/mcp/c0de01_s3cret"
+PRIVATE = 0o600
+MCP_OF_VERTEX = "/v1/identities/Vertex%201/mcp"
+
+
+def test_mcp_mint_prints_the_url_once(desk: FakeDesk, capsys: pytest.CaptureFixture[str]) -> None:
+    desk.on("POST", MCP_OF_VERTEX, (201, CODE | {"url": URL}))
+    assert main(["mcp", "mint", "Vertex 1", "--label", "phone"]) == 0
+    assert capsys.readouterr().out == URL + "\n"
+    assert desk.calls("POST", MCP_OF_VERTEX)[0].body == {"label": "phone"}
+
+
+def test_mcp_mint_out_writes_a_private_new_file(
+    desk: FakeDesk, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    desk.on("POST", MCP_OF_VERTEX, (201, CODE | {"url": URL}))
+    out = tmp_path / "vertex1.mcp"
+    assert main(["mcp", "mint", "Vertex 1", "--out", str(out)]) == 0
+    assert out.read_text() == URL + "\n" and stat.S_IMODE(out.stat().st_mode) == PRIVATE
+    printed = capsys.readouterr().out
+    assert "s3cret" not in printed and str(out) in printed and "c0de01" in printed
+    assert main(["mcp", "mint", "Vertex 1", "--out", str(out)]) == 1
+    assert "exists" in capsys.readouterr().err and len(desk.calls("POST", MCP_OF_VERTEX)) == 1
+
+
+def test_mcp_mint_on_a_desk_without_mcp(
+    desk: FakeDesk, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    detail = "this Desk serves no MCP: it was installed without the `mcp` extra"
+    desk.on("POST", MCP_OF_VERTEX, (409, {"detail": detail}))
+    out = tmp_path / "vertex1.mcp"
+    assert main(["mcp", "mint", "Vertex 1", "--out", str(out)]) == 1
+    captured = capsys.readouterr()
+    assert captured.err == f"ashigaru: 409: {detail}\n" and captured.out == ""
+    assert not out.exists()
+
+
+def test_mcp_list_never_shows_a_code(desk: FakeDesk, capsys: pytest.CaptureFixture[str]) -> None:
+    desk.on("GET", "/v1/me", (200, {"name": "Josui Prime", "role": "admin", "key_id": "k1"}))
+    desk.on("GET", "/v1/identities", (200, [{"name": "Josui Prime"}, {"name": "Vertex 1"}]))
+    desk.on("GET", "/v1/identities/Josui%20Prime/mcp", (200, []))
+    desk.on("GET", MCP_OF_VERTEX, (200, [CODE]))
+    assert main(["mcp", "list"]) == 0
+    lines = capsys.readouterr().out.splitlines()
+    assert lines[0].split() == ["ID", "IDENTITY", "LABEL", "CREATED", "LAST", "USED", "REVOKED"]
+    assert [line.split()[:3] for line in lines[1:]] == [["c0de01", "Vertex", "1"]]
+
+
+def test_mcp_list_for_a_seat_is_its_own(desk: FakeDesk) -> None:
+    desk.on("GET", "/v1/me", (200, {"name": "Vertex 1", "role": "seat", "key_id": "k1"}))
+    desk.on("GET", MCP_OF_VERTEX, (200, [CODE]))
+    assert commands.mcp_list(Desk(config.load())) == [CODE]
+    assert not desk.calls("GET", "/v1/identities")
+
+
+def test_mcp_revoke_finds_the_codes_identity(desk: FakeDesk, capsys: pytest.CaptureFixture[str]) -> None:
+    desk.on("GET", MCP_OF_VERTEX, (200, [CODE]))
+    desk.on("DELETE", f"{MCP_OF_VERTEX}/c0de01", (200, CODE | {"revoked_at": "2026-11-18T02:00:00Z"}))
+    assert main(["mcp", "revoke", "c0de01", "--identity", "Vertex 1"]) == 0
+    assert "2026-11-18T02:00:00Z" in capsys.readouterr().out
+    assert main(["mcp", "revoke", "nope", "--identity", "Vertex 1"]) == 1
+    assert (
+        "no MCP code nope" in capsys.readouterr().err
+        and len(desk.calls("DELETE", f"{MCP_OF_VERTEX}/c0de01")) == 1
+    )

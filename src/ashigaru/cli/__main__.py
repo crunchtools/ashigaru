@@ -57,18 +57,40 @@ def parser() -> argparse.ArgumentParser:
     wrap.add_argument("--state", choices=["done", "wontdo", "abandoned"], default="done")
     wrap.add_argument("--force", action="store_true", help="skip the idle and CC-DONE checks")
 
+    mcp = sub.add_parser("mcp", help="hosted MCP URLs: mint, list, revoke")
+    action = mcp.add_subparsers(dest="action", required=True, metavar="action")
+    mint = action.add_parser(
+        "mint", parents=[common], help="admin: a new MCP URL for an identity, shown once"
+    )
+    mint.add_argument("identity")
+    mint.add_argument("--label", help="what the URL is for")
+    mint.add_argument("--out", help="write the URL to this new file (mode 0600) instead of printing it")
+    listing = action.add_parser("list", parents=[common], help="MCP codes: id, identity, created, last used")
+    listing.add_argument(
+        "identity", nargs="?", help="this identity's (default: all for an admin, else yours)"
+    )
+    revoke = action.add_parser("revoke", parents=[common], help="revoke an MCP code by its id")
+    revoke.add_argument("code_id", metavar="id")
+    revoke.add_argument("--identity", help="the code's identity, if the key sees several")
+
     hook = sub.add_parser("hook", help="Claude Code hooks: report this seat's turn and task; always exit 0")
     hook.add_argument("event", choices=hooks.EVENTS)
     return top
 
 
 def _arguments(args: argparse.Namespace) -> dict[str, Any]:
-    return {k: v for k, v in vars(args).items() if k not in ("command", "json")}
+    return {k: v for k, v in vars(args).items() if k not in ("command", "action", "json")}
+
+
+def _command(args: argparse.Namespace) -> str:
+    """`mcp mint` is commands.mcp_mint; every other command is its own name."""
+    return f"mcp_{args.action}" if args.command == "mcp" else str(args.command)
 
 
 def execute(args: argparse.Namespace, desk: Desk) -> int:
-    result = commands.COMMANDS[args.command](desk, **_arguments(args))
-    print(json.dumps(result, indent=2) if args.json else render.view(args.command, result))
+    command = _command(args)
+    result = commands.COMMANDS[command](desk, **_arguments(args))
+    print(json.dumps(result, indent=2) if args.json else render.view(command, result))
     if args.command == "wait" and result["state"] not in SUCCEEDED:
         return 1
     return 0
