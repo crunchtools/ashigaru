@@ -36,3 +36,10 @@ path = "src/ashigaru/cli/wait.py"
 pattern = "_poll"
 justification = "isolates the retry-on-blip policy (no answer or a 5xx means poll again) from the backoff loop; inlined, the loop needs an empty except to swallow the blip"
 classification = "by_design"
+
+[[exceptions]]
+check = "single_use_helpers"
+path = "src/ashigaru/cli/wait.py"
+item = "_ask"
+justification = "CIWaiter's twin of _poll: isolates the retry-on-blip policy (unreachable or a 5xx means ask again, a 404 means no CI wait) from the deadline loop; inlined, the loop needs an empty except to swallow the blip"
+classification = "by_design"
