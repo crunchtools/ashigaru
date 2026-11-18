@@ -1038,6 +1038,16 @@ def test_the_apps_lane_label_approves_nobody_elses_issue(
     assert "approved_by" not in held_item(conn)["extra"]
 
 
+@pytest.mark.parametrize("record", ["ashigaru-inbox", "ashigaru-releases", "ashigaru-observe"])
+def test_the_apps_record_issues_are_never_queued(
+    trusting_the_bot: TestClient, conn: sqlite3.Connection, record: str
+) -> None:
+    """The inbox lists strangers' titles: trusted as the bot's own, it would be claimable work."""
+    labels = [{"name": record}, {"name": "lane:dolza-max"}]
+    deliver(trusting_the_bot, "issues", payload("issues", user={"login": BOT}, labels=labels))
+    assert store.item_by_subject(conn, f"{REPO}#190") is None
+
+
 def test_trusted_authors_come_from_their_variable(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("ASHIGARU_FORGE_AUTHORS_GITHUB", f" {BOT}, ,other ")
     assert desk_main.forge_authors() == {"github": [BOT, "other"]}

@@ -299,10 +299,16 @@ def test_work_advance_posts(desk: FakeDesk, capsys: pytest.CaptureFixture[str]) 
     moved = round_()
     moved["catch_up"] = moved["catch_up"] | {"advanced": True}
     desk.on("POST", "/v1/work", (200, moved))
-    assert main(["work", "--advance", "--since", "2026-11-01T00:00:00Z"]) == 0
+    assert main(["work", "--advance", "--all"]) == 0
     assert [s.method for s in desk.seen] == ["POST"]
-    assert desk.seen[0].query == {"since": ["2026-11-01T00:00:00Z"]}
+    assert desk.seen[0].query == {"all": ["true"]}
     assert "sweep mark moved" in capsys.readouterr().out
+
+
+def test_work_refuses_since_with_advance(desk: FakeDesk, capsys: pytest.CaptureFixture[str]) -> None:
+    assert main(["work", "--advance", "--since", "2026-11-01T00:00:00Z"]) == 1
+    assert desk.seen == []
+    assert "--since cannot go with --advance" in capsys.readouterr().err
 
 
 def test_work_says_when_a_list_was_cut(desk: FakeDesk, capsys: pytest.CaptureFixture[str]) -> None:

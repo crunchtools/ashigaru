@@ -51,7 +51,10 @@ def work(desk: Desk, since: str | None = None, **flags: bool) -> dict[str, Any]:
     """The whole check round: open items blocked first then newest, the seats with how many are up
     and how many items are open, the queue, and the forge catch-up from `since` (default the sweep
     mark). `flags` are `all`, which adds closed and cleared items, and `advance` (admin), which then
-    moves the mark to the round's `until`. The MCP tool is desk_work."""
+    moves the mark to the round's `until`, never from `since`, which could pass events it never read.
+    The MCP tool is desk_work."""
+    if since and flags.get("advance"):
+        raise CommandError("--since cannot go with --advance")
     query = {"since": since} if since else {}
     if flags.get("all"):
         query["all"] = "true"

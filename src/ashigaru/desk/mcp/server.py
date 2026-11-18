@@ -119,7 +119,7 @@ def desk_work(
 ) -> Round:
     """`ashigaru work`: the whole check round: the check table (open items unless `all`), the seats,
     the queue, and the forge catch-up since the sweep mark. With `advance`, admin only, the sweep
-    mark then moves to the catch-up's `until`."""
+    mark then moves forward to the catch-up's `until`; `since` cannot go with it."""
     with desk() as (conn, who):
         if advance:
             return api.advance(conn, api.admin(who), all, since)

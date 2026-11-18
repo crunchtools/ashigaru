@@ -155,25 +155,46 @@ def test_a_delivery_after_the_round_is_the_next_rounds(
     assert [row["id"] for row in advance(client, keys)["new"]] == [later]
 
 
-def test_catch_up_reopened_lists_closed_items_open_at_the_source(
+def test_catch_up_reopened_lists_closed_items_reopened_at_the_source(
     client: TestClient, keys: Keys, conn: sqlite3.Connection
 ) -> None:
     again, quiet, shut = (seen(conn, number, ago(days=5)) for number in (1, 2, 3))
+    issue = IntakeItem(
+        subject_key="crunchtools/x#1", title="title 1", ref="https://github.com/crunchtools/x/issues/1",
+        source="webhook", repo="crunchtools/x", kind=Kind.STORY, author="fatherlinux",
+    )  # fmt: skip
     with store.transaction(conn):
         for item_id in (again, quiet, shut):
             store.update_item(conn, item_id, {"state": "done"}, JOSUI)
+        intake.upsert(conn, dataclasses.replace(issue, closed=True))
     client.put("/v1/marks/sweep", headers=keys[JOSUI], json={"value": ago(hours=1)})
     with store.transaction(conn):
-        reopen = IntakeItem(
-            subject_key="crunchtools/x#1", title="title 1, again", ref="https://github.com/crunchtools/x/issues/1",
-            source="webhook", repo="crunchtools/x", kind=Kind.STORY, author="fatherlinux",
-        )  # fmt: skip
-        intake.upsert(conn, reopen)
-        intake.upsert(conn, dataclasses.replace(reopen, subject_key="crunchtools/x#3", closed=True))
+        intake.upsert(conn, issue)
+        intake.upsert(conn, dataclasses.replace(issue, subject_key="crunchtools/x#3", closed=True))
     caught = work(client, keys)["catch_up"]
     assert caught["new"] == [] and [(row["id"], row["state"]) for row in caught["reopened"]] == [
         (again, "done")
     ]
+
+
+def test_a_later_delivery_on_an_item_closed_here_and_open_there_is_not_reopened(
+    client: TestClient, keys: Keys, conn: sqlite3.Connection
+) -> None:
+    """Reopened is the event that flipped the source state, not the item's state on every write."""
+    done = seen(conn, 1, ago(days=5))
+    issue = IntakeItem(
+        subject_key="crunchtools/x#1", title="title 1", ref="https://github.com/crunchtools/x/issues/1",
+        source="webhook", repo="crunchtools/x", kind=Kind.STORY, author="fatherlinux",
+    )  # fmt: skip
+    with store.transaction(conn):
+        store.update_item(conn, done, {"state": "done"}, JOSUI)
+        intake.upsert(conn, dataclasses.replace(issue, closed=True))
+        intake.upsert(conn, issue)
+    assert [row["id"] for row in advance(client, keys)["reopened"]] == [done]
+    with store.transaction(conn):
+        intake.upsert(conn, dataclasses.replace(issue, title="title 1, edited"))
+        intake.upsert(conn, dataclasses.replace(issue, title="title 1, edited", labels=("bug",)))
+    assert advance(client, keys)["reopened"] == []
 
 
 def test_without_a_mark_the_catch_up_reaches_a_day_back(
@@ -212,6 +233,45 @@ def test_advancing_is_admin_only_and_moves_the_mark(client: TestClient, keys: Ke
     assert client.get("/v1/marks/sweep", headers=keys[JOSUI]).json()["value"] == str(caught["until"])
     assert work(client, keys)["catch_up"]["advanced"] is False
     assert work(client, keys)["catch_up"]["since"] is None
+
+
+def test_advance_refuses_since(client: TestClient, keys: Keys) -> None:
+    refused = client.post(f"/v1/work?since={ago(days=1)}", headers=keys[JOSUI])
+    assert refused.status_code == UNPROCESSABLE_ENTITY and "since" in refused.json()["detail"]
+    assert client.get("/v1/marks/sweep", headers=keys[JOSUI]).status_code == NOT_FOUND
+
+
+def test_a_stale_advance_never_moves_the_mark_back(
+    client: TestClient, keys: Keys, conn: sqlite3.Connection
+) -> None:
+    """Two rounds racing: the one that read less commits its mark last and must not win."""
+    seen(conn, 1, ago(hours=1))
+    stale = dispatch.catch_up(conn)
+    seen(conn, 2, ago(minutes=1))
+    fresh = advance(client, keys)
+    assert fresh["until"] > stale["until"]
+    assert store.advance_mark(conn, dispatch.SWEEP, stale["until"], JOSUI) is False
+    assert client.get("/v1/marks/sweep", headers=keys[JOSUI]).json()["value"] == str(fresh["until"])
+    assert store.advance_mark(conn, dispatch.SWEEP, fresh["until"], JOSUI) is True
+    client.put("/v1/marks/sweep", headers=keys[JOSUI], json={"value": ago(days=2)})
+    assert store.advance_mark(conn, dispatch.SWEEP, stale["until"], JOSUI) is True
+
+
+def test_an_advance_that_lost_the_race_says_so(
+    client: TestClient, keys: Keys, conn: sqlite3.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    seen(conn, 1, ago(hours=1))
+    round_ = dispatch.work
+
+    def raced(conn: sqlite3.Connection, show_all: bool = False, since: str | None = None) -> dict[str, Any]:
+        found = round_(conn, show_all, since)
+        store.set_mark(conn, dispatch.SWEEP, str(found["catch_up"]["until"] + 1), "another round")
+        return found
+
+    monkeypatch.setattr(dispatch, "work", raced)
+    caught = advance(client, keys)
+    assert caught["advanced"] is False
+    assert client.get("/v1/marks/sweep", headers=keys[JOSUI]).json()["value"] == str(caught["until"] + 1)
 
 
 def test_the_check_table_stops_at_its_limit_and_says_so(

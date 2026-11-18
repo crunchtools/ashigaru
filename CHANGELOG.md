@@ -54,6 +54,21 @@ All notable changes to this project are documented here. The format follows
 - `ashigaru work` and `GET /v1/check` list only open items: `done` rows that
   were never wrapped (old imports) no longer show without `--all`.
 
+### Fixed
+- The catch-up's `reopened` is the delivery that took a subject from closed to
+  open at the source, not every later delivery on an item closed on the Desk
+  and open there (a374).
+- `--advance` only moves the `sweep` mark forward, so a round that lost a race
+  to a newer one never moves it back; `advanced` says whether it moved.
+  `--since` with `--advance` is refused, since that round could move the mark
+  past events it never read (a374).
+- The record issues the sweep keeps (`ashigaru-inbox`, `ashigaru-releases`,
+  `ashigaru-observe`) are never queued: the inbox lists strangers' titles and
+  arrived trusted and `auto` as the bot's own issue (a374).
+- The CLI-to-MCP drift test compares choices on either side, required-ness of
+  carried fields, nullability and defaults, and checks `docs/desk-api.md`'s
+  tool names (a374).
+
 ## [3.4.0] - 2026-11-18
 
 ### Added

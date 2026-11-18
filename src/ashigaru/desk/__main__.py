@@ -38,7 +38,7 @@ for _forge in FORGES:
     SETTINGS[f"ASHIGARU_FORGE_TOKEN_{_forge.upper()}_FILE"] = f"a file holding that {_forge} token (serve)"
     SETTINGS[f"ASHIGARU_FORGE_AUTHORS_{_forge.upper()}"] = (
         f"comma-separated {_forge} accounts, such as the app's bot, whose own issues and PRs are "
-        "trusted as a writer's (serve)"
+        "trusted as a writer's, so auto-claimable: a lane label on one sets its lane and mode auto (serve)"
     )
     SETTINGS[f"ASHIGARU_WEBHOOK_SECRET_{_forge.upper()}"] = f"the {_forge} webhook secret (serve)"
     SETTINGS[f"ASHIGARU_WEBHOOK_SECRET_{_forge.upper()}_FILE"] = (

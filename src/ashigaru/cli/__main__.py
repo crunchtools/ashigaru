@@ -140,7 +140,9 @@ def parser() -> argparse.ArgumentParser:
     )
     work.add_argument("--all", action="store_true", help="include closed and cleared items")
     work.add_argument("--since", help="start the catch-up here, a time (default: the sweep mark)")
-    work.add_argument("--advance", action="store_true", help="admin: then move the sweep mark to now")
+    work.add_argument(
+        "--advance", action="store_true", help="admin: then move the sweep mark to the round's end"
+    )
     sub.add_parser("queue", parents=[common], help="queued items, what they wait on, proposed children")
     sub.add_parser("outcomes", parents=[common], help="each outcome's stories: done, blocked, open")
 
