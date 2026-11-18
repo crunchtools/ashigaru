@@ -29,8 +29,11 @@ from starlette.types import ASGIApp, Lifespan, Receive, Scope, Send
 
 from .. import api, auth, store
 from ..model import (
+    MAX_WAIT,
     Assign,
     CheckRow,
+    CIResult,
+    CIWait,
     FileChild,
     Item,
     ItemCreate,
@@ -53,6 +56,7 @@ CALLER = "desk_caller"
 SECRET_PATH = re.compile(r"/mcp/[A-Za-z0-9_-]+")
 REDACTED = "/mcp/<code>"
 DB = "desk_db"
+WAITERS = "desk_waiters"
 ItemId = Annotated[str, Field(description="An item id, e.g. a204.")]
 
 mcp = FastMCP(
@@ -239,6 +243,20 @@ def desk_file(item_id: ItemId, task: str, done_when: str | None = None, note: st
         return api.file(conn, who, item_id, FileChild(task=task, done_when=done_when, note=note))
 
 
+@mcp.tool
+async def desk_wait(
+    repo: Annotated[str, Field(description="owner/name, e.g. crunchtools/ashigaru.")],
+    sha: Annotated[str, Field(description="The full commit id.")],
+    timeout: Annotated[int, Field(description="Seconds to wait, at most 90; 0 reads now.")] = MAX_WAIT,
+) -> CIResult:
+    """`ashigaru wait`: the commit's CI result as soon as a webhook delivery settles it, or as it
+    stands after `timeout` (status still `pending`: call again). Nothing polls the forge."""
+    with desk() as (conn, who):
+        query = CIWait(repo=repo, sha=sha, timeout=timeout)
+        waiters = get_http_request().scope["state"][WAITERS]
+        return await waiters.wait(conn, query.repo, query.sha, query.timeout)
+
+
 class Endpoint:
     """/mcp/{code}, with or without anything after it: the code names the caller, then the request
     goes to MCP as if at its root, with the code gone from the scope. An unknown or revoked code,
@@ -264,7 +282,9 @@ class Endpoint:
         if who is None:
             await JSONResponse({"detail": "Not Found"}, status_code=404)(scope, receive, send)
             return
-        state = {**scope.get("state", {}), CALLER: who, DB: self.db_path}
+        # The MCP app becomes scope["app"] below, so the Desk's waiters travel in the state.
+        waiters = scope["app"].state.waiters
+        state = {**scope.get("state", {}), CALLER: who, DB: self.db_path, WAITERS: waiters}
         inner = {**scope, "path": "/", "raw_path": b"/", "root_path": "", "path_params": {}, "state": state}
         await self.app(inner, receive, send)
 

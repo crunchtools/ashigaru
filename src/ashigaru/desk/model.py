@@ -469,3 +469,63 @@ class KeyCreate(BaseModel):
 
 class MintedKey(ApiKey):
     token: str = Field(description="Shown once. Send it as `Authorization: Bearer <token>`.")
+
+
+class Verdict(StrEnum):
+    """One check's verdict, whatever forge ran it. A forge adapter maps its own conclusions onto these."""
+
+    PENDING = "pending"
+    SUCCESS = "success"
+    FAILURE = "failure"
+    CANCELLED = "cancelled"
+    SKIPPED = "skipped"
+    NEUTRAL = "neutral"
+
+
+class CIStatus(StrEnum):
+    """A commit's CI as a whole: pending while any check is (or none has reported), else failure when
+    any check failed or was cancelled, else success."""
+
+    PENDING = "pending"
+    SUCCESS = "success"
+    FAILURE = "failure"
+
+
+class Check(BaseModel):
+    name: str
+    verdict: Verdict
+    url: str | None = None
+    updated_at: str = Field(description="When the forge last changed it.")
+
+
+class CIResult(BaseModel):
+    """The normalized CI result for one commit: what `desk_wait` and `ashigaru wait` read."""
+
+    repo: str = Field(description="owner/name, lower case.")
+    sha: str
+    status: CIStatus
+    checks: list[Check] = Field(default_factory=list)
+    failing: list[str] = Field(
+        default_factory=list, description="Names of the checks that failed or were cancelled."
+    )
+
+
+MAX_WAIT = 90
+"""Seconds one wait may block. Cloudflare drops a proxied request at 100s, so a client waits again."""
+
+
+class CIWait(BaseModel):
+    """GET /v1/ci/wait query parameters."""
+
+    repo: str = Field(pattern=r"^[^/\s]+/[^/\s]+$", description="owner/name")
+    sha: str = Field(pattern=r"^[0-9a-fA-F]{40}([0-9a-fA-F]{24})?$", description="The full commit id.")
+    timeout: int = Field(MAX_WAIT, ge=0, le=MAX_WAIT, description="Seconds to wait; 0 reads now.")
+
+
+class WebhookAck(BaseModel):
+    """The whole answer to a verified delivery; nothing from the delivery is echoed."""
+
+    duplicate: bool = Field(
+        description="True when the same signed delivery (forge, event and body) was already processed."
+    )
+    handled: bool = Field(description="True when an adapter mapped the event to CI or intake.")

@@ -37,11 +37,12 @@ identity exists with another role it refuses, unless `--change-role` is given.
 Every 4xx body is `{"detail": "..."}`; each route's contract lists the codes it
 can return.
 
-## Routes (all under `/v1` but `/healthz`)
+## Routes (all under `/v1` but `/healthz` and `/webhook/`)
 
 | Route | Does |
 |---|---|
 | `GET /healthz` | 200 with the schema version; no key |
+| `POST /webhook/{forge}` | a forge's webhook delivery (`/webhook/github`); its signature, not a key, authenticates it (see Webhooks) |
 | `GET /me` | the caller's identity and role |
 | `GET /items` | list, newest first; filters `state` (repeat it for any of several), `seat`, `lane`, `kind`, `mode`, `parent`, `subject_key` (normalised the same way), `ref`, `learned` (true: a Learned line other than `none` is recorded) and `memorized`; pages of `limit` (200, at most 1000) from `offset` |
 | `POST /items` | admin: create; `id` defaults to the next `a<N>`, `state` to `queued`; 409 on a taken id or `subject_key`, whose detail names the item holding it (`subject_key RT#9 is taken by a3`). A `subject_key` that is a ref is stored as its key: a GitHub issue or PR URL or `owner/repo#N` becomes `owner/repo#N` in lowercase, an RT URL or `RT #N` becomes `RT#N`; any other key is stored as given. An admin may set `filed_by` |
@@ -53,6 +54,7 @@ can return.
 | `POST /items/{id}/wrap` | admin, `wrap` in the CLI and MCP: `{stage: wrapping}` records that `/cc seat` was sent. `{stage: cleared}` (the default) is 409 until the item is memorized (CC-DONE) or `learned` is sent, and while its seat's turn is active or its seat never reported, unless `force`; then it clears the wrap and closes an open item in `state` (`done`, `wontdo`, `abandoned`), which frees the seat |
 | `POST /items/{id}/claim` | `desk_claim`, seats only: take a `queued`, seatless, `auto` item in the seat's lane whose `after` items are done. Atomic; the loser of a race gets 409. The seat must be free, unheld and have a lane: a seat with no lane claims nothing, and an item with no lane is claimed by no seat (Josui sets its lane or assigns it) |
 | `GET /items/{id}/events` | the item's history, ledger lines included, oldest first; pages of `limit` (200, at most 1000) after `after` (a seq) |
+| `GET /ci/wait` | `desk_wait`: `repo` (owner/name) and full `sha`; the commit's CI result as soon as it is not `pending`, else as it stands after `timeout` seconds (default and most 90; 0 reads now). A client waits again on `pending` |
 | `GET /check` | the `/agents check` table: id, seat, mode, task, state, wrap, result or blocker, next. Blocked first, then newest; `?all=true` includes cleared, wontdo and abandoned |
 | `GET /queue` | `ashigaru queue`: the newest 1000 `queued` items, each with `waits_on` (every `after` id and its state, `unknown` for no such item), and the newest 1000 `proposed` children; `truncated` is true when either list was cut |
 | `GET /seats`, `GET /seats/{name}` | seat state: free/busy, owner, `hold` (`free`, `busy-auto` or `busy-manual`), turn, task, item, since, and the last usage report. `missing` is true for a seat whose row has not changed in 24 hours; the list ends with each seat identity that never checked in, `missing` with a null `updated_at` |
@@ -82,10 +84,10 @@ redact the path the same way.
 
 The tools are the shared command set: `usage`, `agents`, `work`, `queue`,
 `outcomes`, `assign`, `auto`, `manual`, `wrap`, plus `desk_list`, `desk_get`,
-`desk_create`, `desk_claim`, `desk_update`, `desk_report` and `desk_file`. Each calls the
-REST route's own function with the code's identity, so authority is the
-API's: a refusal comes back as a tool error carrying the same status and
-detail. `wait` follows the CI-callback route it would mirror.
+`desk_create`, `desk_claim`, `desk_update`, `desk_report`, `desk_file` and
+`desk_wait` (the `GET /ci/wait` long-poll). Each calls the REST route's own
+function with the code's identity, so authority is the API's: a refusal comes
+back as a tool error carrying the same status and detail.
 
 ## Scott's hold
 
@@ -107,6 +109,59 @@ state stamps `assigned_at`, `queued_at` or `closed_at`; `wrap: cleared` stamps
 `cleared_at`. Closing an item, clearing it, or moving it to another seat frees
 the seat that held it.
 Times are UTC, `YYYY-MM-DDTHH:MM:SSZ`.
+
+## Webhooks
+
+Each forge posts to `POST /webhook/<forge>` (`/webhook/github`), the only path
+Cloudflare and the proxy let in from the internet. That forge's adapter checks
+the signature against each of its configured secrets, timing-safe. None
+verifies, or the forge has no adapter or no secret: 401, `{"detail":
+"unverified delivery"}`, nothing echoed and nothing stored. A verified delivery
+the adapter cannot read is 400; one over 2 MiB is 413. The answer is
+`{"duplicate", "handled"}` and nothing else. A delivery is remembered for 7
+days by a SHA-256 of the forge, the event and the signed body, never by the
+delivery id, which the signature does not cover. It is recorded in the
+transaction that applies it, so a replay or redelivery changes nothing and a
+delivery that failed is applied whole when the forge retries.
+
+Adapters live in `src/ashigaru/desk/forges/`, and nothing outside them names a
+forge. GitHub's: `X-Hub-Signature-256`, `X-GitHub-Event`, content type JSON;
+subscribe the org webhook to Workflow runs, Check suites, Issues and Pull
+requests. Its permission checks call the collaborator permission API with
+`ASHIGARU_FORGE_TOKEN_GITHUB`, which needs read access to the repos'
+collaborators and nothing more.
+
+**CI.** One result per (repo, commit): each check's name and verdict
+(`pending`, `success`, `failure`, `cancelled`, `skipped`, `neutral`), and a
+status, `pending` while any check is or none has reported, else `failure` when
+any check failed or was cancelled, else `success`. A forge conclusion the
+adapter does not know counts as `failure`. A newer run of a check (a re-run)
+always replaces an older one, which never comes back; within one run the newest
+forge time wins, so a late `in_progress` never undoes a `completed`. A commit's
+checks are kept 30 days after their last delivery. GitHub: each workflow on each triggering event is a check
+(`CI (push)`, `CI (pull_request)`), from `workflow_run`; another App's
+`check_suite` completed is a check named for the App (an org webhook gets no
+`requested` for those, so they appear once they finish); the Actions App's
+suites are left to `workflow_run`.
+
+**Intake.** An issue or PR becomes an item keyed `owner/repo#N`, lower case as
+GitHub's names are case-insensitive (`crunchtools/ashigaru#190`): an issue a
+queued `outcome`, a PR a queued `story`. Its task is the Desk's own words
+(`Triage owner/name#N (from github; read it at the ref)`, `Review ...` for a
+PR), never the source's title, which is data under `extra`. An item is
+claimable (mode `auto`) only when the forge says its **author** may write to the
+repo (GitHub: write, maintain or admin), with a `lane:<lane>` label as its lane,
+or once a maintainer approves it: a `labeled` event adding a `lane:<lane>`
+label, from a sender who may write. Anything else (an outsider, a bot, a
+failed check, a missing token, or a writer editing, reopening or commenting on
+an outsider's issue) leaves it held, no lane and mode `manual`, for Josui. An
+approval sets the lane and mode only while the item is still queued and
+seatless; it is recorded either way under `extra` as `approved_by`,
+`approved_at` and `approved_lane`. `extra` also records the `author` and
+whether the item is `trusted`. Later deliveries refresh `ref` and, under
+`extra`, the source's `title`, `labels` and `source_state` (open or closed);
+nothing else changes task, lane, mode, state or seat. A subject first seen
+closed is not queued.
 
 ## Ledger import
 
@@ -139,6 +194,15 @@ Settings are flags on `ashigaru-desk serve`, else these environment variables:
 | `ASHIGARU_BIND` | the address to listen on | `127.0.0.1` (`0.0.0.0`) |
 | `ASHIGARU_PORT` | the port | `8080` |
 | `ASHIGARU_TRUSTED_PROXIES` | comma-separated addresses or CIDRs of the reverse proxies in front | none |
+| `ASHIGARU_WEBHOOK_SECRET_GITHUB` | GitHub's webhook secret; each forge has its own `ASHIGARU_WEBHOOK_SECRET_<FORGE>` | none: its deliveries are refused |
+| `ASHIGARU_WEBHOOK_SECRET_GITHUB_FILE` | a file of GitHub's secrets, one per line, all accepted while one rotates | none |
+| `ASHIGARU_FORGE_TOKEN_GITHUB` | a GitHub token that can read collaborator permissions; each forge has its own `ASHIGARU_FORGE_TOKEN_<FORGE>` | none: all intake is held for Josui |
+| `ASHIGARU_FORGE_TOKEN_GITHUB_FILE` | a file holding that token | none |
+| `ASHIGARU_WEBHOOK_SECRET` | GitHub's secret under the bare name the first deploy used; added to `_GITHUB` | none |
+| `ASHIGARU_WEBHOOK_SECRET_FILE` | the same, as a file | none |
+
+A webhook secret is read from the environment or its file at start, never from
+the database, a flag or a log; mount the file as a podman secret.
 
 Behind Cloudflare and Gloval's proxy, set `ASHIGARU_TRUSTED_PROXIES` to the
 address the proxy connects from. The client address and scheme then come from

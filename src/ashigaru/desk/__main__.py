@@ -17,6 +17,7 @@ import urllib.request
 from http import HTTPStatus
 
 from . import auth, importer, store
+from .forges import DEFAULT, FORGES
 from .model import Role
 
 SETTINGS = {
@@ -28,6 +29,17 @@ SETTINGS = {
         " believed; none by default, so a direct client cannot forge its address or scheme"
     ),
 }
+SETTINGS["ASHIGARU_WEBHOOK_SECRET"] = f"the {DEFAULT} webhook secret, kept for the first deploy (serve)"
+SETTINGS["ASHIGARU_WEBHOOK_SECRET_FILE"] = f"a file of {DEFAULT} webhook secrets, one per line (serve)"
+for _forge in FORGES:
+    SETTINGS[f"ASHIGARU_FORGE_TOKEN_{_forge.upper()}"] = (
+        f"a {_forge} API token that can read collaborator permissions (serve); without it, intake is held"
+    )
+    SETTINGS[f"ASHIGARU_FORGE_TOKEN_{_forge.upper()}_FILE"] = f"a file holding that {_forge} token (serve)"
+    SETTINGS[f"ASHIGARU_WEBHOOK_SECRET_{_forge.upper()}"] = f"the {_forge} webhook secret (serve)"
+    SETTINGS[f"ASHIGARU_WEBHOOK_SECRET_{_forge.upper()}_FILE"] = (
+        f"a file of {_forge} webhook secrets, one per line, for rotation (serve)"
+    )
 """Every environment variable the service reads, documented in docs/desk-api.md under Deploy."""
 
 
@@ -41,6 +53,37 @@ def proxies(value: str) -> list[str]:
     return [entry.strip() for entry in value.split(",") if entry.strip()]
 
 
+def _secrets_in(variable: str) -> list[str]:
+    """The secret in `variable` and those in the file `<variable>_FILE` names, one per line."""
+    values = [setting(variable)]
+    path = setting(f"{variable}_FILE")
+    if path:
+        with open(path, encoding="utf-8") as secrets:
+            values += secrets.read().splitlines()
+    return values
+
+
+def webhook_secrets() -> dict[str, list[bytes]]:
+    """Each forge's secrets from ASHIGARU_WEBHOOK_SECRET_<FORGE> and its file; the bare
+    ASHIGARU_WEBHOOK_SECRET and its file count for DEFAULT. Never from the database or a flag."""
+    found: dict[str, list[bytes]] = {}
+    for forge in FORGES:
+        values = _secrets_in(f"ASHIGARU_WEBHOOK_SECRET_{forge.upper()}")
+        if forge == DEFAULT:
+            values += _secrets_in("ASHIGARU_WEBHOOK_SECRET")
+        found[forge] = [value.strip().encode() for value in values if value.strip()]
+    return found
+
+
+def forge_tokens() -> dict[str, str]:
+    """Each forge's API token from ASHIGARU_FORGE_TOKEN_<FORGE>, else the first line of its file."""
+    found: dict[str, str] = {}
+    for forge in FORGES:
+        values = [value.strip() for value in _secrets_in(f"ASHIGARU_FORGE_TOKEN_{forge.upper()}")]
+        found[forge] = next((value for value in values if value), "")
+    return found
+
+
 def _open(path: str) -> sqlite3.Connection:
     conn = store.connect(path)
     store.migrate(conn)
@@ -52,7 +95,12 @@ def serve(args: argparse.Namespace) -> int:
 
     from .api import create_app
 
-    app = create_app(args.db, trusted_proxies=proxies(args.trusted_proxies))
+    app = create_app(
+        args.db,
+        trusted_proxies=proxies(args.trusted_proxies),
+        webhook_secrets=webhook_secrets(),
+        forge_tokens=forge_tokens(),
+    )
     # The app applies the proxy headers itself, and only from trusted_proxies; uvicorn's own
     # handling would trust 127.0.0.1 by default.
     uvicorn.run(app, host=args.host, port=args.port, proxy_headers=False, server_header=False)
