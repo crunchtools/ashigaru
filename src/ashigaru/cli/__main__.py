@@ -11,6 +11,7 @@ import json
 import sys
 from typing import Any
 
+from .. import __version__
 from . import commands, hooks, render
 from .client import Desk, DeskError, Unreachable
 from .config import ConfigError, load
@@ -108,6 +109,7 @@ def parser() -> argparse.ArgumentParser:
         description="The Desk's client. The URL and key come from the environment "
         "(ASHIGARU_URL, ASHIGARU_API_KEY or ASHIGARU_API_KEY_FILE) or ~/.config/ashigaru/config.toml.",
     )
+    top.add_argument("--version", action="version", version=__version__)
     sub = top.add_subparsers(dest="command", required=True, metavar="command")
     sub.add_parser("usage", parents=[common], help="context, tokens, turn and spend per seat")
     sub.add_parser("agents", parents=[common], help="each seat: free or busy, its item, how long")
