@@ -1,0 +1,16 @@
+{
+  "action": "completed",
+  "workflow_run": {
+    "id": 30433642,
+    "name": "CI",
+    "workflow_id": 159038,
+    "event": "push",
+    "head_sha": "acb5820ced9479c074f688cc328bf03f341a511d",
+    "run_attempt": 1,
+    "status": "completed",
+    "conclusion": "success",
+    "html_url": "https://github.com/crunchtools/ashigaru/actions/runs/30433642",
+    "updated_at": "2026-11-17T10:04:00Z"
+  },
+  "repository": {"full_name": "crunchtools/Ashigaru"}
+}

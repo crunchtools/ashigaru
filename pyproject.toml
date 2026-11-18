@@ -35,6 +35,11 @@ pattern = "(?P<version>[^\\s]+)"
 [tool.hatch.build.targets.wheel]
 packages = ["src/ashigaru"]
 
+# The version is VERSION's, which uv does not watch by default: without this, an environment
+# synced before a release keeps the old version's metadata after it.
+[tool.uv]
+cache-keys = [{ file = "pyproject.toml" }, { file = "VERSION" }]
+
 [dependency-groups]
 dev = ["ashigaru[desk,mcp]", "mypy>=1.14", "pytest>=8.3", "pyyaml>=6.0.3"]
 

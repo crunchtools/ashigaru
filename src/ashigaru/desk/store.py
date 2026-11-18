@@ -146,6 +146,31 @@ MIGRATIONS: tuple[str, ...] = (
     );
     CREATE INDEX mcp_codes_identity ON mcp_codes(identity);
     """,
+    """
+    CREATE TABLE ci_checks (
+        repo TEXT NOT NULL,
+        sha TEXT NOT NULL,
+        key TEXT NOT NULL,
+        name TEXT NOT NULL,
+        verdict TEXT NOT NULL,
+        run TEXT NOT NULL,
+        url TEXT,
+        source TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        received_at TEXT NOT NULL,
+        PRIMARY KEY (repo, sha, key)
+    );
+    CREATE INDEX ci_checks_received ON ci_checks(received_at);
+
+    CREATE TABLE deliveries (
+        source TEXT NOT NULL,
+        digest TEXT NOT NULL,
+        event TEXT NOT NULL,
+        received_at TEXT NOT NULL,
+        PRIMARY KEY (source, digest)
+    );
+    CREATE INDEX deliveries_received ON deliveries(received_at);
+    """,
 )
 
 ITEM_DEFAULTS: dict[str, Any] = {
@@ -233,6 +258,26 @@ RELEASE_SEAT = """
 # Scott's hold follows the mode of the item a seat holds: `manual` hands it to him, `auto` to Josui.
 MANUAL_OWNER = "Scott"
 HOLD_SEAT = "UPDATE seats SET owner = :owner, updated_at = :at WHERE item = :item"
+
+WRITE_CHECK = """
+    INSERT INTO ci_checks (repo, sha, key, name, verdict, run, url, source, updated_at, received_at)
+    VALUES (:repo, :sha, :key, :name, :verdict, :run, :url, :source, :updated_at, :received_at)
+    ON CONFLICT (repo, sha, key) DO UPDATE SET
+        name = excluded.name, verdict = excluded.verdict, run = excluded.run, url = excluded.url,
+        source = excluded.source, updated_at = excluded.updated_at, received_at = excluded.received_at
+    WHERE excluded.run > ci_checks.run
+       OR (excluded.run = ci_checks.run AND (
+           excluded.updated_at > ci_checks.updated_at
+           OR (excluded.updated_at = ci_checks.updated_at AND ci_checks.verdict = 'pending')))
+"""
+"""A newer run (or re-run) always wins and an older one never does. Within one run the newest forge
+time wins, so a late `in_progress` never undoes a `completed`; at the same second a verdict beats
+pending."""
+
+DELIVERY_TTL = timedelta(days=7)
+"""How long a delivery id is remembered. Processing is idempotent, so an older redelivery is harmless."""
+CI_TTL = timedelta(days=30)
+"""How long a commit's checks are kept after their last delivery. Nobody waits on a month-old commit."""
 
 ITEM_FILTERS = ("state", "seat", "lane", "kind", "mode", "parent")
 ITEM_JSON = ("after", "extra")
@@ -562,3 +607,48 @@ def key_owner(conn: sqlite3.Connection, key_id: str) -> sqlite3.Row | None:
 
 def touch_key(conn: sqlite3.Connection, key_id: str) -> None:
     conn.execute("UPDATE api_keys SET last_used_at = ? WHERE key_id = ?", (now(), key_id))
+
+
+# Webhooks and CI
+
+
+def record_delivery(conn: sqlite3.Connection, source: str, digest: str, event: str) -> bool:
+    """Remember a delivery; the caller holds the transaction. False when it was already processed."""
+    at = now()
+    forget = (datetime.now(UTC) - DELIVERY_TTL).strftime("%Y-%m-%dT%H:%M:%SZ")
+    conn.execute("DELETE FROM deliveries WHERE received_at < ?", (forget,))
+    cursor = conn.execute(
+        "INSERT OR IGNORE INTO deliveries (source, digest, event, received_at) VALUES (?, ?, ?, ?)",
+        (source, digest, event, at),
+    )
+    return cursor.rowcount == 1
+
+
+def delivery_seen(conn: sqlite3.Connection, source: str, digest: str) -> bool:
+    """Whether this signed delivery was already processed, read before any write to skip the forge's
+    API for a replay; record_delivery stays the transactional guard."""
+    found = conn.execute("SELECT 1 FROM deliveries WHERE source = ? AND digest = ?", (source, digest))
+    return found.fetchone() is not None
+
+
+def write_check(conn: sqlite3.Connection, check: dict[str, Any]) -> None:
+    """Store one check and forget checks past CI_TTL; the caller holds the transaction."""
+    forget = (datetime.now(UTC) - CI_TTL).strftime("%Y-%m-%dT%H:%M:%SZ")
+    conn.execute("DELETE FROM ci_checks WHERE received_at < ?", (forget,))
+    conn.execute(WRITE_CHECK, {**check, "received_at": now()})
+
+
+def ci_checks(conn: sqlite3.Connection, repo: str, sha: str) -> list[dict[str, Any]]:
+    """The commit's checks within CI_TTL; an expired one reads as gone before a write deletes it."""
+    since = (datetime.now(UTC) - CI_TTL).strftime("%Y-%m-%dT%H:%M:%SZ")
+    rows = conn.execute(
+        "SELECT name, verdict, url, updated_at FROM ci_checks"
+        " WHERE repo = ? AND sha = ? AND received_at >= ? ORDER BY name, key",
+        (repo, sha, since),
+    )
+    return [dict(row) for row in rows]
+
+
+def item_by_subject(conn: sqlite3.Connection, subject_key: str) -> dict[str, Any] | None:
+    row = conn.execute("SELECT * FROM items WHERE subject_key = ?", (subject_key,)).fetchone()
+    return decode(row) if row else None

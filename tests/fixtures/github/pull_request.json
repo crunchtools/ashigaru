@@ -1,0 +1,20 @@
+{
+  "action": "opened",
+  "number": 191,
+  "pull_request": {
+    "number": 191,
+    "title": "feat(desk): webhook receiver",
+    "html_url": "https://github.com/crunchtools/ashigaru/pull/191",
+    "state": "open",
+    "labels": [],
+    "user": {
+      "login": "fatherlinux"
+    }
+  },
+  "repository": {
+    "full_name": "crunchtools/ashigaru"
+  },
+  "sender": {
+    "login": "fatherlinux"
+  }
+}

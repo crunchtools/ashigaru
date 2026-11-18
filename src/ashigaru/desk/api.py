@@ -6,7 +6,7 @@ SEAT_STATES; Josui verifies and closes. A ci identity reads.
 """
 
 import sqlite3
-from collections.abc import Iterator, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -387,13 +387,24 @@ def revoke_key(conn: Conn, who: Who, name: str, key_id: str) -> ApiKey:
     return ApiKey.model_validate(store.get_key(conn, key_id))
 
 
-def create_app(db_path: str | Path, trusted_proxies: Sequence[str] = ()) -> FastAPI:
+def create_app(
+    db_path: str | Path,
+    trusted_proxies: Sequence[str] = (),
+    webhook_secrets: Mapping[str, Sequence[bytes]] | None = None,
+    forge_tokens: Mapping[str, str] | None = None,
+) -> FastAPI:
     """The service over one SQLite file, migrated before the first request.
 
     The client address and scheme come from X-Forwarded-For and X-Forwarded-Proto only when the
     request arrives from one of `trusted_proxies` (addresses or CIDRs); with none, never.
+    `webhook_secrets` maps a forge adapter's name to its secrets; with none, every delivery is refused.
+    `forge_tokens` maps it to an API token for permission checks; with none, all intake is held.
     """
-    from . import mcp  # imported here: its tools call this module's routes
+    from . import (
+        ci,
+        mcp,  # imported here: its tools call this module's routes
+        webhooks,
+    )
     from .mcp import routes as mcp_routes
 
     conn = store.connect(db_path)
@@ -407,7 +418,11 @@ def create_app(db_path: str | Path, trusted_proxies: Sequence[str] = ()) -> Fast
         lifespan=mcp_lifespan,
     )
     app.state.db_path = str(db_path)
+    app.state.webhook_secrets = webhooks.secrets(webhook_secrets or {})
+    app.state.forge_tokens = dict(forge_tokens or {})
+    app.state.waiters = ci.Waiters()
     app.include_router(router)
+    app.include_router(webhooks.router)
     app.include_router(mcp_routes.router)
     app.state.mcp = mcp_route is not None
     if mcp_route is not None:
