@@ -51,6 +51,8 @@ HARNESS_MARKS = ("<cross-session-message", "<task-notification")
 STATUSLINE_EVERY = 30.0
 # The most of a transcript one status line run reads; the rest waits for the next.
 TRANSCRIPT_CHUNK = 4 << 20
+# A session's state is dropped this long after its last post, so tmpfs holds only live sessions.
+STATE_KEPT = timedelta(days=1)
 TOKEN_FIELDS = ("input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens", "output_tokens")
 LANE_BILLING = {"vertex": "vertex", "dolza-max": "max", "exedore-max": "max"}
 
@@ -111,10 +113,10 @@ def _stop(event: dict[str, Any], desk: Desk, path: str) -> None:
     desk.request("PATCH", path, body={"turn": "idle"})
 
 
-def usage_state(session: str) -> Path:
+def usage_state(session: str, env: Mapping[str, str]) -> Path:
     """Where the status line keeps its throttle and transcript offset: tmpfs, private to the user,
     since it is looked at on every refresh."""
-    runtime = os.environ.get("XDG_RUNTIME_DIR") or f"/dev/shm/ashigaru-{os.getuid()}"
+    runtime = env.get("XDG_RUNTIME_DIR") or f"/dev/shm/ashigaru-{os.getuid()}"
     return Path(runtime) / "ashigaru" / f"usage-{re.sub(r'[^A-Za-z0-9_-]', '_', session)}.json"
 
 
@@ -170,14 +172,14 @@ def _statusline(event: dict[str, Any], desk: Desk, path: str) -> None:
     desk.post(f"{path}/usage", {key: value for key, value in report.items() if value is not None})
 
 
-def _throttled(event: dict[str, Any]) -> bool:
+def _throttled(event: dict[str, Any], env: Mapping[str, str]) -> bool:
     """True when this session posted within STATUSLINE_EVERY. Otherwise counts the transcript into
     event["session_tokens"] and records the attempt first, so a Desk that is down is not retried on
-    every refresh."""
+    every refresh, and drops any session's state once it is STATE_KEPT old."""
     session = event.get("session_id")
     if not session:
         return True
-    state_path = usage_state(str(session))
+    state_path = usage_state(str(session), env)
     try:
         state = json.loads(state_path.read_text())
     except (OSError, ValueError):
@@ -196,6 +198,9 @@ def _throttled(event: dict[str, Any]) -> bool:
     partial = state_path.with_suffix(".tmp")
     partial.write_text(json.dumps(state))
     partial.replace(state_path)
+    for old in state_path.parent.glob("usage-*.json"):
+        if now - old.stat().st_mtime > STATE_KEPT.total_seconds():
+            old.unlink(missing_ok=True)
     return False
 
 
@@ -206,7 +211,7 @@ def _report(name: str, stdin: TextIO, env: Mapping[str, str] | None, transport: 
     event = {} if stdin.isatty() else json.loads(stdin.read() or "{}")
     if not isinstance(event, dict):
         raise ValueError("the hook event is not a JSON object")
-    if name == "statusline" and _throttled(event):
+    if name == "statusline" and _throttled(event, os.environ if env is None else env):
         return
     config = load(env)
     desk = Desk(config, timeout=HOOK_SECONDS, transport=transport)

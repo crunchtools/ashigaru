@@ -2,6 +2,7 @@
 
 import io
 import json
+import os
 import stat
 import time
 from collections.abc import Iterator
@@ -809,6 +810,17 @@ def test_the_status_line_is_silent_on_every_failure(
     assert hook("statusline", {"model": {"id": "x"}}) == 0
     assert hooks.run("statusline", io.StringIO("not json")) == 0
     assert capsys.readouterr() == ("", "")
+
+
+def test_the_status_line_drops_state_a_day_old(statusline_seat: FakeDesk, tmp_path: Path) -> None:
+    stale = hooks.usage_state("gone", {"XDG_RUNTIME_DIR": str(tmp_path / "run")})
+    stale.parent.mkdir(parents=True)
+    stale.write_text("{}")
+    day_ago = time.time() - hooks.STATE_KEPT.total_seconds() - 60
+    os.utime(stale, (day_ago, day_ago))
+    hook("statusline", statusline())
+    assert not stale.exists()
+    assert hooks.usage_state("s1", {"XDG_RUNTIME_DIR": str(tmp_path / "run")}).exists()
 
 
 def test_a_slow_desk_never_holds_the_status_line(

@@ -105,7 +105,7 @@ tokens are every input, cache and output token of the session's API calls,
 counted from the transcript a few MiB at a time. Billing comes from the seat's
 lane (`vertex` is Vertex, `dolza-max` and `exedore-max` are Max); any other
 lane sends none, and the Desk keeps what it had. The status line refreshes often, so it posts at most once every 30
-seconds per session, with its state in `$XDG_RUNTIME_DIR/ashigaru` (else
+seconds per session, with its state (dropped a day after its last post) in `$XDG_RUNTIME_DIR/ashigaru` (else
 `/dev/shm/ashigaru-<uid>`); it prints nothing at all, failures included. Pipe
 the JSON to it in the background so the bar never waits:
 
