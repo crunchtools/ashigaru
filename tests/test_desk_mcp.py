@@ -402,3 +402,10 @@ def test_desk_wait_on_an_item_reads_it(
     assert mcp_status(call(client, urls[SEAT], "desk_wait", {"timeout": 0})) == UNPROCESSABLE_ENTITY
     mixed = {"item_id": "a1", "repo": "o/r", "sha": "a" * 40}
     assert mcp_status(call(client, urls[SEAT], "desk_wait", mixed)) == UNPROCESSABLE_ENTITY
+
+
+@pytest.mark.parametrize("half", [{"repo": "o/r"}, {"sha": "a" * 40}, {"item_id": "a1", "repo": "o/r"}])
+def test_desk_wait_refuses_half_a_commit(
+    client: TestClient, urls: dict[str, str], half: dict[str, str]
+) -> None:
+    assert mcp_status(call(client, urls[SEAT], "desk_wait", {**half, "timeout": 0})) == UNPROCESSABLE_ENTITY

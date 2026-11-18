@@ -316,7 +316,8 @@ async def desk_wait(
     """`ashigaru wait`: with `item_id`, the item as soon as it is review, done, blocked, wontdo or
     abandoned; with `repo` and `sha`, the commit's CI result as soon as a webhook delivery settles it.
     Either way, as it stands after `timeout` (still working or `pending`: call again)."""
-    if (item_id is None) == (repo is None and sha is None) or (item_id is not None and (repo or sha)):
+    commit = repo is not None and sha is not None
+    if (repo is None) != (sha is None) or (item_id is not None) == commit:
         raise ToolError("422: name an item_id, or a repo and a sha")
     with desk() as (conn, who):
         if item_id is not None:
@@ -332,7 +333,7 @@ async def wait_item(conn: sqlite3.Connection, item_id: str, timeout: int) -> Ite
     while True:
         row = await run_in_threadpool(store.get_item, conn, item_id)
         if row is None:
-            raise HTTPException(404, "no such item")
+            raise ToolError("404: no such item")
         item = Item.model_validate(row)
         left = deadline - time.monotonic()
         if item.state in SETTLED or left <= 0:
