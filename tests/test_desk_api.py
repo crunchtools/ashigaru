@@ -208,6 +208,8 @@ def test_a_learned_line_of_none_is_no_line(client: TestClient, keys: Keys, conn:
     path = f"/v1/items/{item['id']}"
     assert client.patch(path, headers=keys[JOSUI], json={"learned": "None"}).json()["learned"] is None
     assert client.post(f"{path}/wrap", headers=keys[JOSUI], json={"learned": "none"}).status_code == CONFLICT
+    report = {"verb": "WORKING", "learned": "  none "}
+    assert client.post(f"{path}/report", headers=keys[JOSUI], json=report).json()["learned"] is None
     store.insert_item(conn, {"id": "imported", "task": "t", "learned": "none"}, JOSUI)
     assert client.get("/v1/items?learned=true", headers=keys["ci"]).json() == []
 

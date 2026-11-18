@@ -383,6 +383,14 @@ def test_assign_task_keeps_the_id_when_the_assign_is_refused(
     assert desk.calls("POST", "/v1/items")[0].body == {"task": "t", "lane": "vertex", "subject_key": "RT#1"}
 
 
+def test_assign_task_does_not_hide_a_desk_failure(desk: FakeDesk, capsys: pytest.CaptureFixture[str]) -> None:
+    desk.on("POST", "/v1/items", (201, item(id="a8")))
+    desk.on("POST", "/v1/items/a8/assign", (500, {"detail": "boom"}))
+    assert main(["assign", "--task", "t", "--lane", "vertex"]) == 1
+    out = capsys.readouterr()
+    assert out.out == "" and "500: boom" in out.err
+
+
 def test_get_by_id_subject_key_or_ref(desk: FakeDesk, capsys: pytest.CaptureFixture[str]) -> None:
     desk.on("GET", "/v1/items/a1", (200, item()))
     desk.on("GET", "/v1/items", lambda seen: (200, [item(id="a2")] if "ref" in seen.query else []))

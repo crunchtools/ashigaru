@@ -48,7 +48,6 @@ CLEARABLE = (
 def _fields(command: argparse.ArgumentParser, options: tuple[tuple[str, str | None], ...]) -> None:
     for flag, text in options:
         command.add_argument(flag, help=text)
-    command.add_argument("--priority", type=int)
 
 
 def _item_commands(
@@ -79,6 +78,7 @@ def _item_commands(
     create.add_argument("--id", help="default: the next a<N>")
     create.add_argument("--after", action="append", help="an item this one waits on (repeatable)")
     _fields(create, FIELDS)
+    create.add_argument("--priority", type=int)
 
     update = sub.add_parser("update", parents=[common], help="set an item's fields; --clear nulls one")
     update.add_argument("item")
@@ -86,6 +86,7 @@ def _item_commands(
     update.add_argument("--memorized", action=argparse.BooleanOptionalAction)
     update.add_argument("--clear", action="append", default=[], choices=CLEARABLE, metavar="FIELD")
     _fields(update, FIELDS + UPDATE_ONLY)
+    update.add_argument("--priority", type=int)
 
     mark = sub.add_parser("mark", parents=[common], help="a named watermark, e.g. sweep; --set to move it")
     mark.add_argument("name")
