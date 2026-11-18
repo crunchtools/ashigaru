@@ -28,7 +28,7 @@ from starlette.concurrency import run_in_threadpool
 from . import ci, intake, store
 from .api import Conn, Who, errors
 from .forges import FORGES, Delivery, Forge, IntakeItem
-from .model import CIResult, CIWait, Problem, WebhookAck
+from .model import CIResult, CIWait, Kind, Problem, WebhookAck
 
 MAX_BODY = 2 * 1024 * 1024
 """Issue, PR and CI payloads are tens of KB; nothing this Desk takes needs more."""
@@ -110,12 +110,14 @@ def _judge_held(
     item: IntakeItem, existing: dict[str, Any], writes: Callable[[str | None], bool]
 ) -> IntakeItem:
     """A held item: a writer's push from the head it was held at moves that head; the author check is
-    retried only at that head, never after a withdrawal; else only a writer's lane label trusts it."""
-    extra = existing["extra"]
-    pushed = (
-        item.head_before is not None and item.head_before == extra.get("held_head") and writes(item.sender)
-    )
-    at_held_head = pushed or item.head == extra.get("held_head")
+    retried only at that head (a PR with no head on file, or a delivery with none, never qualifies;
+    an issue has no head), never after a withdrawal; else only a writer's lane label trusts it."""
+    held_head = existing["extra"].get("held_head")
+    pushed = item.head is not None and item.head_before is not None and item.head_before == held_head
+    pushed = pushed and writes(item.sender)
+    at_held_head = pushed or (item.head is not None and item.head == held_head)
+    if item.kind != Kind.STORY:
+        at_held_head = True
     retry = not (intake.was_approved(existing) or intake.withdrawn(existing))
     if retry and at_held_head and writes(item.author):
         return dataclasses.replace(item, author_writes=True)

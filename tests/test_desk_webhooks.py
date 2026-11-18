@@ -762,6 +762,22 @@ def test_the_author_retry_needs_a_head_on_a_pr(
     assert (pr_item(conn)["mode"], pr_item(conn)["extra"]["trusted"]) == ("manual", False)
 
 
+def test_the_author_retry_needs_a_held_head_on_file(
+    trusting: TestClient, conn: sqlite3.Connection, permissions: Permissions
+) -> None:
+    held_writer_pr(trusting, conn, permissions)
+    item = pr_item(conn)
+    with store.transaction(conn):
+        legacy = {key: value for key, value in item["extra"].items() if key != "held_head"}
+        store.update_item(conn, item["id"], {"extra": legacy}, "intake")
+    headless = writer_pr("edited")
+    headless["pull_request"] = {
+        key: value for key, value in headless["pull_request"].items() if key != "head"
+    }
+    deliver(trusting, "pull_request", headless, "d-2")
+    assert (pr_item(conn)["mode"], pr_item(conn)["extra"]["trusted"]) == ("manual", False)
+
+
 def test_the_author_retry_trusts_a_head_a_writer_pushed(
     trusting: TestClient, conn: sqlite3.Connection, permissions: Permissions
 ) -> None:
