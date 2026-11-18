@@ -8,6 +8,7 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- BREAKING: Ashigaru 3.0 adds the Desk, Josui's system of record for seat work, and moves the service's web stack (FastAPI, uvicorn) out of the base package into the `desk` extra. Anything that imported the web stack through a plain `ashigaru` install now installs `ashigaru[desk]` or the `ashigaru-desk` RPM. The GitHub workflows (`router.yml@v2` and its callers) are unchanged; `v2` stays where it is.
 - Desk `claim` fails closed on an item with no lane: no seat can claim it, and Josui sets its lane or assigns it directly (a232).
 
 ### Added
