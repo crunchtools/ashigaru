@@ -795,7 +795,9 @@ def judged_on_one_snapshot(db: Path, bodies: list[dict[str, Any]]) -> list[tuple
         raw = json.dumps(body).encode()
         signed_as = webhooks.digest(forge.name, "pull_request", raw)
         delivery = forge.parse({"x-github-event": "pull_request"}, raw)
-        judged.append((signed_as, webhooks._judged(str(db), forge, "token", signed_as, delivery)))
+        judged.append(
+            (signed_as, webhooks._judged(str(db), forge, webhooks.Access("token"), signed_as, delivery))
+        )
     return judged
 
 
@@ -994,3 +996,48 @@ def test_the_subject_key_is_owner_repo_hash_number(fixture: str, event: str, num
     body = {**payload(fixture), "repository": {"full_name": "CrunchTools/Ashigaru"}}
     delivery = FORGES["github"].parse({"x-github-event": event}, json.dumps(body).encode())
     assert [item.subject_key for item in delivery.intake] == [f"crunchtools/ashigaru#{number}"]
+
+
+BOT = "ashigaru-crunchtools[bot]"
+
+
+@pytest.fixture
+def trusting_the_bot(db: Path, conn: sqlite3.Connection, permissions: Permissions) -> Any:
+    app = create_app(
+        db,
+        webhook_secrets={"github": [SECRET]},
+        forge_tokens={"github": "token"},
+        forge_authors={"github": [BOT]},
+    )
+    with TestClient(app) as test_client:
+        yield test_client
+
+
+def test_the_apps_own_issue_is_trusted_without_asking_the_forge(
+    trusting_the_bot: TestClient, conn: sqlite3.Connection, permissions: Permissions
+) -> None:
+    deliver(trusting_the_bot, "issues", payload("issues", user={"login": BOT}))
+    item = store.item_by_subject(conn, f"{REPO}#190") or {}
+    assert (item["lane"], item["mode"], item["extra"]["trusted"]) == ("dolza-max", "auto", True)
+    assert permissions.asked == []
+
+
+def test_a_bot_not_on_the_list_is_still_held(trusting_the_bot: TestClient, conn: sqlite3.Connection) -> None:
+    other = {"login": "other-app[bot]"}
+    deliver(trusting_the_bot, "issues", {**payload("issues", user=other), "sender": other})
+    assert held_item(conn)["extra"]["author"] == "other-app[bot]"
+
+
+def test_the_apps_lane_label_approves_nobody_elses_issue(
+    trusting_the_bot: TestClient, conn: sqlite3.Connection
+) -> None:
+    deliver(trusting_the_bot, "issues", outsider(), "d-1")
+    deliver(
+        trusting_the_bot, "issues", {**outsider("labeled", by=BOT), "label": {"name": "lane:vertex"}}, "d-2"
+    )
+    assert "approved_by" not in held_item(conn)["extra"]
+
+
+def test_trusted_authors_come_from_their_variable(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("ASHIGARU_FORGE_AUTHORS_GITHUB", f" {BOT}, ,other ")
+    assert desk_main.forge_authors() == {"github": [BOT, "other"]}

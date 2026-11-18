@@ -69,14 +69,17 @@ def queue(lists: dict[str, Any]) -> str:
 
 
 def work(round_: dict[str, Any]) -> str:
-    """The check table, the seats and their tally, the queue, then what GitHub brought in."""
+    """The check table, the seats and their tally, the queue, then what the forge brought in."""
     tally = round_["summary"]
     caught = round_["catch_up"]
-    window = f"since {caught['since']}" + (" (sweep mark moved)" if caught.get("advanced") else "")
+    window = f"events {caught['after']} to {caught['until']}"
     if caught.get("truncated"):
-        window += "; cut at 1000, read on with --since"
+        window += ", cut at 1000: the next --advance reads on"
+    if caught.get("advanced"):
+        window += " (sweep mark moved)"
+    cut = "\n(the first 1000; ashigaru list pages the rest)" if round_.get("truncated") else ""
     parts = [
-        table(round_["items"], WORK),
+        table(round_["items"], WORK) + cut,
         table(round_["seats"], AGENTS),
         f"{tally['up']} of {tally['seats']} up, {tally['open']} items open",
         queue(round_["queue"]),

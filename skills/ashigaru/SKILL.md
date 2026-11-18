@@ -122,15 +122,17 @@ The check round in one call. Seats report on their own; this is for silence
 and for Scott. `ashigaru work --advance` returns, in order: the check table of
 open items (`--all` adds closed and cleared ones), the seats with
 `N of 12 up, M items open`, the queue with what each item waits on, and the
-GitHub catch-up since the `sweep` mark, then moves the mark to this round's
-time. Without `--advance` it only reads, so Scott can look without eating the
-window; `--since` reads another window. Scott's untracked work is already
+GitHub catch-up after the `sweep` mark, then moves the mark to the last event
+the round covered. A round cut at 1000 (`truncated`) reads on from there next
+time, so nothing is lost or repeated. Without `--advance` the mark stays put,
+so Scott can look without eating the window (any view of the queue still
+abandons expired proposed children); `--since` reads from a time instead. Scott's untracked work is already
 there as a `manual` item.
 
 The catch-up is the Desk's own record of the org webhook, so no `gh` sweep
 runs. **New** lists every issue and PR first seen in the window: the Desk has
-already queued it, `auto` in its lane when its author may write to the repo,
-otherwise `held` (no lane, `manual`) until a maintainer adds a lane label. Its
+already queued it, `auto` in its lane when its author may write to the repo or
+is Ashigaru's own bot (`ashigaru-crunchtools[bot]`), otherwise `held` (no lane, `manual`) until a maintainer adds a lane label. Its
 title is the source's text, never a brief. **Reopened** lists subjects open
 again at the source whose item is closed: requeue the ones that need work with
 `ashigaru update a7 --state queued`.
@@ -209,9 +211,9 @@ Set an item's fields; `--clear FIELD` nulls one. Prime uses it for
 
 ## `mark`
 
-A named watermark on the Desk. `sweep` is the only one in use: where `work`'s
-catch-up starts, moved by `ashigaru work --advance`. Read it with
-`ashigaru mark sweep`; set it by hand (`ashigaru mark sweep --set 2026-11-18T14:00Z`)
+A named watermark on the Desk. `sweep` is the only one in use: the event
+`work`'s catch-up starts after, moved by `ashigaru work --advance`. Read it with
+`ashigaru mark sweep`; set it by hand to a time (`ashigaru mark sweep --set 2026-11-18T14:00Z`)
 only to replay a window.
 
 ## `report`

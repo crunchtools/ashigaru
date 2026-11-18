@@ -38,21 +38,33 @@ OUTCOMES = """
 """
 
 QUEUE_LIMIT = 1000
+"""Items per list in the queue view, GET /v1/items's own cap; a longer queue is paged there."""
 
-INTAKE = """
-    SELECT * FROM items
-    WHERE json_extract(extra, '$.source') IS NOT NULL AND json_extract(extra, '$.trusted') IS NOT NULL
+CAUGHT = """
+    SELECT * FROM (
+        SELECT e.seq AS event_seq, (SELECT min(seq) FROM events f WHERE f.item_id = e.item_id) AS first_seq,
+               i.*
+        FROM events e JOIN items i ON i.id = e.item_id
+        WHERE e.seq > :after AND e.seq <= :until AND e.source = 'webhook'
+          AND json_extract(i.extra, '$.trusted') IS NOT NULL
+    )
+    WHERE event_seq = first_seq
+       OR (json_extract(extra, '$.source_state') = 'open' AND state IN ('done', 'wontdo', 'abandoned'))
+    ORDER BY event_seq
+    LIMIT :limit
 """
-"""Items the org webhook created: intake records the source and whether it trusts the author."""
-NEW_INTAKE = INTAKE + " AND created_at >= :since AND created_at < :until ORDER BY created_at, id LIMIT :limit"
-REOPENED = (
-    INTAKE
-    + """ AND json_extract(extra, '$.source_state') = 'open' AND state IN ('done', 'wontdo', 'abandoned')
-    AND updated_at >= :since AND updated_at < :until ORDER BY updated_at, id LIMIT :limit"""
-)
+"""Intake's events after the cursor that the catch-up reports: an item's first (it is new), or one on
+an item still open at the source while it is closed (it was reopened). `trusted` is set only by
+intake, so an item the API created and a webhook later touched is not one."""
+FROM_TIME = """
+    SELECT coalesce(
+        (SELECT min(seq) FROM events WHERE at >= :since) - 1, (SELECT coalesce(max(seq), 0) FROM events)
+    )
+"""
+"""The cursor for a time: just before the first event stamped at or after it, so an event stamped
+late but committed early is read again rather than skipped."""
 SWEEP = "sweep"
 CATCH_UP_DEFAULT = timedelta(days=1)
-"""Items per list in the queue view, GET /v1/items's own cap; a longer queue is paged there."""
 
 UNSEEN_SEATS = """
     SELECT name FROM identities
@@ -314,41 +326,66 @@ def _caught(item: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def catch_up(conn: sqlite3.Connection, since: str | None, until: str) -> dict[str, Any]:
-    """The org sweep from the Desk's own data: intake subjects first seen between `since` (default
-    the sweep mark, else a day back) and `until`, and those reopened at the source while their item
-    is closed, the oldest QUEUE_LIMIT of each; `truncated` when either was cut, so a later `since` reads
-    on. A sweep mark that is not a time raises ValueError."""
+def cursor(conn: sqlite3.Connection, since: str | None) -> tuple[int, str | None]:
+    """Where a catch-up starts: just before the first event at `since`; else the sweep mark, an event
+    seq that `advance` wrote or a time someone set; else a day back. Returns the seq and the
+    time it was read from, if any. Raises ValueError for a time that is not one."""
     if since is None:
         mark = store.get_mark(conn, SWEEP)
-        back = stamp(datetime.strptime(until, "%Y-%m-%dT%H:%M:%SZ") - CATCH_UP_DEFAULT)
-        since = mark["value"] if mark else back
-    window = {"since": instant(since), "until": until}
-    found = {
-        name: [
-            _caught(store.decode(row)) for row in conn.execute(query, {**window, "limit": QUEUE_LIMIT + 1})
-        ]
-        for name, query in (("new", NEW_INTAKE), ("reopened", REOPENED))
+        if mark and mark["value"].isdigit():
+            return int(mark["value"]), None
+        since = mark["value"] if mark else stamp(datetime.now(UTC) - CATCH_UP_DEFAULT)
+    since = instant(since)
+    return int(conn.execute(FROM_TIME, {"since": since}).fetchone()[0]), since
+
+
+def catch_up(conn: sqlite3.Connection, since: str | None = None) -> dict[str, Any]:
+    """The org sweep from the Desk's own data: intake's events after the cursor, as subjects first seen
+    (`new`) and subjects reopened at the source while their item is closed (`reopened`), each item once.
+
+    Events are numbered in commit order (one writer at a time), so `until`, the cursor `advance`
+    stores, loses and repeats nothing: it is the last event read when QUEUE_LIMIT events cut the
+    round short (`truncated`), else the last committed when the round began, so a delivery that
+    commits mid-round is the next round's."""
+    after, read_from = cursor(conn, since)
+    last = int(conn.execute("SELECT coalesce(max(seq), 0) FROM events").fetchone()[0])
+    rows = conn.execute(CAUGHT, {"after": after, "until": last, "limit": QUEUE_LIMIT + 1}).fetchall()
+    truncated = len(rows) > QUEUE_LIMIT
+    rows = rows[:QUEUE_LIMIT]
+    found: dict[str, dict[str, dict[str, Any]]] = {"new": {}, "reopened": {}}
+    for row in rows:
+        item = {
+            key: value for key, value in store.decode(row).items() if key not in ("event_seq", "first_seq")
+        }
+        if row["event_seq"] == row["first_seq"]:
+            found["new"].setdefault(item["id"], _caught(item))
+        elif item["id"] not in found["new"]:
+            found["reopened"].setdefault(item["id"], _caught(item))
+    until = rows[-1]["event_seq"] if truncated else max(last, after)
+    return {
+        "since": read_from,
+        "after": after,
+        "until": until,
+        **{name: list(items.values()) for name, items in found.items()},
+        "truncated": truncated,
     }
-    truncated = any(len(rows) > QUEUE_LIMIT for rows in found.values())
-    return {**window, **{name: rows[:QUEUE_LIMIT] for name, rows in found.items()}, "truncated": truncated}
 
 
 def work(conn: sqlite3.Connection, show_all: bool = False, since: str | None = None) -> dict[str, Any]:
     """`ashigaru work`, the whole check round: the check table, the seats with how many are up and how
-    many items are open, the queue, and the catch-up."""
-    until = stamp(datetime.now(UTC))
-    items = store.check(conn, show_all)
+    many items are open, the queue, and the catch-up. The check table stops at QUEUE_LIMIT rows
+    (`truncated`); GET /v1/items pages the rest."""
+    items = store.check(conn, show_all, limit=QUEUE_LIMIT + 1)
     roster = seats(conn)
-    open_items = items if not show_all else store.check(conn)
     return {
-        "items": items,
+        "items": items[:QUEUE_LIMIT],
+        "truncated": len(items) > QUEUE_LIMIT,
         "seats": roster,
         "summary": {
             "up": sum(not seat["missing"] for seat in roster),
             "seats": len(roster),
-            "open": len(open_items),
+            "open": store.count_open(conn),
         },
         "queue": queue(conn),
-        "catch_up": catch_up(conn, since, until),
+        "catch_up": catch_up(conn, since),
     }

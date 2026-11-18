@@ -181,13 +181,18 @@
         "type": "string"
       },
       "CatchUp": {
-        "description": "What the org webhook brought in between `since` and `until`, the org sweep done Desk side.",
+        "description": "What the org webhook brought in after the sweep mark: the org sweep done Desk side.",
         "properties": {
           "advanced": {
             "default": false,
             "description": "True when this round moved the sweep mark to `until`.",
             "title": "Advanced",
             "type": "boolean"
+          },
+          "after": {
+            "description": "The event seq it starts after: the sweep mark, or the one before `since`.",
+            "title": "After",
+            "type": "integer"
           },
           "new": {
             "description": "Subjects first seen in the window.",
@@ -198,7 +203,7 @@
             "type": "array"
           },
           "reopened": {
-            "description": "Subjects open at the source whose item is closed, changed in the window.",
+            "description": "Subjects open again at the source whose item is closed, changed in the window.",
             "items": {
               "$ref": "#/components/schemas/CatchUpRow"
             },
@@ -206,24 +211,32 @@
             "type": "array"
           },
           "since": {
-            "description": "The sweep mark, or a day before `until` while the mark is unset.",
-            "title": "Since",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The time the cursor was read from: `since`, or a time mark.",
+            "title": "Since"
           },
           "truncated": {
             "default": false,
-            "description": "True when either list stopped at its limit of 1000.",
+            "description": "True when the window stopped at 1000 events; `until` is where it stopped.",
             "title": "Truncated",
             "type": "boolean"
           },
           "until": {
-            "description": "When this round read the Desk; `advance` moves the mark here.",
+            "description": "The last event it covers; `advance` stores it as the sweep mark.",
             "title": "Until",
-            "type": "string"
+            "type": "integer"
           }
         },
         "required": [
           "since",
+          "after",
           "until",
           "new",
           "reopened"
@@ -2209,6 +2222,12 @@
           },
           "summary": {
             "$ref": "#/components/schemas/SeatSummary"
+          },
+          "truncated": {
+            "default": false,
+            "description": "True when `items` stopped at its limit of 1000.",
+            "title": "Truncated",
+            "type": "boolean"
           }
         },
         "required": [
@@ -5468,7 +5487,7 @@
     },
     "/v1/work": {
       "get": {
-        "description": "`ashigaru work`, the whole check round in one read: the check table (open items unless `all`),\nthe seats with how many are up and how many items are open, the queue, and the forge catch-up\nfrom the org webhook's intake since the sweep mark.",
+        "description": "`ashigaru work`, the whole check round in one call: the check table (open items unless `all`),\nthe seats with how many are up and how many items are open, the queue, and the forge catch-up\nfrom the org webhook's intake after the sweep mark. It leaves the mark alone; like every view of\nthe queue, it abandons proposed children past their expiry.",
         "operationId": "work_v1_work_get",
         "parameters": [
           {
@@ -5482,7 +5501,7 @@
             }
           },
           {
-            "description": "Start of the catch-up window, a time; default the sweep mark.",
+            "description": "Start the catch-up at this time instead of the sweep mark.",
             "in": "query",
             "name": "since",
             "required": false,
@@ -5495,7 +5514,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Start of the catch-up window, a time; default the sweep mark.",
+              "description": "Start the catch-up at this time instead of the sweep mark.",
               "title": "Since"
             }
           }
@@ -5543,7 +5562,7 @@
         ]
       },
       "post": {
-        "description": "`ashigaru work --advance`, admin: the same round, then the sweep mark moves to its `until`, so\nthe next round's catch-up starts where this one stopped.",
+        "description": "`ashigaru work --advance`, admin: the same round, then the sweep mark moves to its catch-up's\n`until`, the last event it covered, so the next round starts after it and nothing is lost or\nrepeated, even when this one was truncated.",
         "operationId": "advance_v1_work_post",
         "parameters": [
           {
@@ -5557,7 +5576,7 @@
             }
           },
           {
-            "description": "Start of the catch-up window, a time; default the sweep mark.",
+            "description": "Start the catch-up at this time instead of the sweep mark.",
             "in": "query",
             "name": "since",
             "required": false,
@@ -5570,7 +5589,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Start of the catch-up window, a time; default the sweep mark.",
+              "description": "Start the catch-up at this time instead of the sweep mark.",
               "title": "Since"
             }
           }

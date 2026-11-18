@@ -55,10 +55,10 @@ can return.
 | `POST /items/{id}/claim` | `desk_claim`, seats only: take a `queued`, seatless, `auto` item in the seat's lane whose `after` items are done. Atomic; the loser of a race gets 409. The seat must be free, unheld and have a lane: a seat with no lane claims nothing, and an item with no lane is claimed by no seat (Josui sets its lane or assigns it) |
 | `GET /items/{id}/events` | the item's history, ledger lines included, oldest first; pages of `limit` (200, at most 1000) after `after` (a seq) |
 | `GET /ci/wait` | `desk_wait`: `repo` (owner/name) and full `sha`; the commit's CI result as soon as it is not `pending`, else as it stands after `timeout` seconds (default and most 90; 0 reads now). A client waits again on `pending` |
-| `GET /work` | `ashigaru work`, the whole check round: `items`, the check table (id, seat, mode, task, state, wrap, result or blocker, next) of open items, blocked first, then newest, with `?all=true` adding done, wontdo, abandoned and cleared ones; `seats` as `GET /seats`; `summary` (`up`: seats not missing, `seats`, `open` items); `queue` as `GET /queue`; and `catch_up`, the issues and PRs intake recorded from the org webhook between `since` (`?since=`, else the `sweep` mark, else a day back; 422 when not a time) and `until` (now): `new`, first seen in the window, with title, `filed_by` (the author), lane, mode and `held`, and `reopened`, open again at the source while the item is closed |
-| `POST /work` | admin: the same round, then the `sweep` mark moves to its `until` (`advanced` is true), so the next round starts where this one stopped |
+| `GET /work` | `ashigaru work`, the whole check round: `items`, the check table (id, seat, mode, task, state, wrap, result or blocker, next) of open items, blocked first, then newest, with `?all=true` adding done, wontdo, abandoned and cleared ones, at most 1000 (`truncated`); `seats` as `GET /seats`; `summary` (`up`: seats not missing, `seats`, `open` items); `queue` as `GET /queue`; and `catch_up`, the issues and PRs intake recorded from the org webhook after a cursor: `new`, first seen, with title, `filed_by` (the author), lane, mode and `held`, and `reopened`, open again at the source while the item is closed, each item once. The cursor is an event seq (`after`): the `sweep` mark, or with `?since=` (or a mark that is a time) the event before the first stamped then; with neither, a day back; 422 for a time that is not one. `until` is the last event covered: the last committed when the round began, or the 1000th read when `truncated`. Events are numbered in commit order, so nothing is lost or repeated between rounds. It leaves the mark alone, though like `GET /queue` it abandons proposed children past their expiry |
+| `POST /work` | admin: the same round, then the `sweep` mark becomes its `until` (`advanced` is true), so the next round reads on from there |
 | `GET /check` | `items` of `GET /work` alone, for clients older than 3.5 |
-| `GET /marks/{name}` | a named watermark (`sweep`: where `GET /work`'s catch-up starts): value, updated_at, updated_by; 404 until first set |
+| `GET /marks/{name}` | a named watermark (`sweep`: the event `GET /work`'s catch-up starts after; a time is read too): value, updated_at, updated_by; 404 until first set |
 | `PUT /marks/{name}` | admin: `{value}` sets it; names are `[a-z][a-z0-9-]*` |
 | `GET /queue` | `ashigaru queue`: the newest 1000 `queued` items, each with `waits_on` (every `after` id and its state, `unknown` for no such item), and the newest 1000 `proposed` children; `truncated` is true when either list was cut |
 | `GET /seats`, `GET /seats/{name}` | seat state: free/busy, owner, `hold` (`free`, `busy-auto` or `busy-manual`), turn, task, item, since, and the last usage report. `missing` is true for a seat whose row has not changed in 24 hours; the list ends with each seat identity that never checked in, `missing` with a null `updated_at` |
@@ -134,7 +134,10 @@ forge. GitHub's: `X-Hub-Signature-256`, `X-GitHub-Event`, content type JSON;
 subscribe the org webhook to Workflow runs, Check suites, Issues and Pull
 requests. Its permission checks call the collaborator permission API with
 `ASHIGARU_FORGE_TOKEN_GITHUB`, which needs read access to the repos'
-collaborators and nothing more.
+collaborators and nothing more. GitHub never calls an app's bot a writer, so
+the accounts in `ASHIGARU_FORGE_AUTHORS_GITHUB` (the image sets
+`ashigaru-crunchtools[bot]`) are trusted as authors of their own issues and
+PRs; their lane labels approve nothing.
 
 **CI.** One result per (repo, commit): each check's name and verdict
 (`pending`, `success`, `failure`, `cancelled`, `skipped`, `neutral`), and a
@@ -224,6 +227,7 @@ Settings are flags on `ashigaru-desk serve`, else these environment variables:
 | `ASHIGARU_WEBHOOK_SECRET_GITHUB_FILE` | a file of GitHub's secrets, one per line, all accepted while one rotates | none |
 | `ASHIGARU_FORGE_TOKEN_GITHUB` | a GitHub token that can read collaborator permissions; each forge has its own `ASHIGARU_FORGE_TOKEN_<FORGE>` | none: all intake is held for Josui |
 | `ASHIGARU_FORGE_TOKEN_GITHUB_FILE` | a file holding that token | none |
+| `ASHIGARU_FORGE_AUTHORS_GITHUB` | comma-separated accounts, such as the app's bot, whose own issues and PRs are trusted as a writer's; each forge has its own `ASHIGARU_FORGE_AUTHORS_<FORGE>` | none; the image sets `ashigaru-crunchtools[bot]` |
 | `ASHIGARU_WEBHOOK_SECRET` | GitHub's secret under the bare name the first deploy used; added to `_GITHUB` | none |
 | `ASHIGARU_WEBHOOK_SECRET_FILE` | the same, as a file | none |
 

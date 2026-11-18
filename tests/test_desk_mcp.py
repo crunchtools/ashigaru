@@ -356,7 +356,7 @@ def test_desk_work_advance_is_admin_only_and_moves_the_sweep_mark(
     advanced = call(client, urls[JOSUI], "desk_work", {"advance": True})["structuredContent"]
     assert advanced["catch_up"]["advanced"] is True
     mark = client.get("/v1/marks/sweep", headers=keys[SEAT]).json()
-    assert mark["value"] == advanced["catch_up"]["until"]
+    assert mark["value"] == str(advanced["catch_up"]["until"])
 
 
 def test_desk_get_by_subject_key_and_ref(

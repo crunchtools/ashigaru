@@ -36,6 +36,10 @@ for _forge in FORGES:
         f"a {_forge} API token that can read collaborator permissions (serve); without it, intake is held"
     )
     SETTINGS[f"ASHIGARU_FORGE_TOKEN_{_forge.upper()}_FILE"] = f"a file holding that {_forge} token (serve)"
+    SETTINGS[f"ASHIGARU_FORGE_AUTHORS_{_forge.upper()}"] = (
+        f"comma-separated {_forge} accounts, such as the app's bot, whose own issues and PRs are "
+        "trusted as a writer's (serve)"
+    )
     SETTINGS[f"ASHIGARU_WEBHOOK_SECRET_{_forge.upper()}"] = f"the {_forge} webhook secret (serve)"
     SETTINGS[f"ASHIGARU_WEBHOOK_SECRET_{_forge.upper()}_FILE"] = (
         f"a file of {_forge} webhook secrets, one per line, for rotation (serve)"
@@ -84,6 +88,11 @@ def forge_tokens() -> dict[str, str]:
     return found
 
 
+def forge_authors() -> dict[str, list[str]]:
+    """Each forge's trusted authors from ASHIGARU_FORGE_AUTHORS_<FORGE>."""
+    return {forge: proxies(setting(f"ASHIGARU_FORGE_AUTHORS_{forge.upper()}")) for forge in FORGES}
+
+
 def _open(path: str) -> sqlite3.Connection:
     conn = store.connect(path)
     store.migrate(conn)
@@ -100,6 +109,7 @@ def serve(args: argparse.Namespace) -> int:
         trusted_proxies=proxies(args.trusted_proxies),
         webhook_secrets=webhook_secrets(),
         forge_tokens=forge_tokens(),
+        forge_authors=forge_authors(),
     )
     # The app applies the proxy headers itself, and only from trusted_proxies; uvicorn's own
     # handling would trust 127.0.0.1 by default.

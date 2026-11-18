@@ -1,5 +1,6 @@
 """`GET /v1/work` and `POST /v1/work` against the real Desk: the check round and the forge catch-up."""
 
+import dataclasses
 import sqlite3
 from datetime import UTC, datetime, timedelta
 from http.client import CREATED, FORBIDDEN, NOT_FOUND, OK, UNPROCESSABLE_ENTITY
@@ -40,7 +41,15 @@ def seen(conn: sqlite3.Connection, number: int, at: str, **fields: Any) -> str:
         item_id = intake.upsert(conn, subject)
         assert item_id
         conn.execute("UPDATE items SET created_at = ?, updated_at = ? WHERE id = ?", (at, at, item_id))
+        conn.execute("UPDATE events SET at = ? WHERE item_id = ?", (at, item_id))
     return item_id
+
+
+def advance(client: TestClient, keys: Keys) -> dict[str, Any]:
+    moved = client.post("/v1/work", headers=keys[JOSUI])
+    assert moved.status_code == OK, moved.text
+    caught: dict[str, Any] = moved.json()["catch_up"]
+    return caught
 
 
 def create(client: TestClient, keys: Keys, **body: Any) -> dict[str, Any]:
@@ -101,9 +110,9 @@ def test_check_hides_done_items_too(client: TestClient, keys: Keys) -> None:
 def test_catch_up_new_lists_intake_items_in_the_window(
     client: TestClient, keys: Keys, conn: sqlite3.Connection
 ) -> None:
+    seen(conn, 3, ago(days=3), author_writes=True)
     trusted = seen(conn, 1, ago(hours=2), author_writes=True, lane_hint="vertex")
     held = seen(conn, 2, ago(hours=1))
-    seen(conn, 3, ago(days=3), author_writes=True)
     create(client, keys, task="by the api", subject_key="crunchtools/x#4")
     new = {row["id"]: row for row in work(client, keys)["catch_up"]["new"]}
     assert set(new) == {trusted, held}
@@ -124,54 +133,68 @@ def test_catch_up_since_moves_the_window(client: TestClient, keys: Keys, conn: s
     assert [row["id"] for row in wide["new"]] == [old, recent]
 
 
-def test_catch_up_stops_at_its_limit_and_says_so(
-    client: TestClient, keys: Keys, conn: sqlite3.Connection, monkeypatch: pytest.MonkeyPatch
+def test_an_advance_after_a_truncated_round_loses_and_repeats_nothing(
+    client: TestClient, keys: Keys, conn: sqlite3.Connection
 ) -> None:
-    monkeypatch.setattr(dispatch, "QUEUE_LIMIT", 1)
-    first = seen(conn, 1, ago(hours=2))
-    seen(conn, 2, ago(hours=1))
-    caught = work(client, keys)["catch_up"]
-    assert [row["id"] for row in caught["new"]] == [first] and caught["truncated"] is True
+    made = [seen(conn, number, ago(hours=1)) for number in range(1, dispatch.QUEUE_LIMIT + 2)]
+    first = advance(client, keys)
+    assert first["truncated"] is True and len(first["new"]) == dispatch.QUEUE_LIMIT
+    assert client.get("/v1/marks/sweep", headers=keys[JOSUI]).json()["value"] == str(first["until"])
+    second = advance(client, keys)
+    assert second["truncated"] is False and second["after"] == first["until"]
+    assert [row["id"] for row in first["new"] + second["new"]] == made
+    assert advance(client, keys)["new"] == []
+
+
+def test_a_delivery_after_the_round_is_the_next_rounds(
+    client: TestClient, keys: Keys, conn: sqlite3.Connection
+) -> None:
+    before = seen(conn, 1, ago(minutes=1))
+    assert [row["id"] for row in advance(client, keys)["new"]] == [before]
+    later = seen(conn, 2, ago(minutes=2))  # stamped earlier than `before`, committed after the round
+    assert [row["id"] for row in advance(client, keys)["new"]] == [later]
 
 
 def test_catch_up_reopened_lists_closed_items_open_at_the_source(
     client: TestClient, keys: Keys, conn: sqlite3.Connection
 ) -> None:
-    again = seen(conn, 1, ago(days=5))
-    quiet = seen(conn, 2, ago(days=5))
-    shut = seen(conn, 3, ago(days=5))
+    again, quiet, shut = (seen(conn, number, ago(days=5)) for number in (1, 2, 3))
     with store.transaction(conn):
-        for item_id in (again, quiet):
+        for item_id in (again, quiet, shut):
             store.update_item(conn, item_id, {"state": "done"}, JOSUI)
-        conn.execute("UPDATE items SET updated_at = ? WHERE id = ?", (ago(hours=1), again))
-        conn.execute("UPDATE items SET updated_at = ? WHERE id = ?", (ago(days=3), quiet))
-        store.update_item(conn, shut, {"state": "done"}, JOSUI)
-        found = store.get_item(conn, shut) or {}
-        store.update_item(conn, shut, {"extra": {**found["extra"], "source_state": "closed"}}, "intake")
-        conn.execute("UPDATE items SET updated_at = ? WHERE id = ?", (ago(hours=1), shut))
-    reopened = work(client, keys)["catch_up"]["reopened"]
-    assert [(row["id"], row["state"]) for row in reopened] == [(again, "done")]
-
-
-def test_the_default_since_is_the_sweep_mark_else_a_day_back(client: TestClient, keys: Keys) -> None:
+    client.put("/v1/marks/sweep", headers=keys[JOSUI], json={"value": ago(hours=1)})
+    with store.transaction(conn):
+        reopen = IntakeItem(
+            subject_key="crunchtools/x#1", title="title 1, again", ref="https://github.com/crunchtools/x/issues/1",
+            source="webhook", repo="crunchtools/x", kind=Kind.STORY, author="fatherlinux",
+        )  # fmt: skip
+        intake.upsert(conn, reopen)
+        intake.upsert(conn, dataclasses.replace(reopen, subject_key="crunchtools/x#3", closed=True))
     caught = work(client, keys)["catch_up"]
-    until = datetime.strptime(caught["until"], "%Y-%m-%dT%H:%M:%SZ")
-    assert caught["since"] == dispatch.stamp(until - timedelta(days=1))
-    client.put("/v1/marks/sweep", headers=keys[JOSUI], json={"value": "2026-11-18T14:00Z"})
-    assert work(client, keys)["catch_up"]["since"] == "2026-11-18T14:00:00Z"
-    client.put("/v1/marks/sweep", headers=keys[JOSUI], json={"value": "2026-11-18T09:00:00-05:00"})
-    assert work(client, keys)["catch_up"]["since"] == "2026-11-18T14:00:00Z"
+    assert caught["new"] == [] and [(row["id"], row["state"]) for row in caught["reopened"]] == [
+        (again, "done")
+    ]
 
 
-def test_a_mark_in_short_form_still_compares_right(
+def test_without_a_mark_the_catch_up_reaches_a_day_back(
+    client: TestClient, keys: Keys, conn: sqlite3.Connection
+) -> None:
+    seen(conn, 1, ago(days=2))
+    recent = seen(conn, 2, ago(hours=1))
+    caught = work(client, keys)["catch_up"]
+    assert [row["id"] for row in caught["new"]] == [recent] and caught["since"]
+
+
+def test_a_mark_set_to_a_time_is_read_in_any_form(
     client: TestClient, keys: Keys, conn: sqlite3.Connection
 ) -> None:
     seen(conn, 1, "2020-06-01T13:59:59Z")
     on_the_mark = seen(conn, 2, "2020-06-01T14:00:00Z")
-    client.put("/v1/marks/sweep", headers=keys[JOSUI], json={"value": "2020-06-01T14:00Z"})
-    caught = work(client, keys)["catch_up"]
-    assert caught["since"] == "2020-06-01T14:00:00Z"
-    assert [row["id"] for row in caught["new"]] == [on_the_mark]
+    for value in ("2020-06-01T14:00Z", "2020-06-01T09:00:00-05:00"):
+        client.put("/v1/marks/sweep", headers=keys[JOSUI], json={"value": value})
+        caught = work(client, keys)["catch_up"]
+        assert caught["since"] == "2020-06-01T14:00:00Z"
+        assert [row["id"] for row in caught["new"]] == [on_the_mark]
 
 
 def test_a_since_that_is_not_a_time_is_422(client: TestClient, keys: Keys) -> None:
@@ -184,9 +207,18 @@ def test_a_since_that_is_not_a_time_is_422(client: TestClient, keys: Keys) -> No
 def test_advancing_is_admin_only_and_moves_the_mark(client: TestClient, keys: Keys) -> None:
     assert client.post("/v1/work", headers=keys[SEAT]).status_code == FORBIDDEN
     assert client.get("/v1/marks/sweep", headers=keys[JOSUI]).status_code == NOT_FOUND
-    moved = client.post("/v1/work", headers=keys[JOSUI])
-    assert moved.status_code == OK
-    caught = moved.json()["catch_up"]
+    caught = advance(client, keys)
     assert caught["advanced"] is True
-    assert client.get("/v1/marks/sweep", headers=keys[JOSUI]).json()["value"] == caught["until"]
+    assert client.get("/v1/marks/sweep", headers=keys[JOSUI]).json()["value"] == str(caught["until"])
     assert work(client, keys)["catch_up"]["advanced"] is False
+    assert work(client, keys)["catch_up"]["since"] is None
+
+
+def test_the_check_table_stops_at_its_limit_and_says_so(
+    client: TestClient, keys: Keys, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(dispatch, "QUEUE_LIMIT", 1)
+    create(client, keys, task="one")
+    create(client, keys, task="two")
+    round_ = work(client, keys)
+    assert len(round_["items"]) == 1 and round_["truncated"] is True and round_["summary"]["open"] == TWO

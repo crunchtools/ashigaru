@@ -13,7 +13,7 @@ import asyncio
 import re
 import shlex
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 import pytest
 import yaml
@@ -117,20 +117,101 @@ RENAMED = {"item": {"item_id"}, "target": {"item_id", "repo", "sha"}}
 """The CLI's positional `item` is the tool's `item_id`; `wait`'s `item | repo sha` is all three."""
 
 
-def _cli_args(command: str) -> set[str]:
-    dests = {a.dest for a in CLI[command]._actions if a.dest not in ("help", "json")}
-    # `--clear F` is a null for F in the tool's fields.
-    return {name for dest in dests - {"clear"} for name in RENAMED.get(dest, {dest})}
+SEAT = "a seat's own report fields, set by report and update, not at birth"
+MCP_ONLY = {
+    "desk_create": {
+        "seat": "recorded without assign's checks; assign gives an item to a seat",
+        "wrap": "the wrap stage is wrap's, never set at creation",
+        **dict.fromkeys(
+            ("result", "next", "learned", "blocked_reason", "check_after", "memorized", "verified_by"), SEAT
+        ),
+    },
+    "desk_update": {
+        "seat": "an item is handed to a seat by assign, not patched in",
+        "wrap": "the wrap stage moves only through wrap (`--clear wrap` is the CLI's way out)",
+    },
+}
+"""Fields of a carried model the CLI deliberately has no flag for, by tool: a new one fails the test."""
 
 
-def _mcp_args(tool: str) -> tuple[set[str], set[str]]:
+TYPE_DIFFERS = {
+    (
+        "desk_wait",
+        "timeout",
+    ): "the CLI's is its whole wait, fractional seconds; the tool's one poll, whole, at most 90",
+}
+"""A tool argument deliberately not the CLI flag's type, with why."""
+
+
+class Arg(NamedTuple):
+    """One argument as JSON schema sees it: its type, its choices (if any), and whether it is required."""
+
+    type: str
+    choices: frozenset[str] | None
+    required: bool
+
+
+_TYPES: dict[object, str] = {int: "integer", float: "number"}
+
+
+def _cli_args(command: str) -> dict[str, Arg]:
+    """Each CLI argument, by the MCP name; `--clear F` is a null for F in the tool's fields."""
+    found = {}
+    for a in CLI[command]._actions:
+        if a.dest in ("help", "json", "clear"):
+            continue
+        scalar = _TYPES.get(a.type, "string")
+        if isinstance(
+            a, (argparse._StoreTrueAction, argparse._StoreFalseAction, argparse.BooleanOptionalAction)
+        ):
+            kind = "boolean"
+        elif isinstance(a, argparse._AppendAction) or a.nargs in ("+", "*"):
+            kind = f"array<{scalar}>"
+        else:
+            kind = scalar
+        required = a.required if a.option_strings else a.nargs not in ("?", "*")
+        arg = Arg(kind, frozenset(a.choices) if a.choices else None, required)
+        if a.dest == "target":  # item | repo sha: each name is one string, none required alone
+            arg = Arg("string", None, False)
+        for name in RENAMED.get(a.dest, {a.dest}):
+            found[name] = arg
+    return found
+
+
+def _type(schema: dict[str, Any], defs: dict[str, Any]) -> tuple[str, frozenset[str] | None]:
+    """A property's non-null type and enum, as `_cli_args` names them: $ref and anyOf resolved."""
+    if "$ref" in schema:
+        return _type(defs[schema["$ref"].rsplit("/", 1)[1]], defs)
+    if "anyOf" in schema:
+        kinds = {_type(branch, defs) for branch in schema["anyOf"] if branch.get("type") != "null"}
+        assert len(kinds) == 1, schema
+        return kinds.pop()
+    if "enum" in schema:
+        return "string", frozenset(map(str, schema["enum"]))
+    if schema["type"] == "array":
+        kind, choices = _type(schema["items"], defs)
+        return f"array<{kind}>", choices
+    return schema["type"], None
+
+
+def _mcp_args(tool: str) -> tuple[dict[str, Arg], dict[str, Arg]]:
     """The tool's own arguments, and the fields any of them carries as a model."""
-    params = set(TOOLS[tool].parameters.get("properties", {}))
-    carried = {"fields", "filters", "record"} & params
-    fields: set[str] = set()
+    schema = TOOLS[tool].parameters
+    props, required, defs = (
+        schema.get("properties", {}),
+        set(schema.get("required", [])),
+        schema.get("$defs", {}),
+    )
+    carried = {"fields", "filters", "record"} & set(props)
+    flat = {
+        name: Arg(*_type(prop, defs), name in required) for name, prop in props.items() if name not in carried
+    }
+    fields = {}
     for name in carried:
-        fields |= set(MODELS[tool if name == "fields" else name].model_fields)
-    return params - carried, fields
+        model = MODELS[tool if name == "fields" else name].model_json_schema()
+        for field, prop in model["properties"].items():
+            fields[field] = Arg(*_type(prop, model.get("$defs", {})), field in model.get("required", []))
+    return flat, fields
 
 
 def test_every_cli_command_is_a_tool_and_every_tool_a_cli_command() -> None:
@@ -139,12 +220,29 @@ def test_every_cli_command_is_a_tool_and_every_tool_a_cli_command() -> None:
 
 @pytest.mark.parametrize("command", SHARED)
 def test_each_tool_takes_its_commands_arguments(command: str) -> None:
+    """Names, types and choices agree; a flat argument is required as the CLI's is; a carried model's
+    fields are the CLI's flags and the tool's listed gaps."""
     flat, carried = _mcp_args(f"desk_{command}")
     cli = _cli_args(command)
-    if carried:
-        assert flat <= cli and cli - flat <= carried, f"desk_{command}: {sorted(cli - flat - carried)}"
-    else:
-        assert flat == cli, f"desk_{command}: CLI only {sorted(cli - flat)}, MCP only {sorted(flat - cli)}"
+    gaps = MCP_ONLY.get(f"desk_{command}", {})
+    assert set(flat) <= set(cli), f"MCP only: {sorted(set(flat) - set(cli))}"
+    assert set(cli) - set(flat) == set(carried) - set(gaps) if carried else set(cli) == set(flat), (
+        f"CLI only {sorted(set(cli) - set(flat) - set(carried))}, "
+        f"MCP only {sorted(set(carried) - set(cli) - set(gaps))}"
+    )
+    assert not set(gaps) & set(cli), f"{sorted(set(gaps) & set(cli))} is on the CLI after all"
+    for name, tool in (flat | carried).items():
+        if name not in cli:
+            continue
+        flag = cli[name]
+        if (f"desk_{command}", name) not in TYPE_DIFFERS:
+            assert tool.type == flag.type, f"{name}: MCP {tool.type}, CLI {flag.type}"
+        if flag.choices and tool.choices:
+            assert {c.lower() for c in tool.choices} == {c.lower() for c in flag.choices}, name
+        if name in flat:
+            assert tool.required == flag.required, (
+                f"{name}: required MCP {tool.required}, CLI {flag.required}"
+            )
 
 
 @pytest.mark.parametrize("command", SHARED)

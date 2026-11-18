@@ -331,15 +331,20 @@ class CatchUpRow(BaseModel):
 
 
 class CatchUp(BaseModel):
-    """What the org webhook brought in between `since` and `until`, the org sweep done Desk side."""
+    """What the org webhook brought in after the sweep mark: the org sweep done Desk side."""
 
-    since: str = Field(description="The sweep mark, or a day before `until` while the mark is unset.")
-    until: str = Field(description="When this round read the Desk; `advance` moves the mark here.")
+    since: str | None = Field(description="The time the cursor was read from: `since`, or a time mark.")
+    after: int = Field(
+        description="The event seq it starts after: the sweep mark, or the one before `since`."
+    )
+    until: int = Field(description="The last event it covers; `advance` stores it as the sweep mark.")
     new: list[CatchUpRow] = Field(description="Subjects first seen in the window.")
     reopened: list[CatchUpRow] = Field(
-        description="Subjects open at the source whose item is closed, changed in the window."
+        description="Subjects open again at the source whose item is closed, changed in the window."
     )
-    truncated: bool = Field(False, description="True when either list stopped at its limit of 1000.")
+    truncated: bool = Field(
+        False, description="True when the window stopped at 1000 events; `until` is where it stopped."
+    )
     advanced: bool = Field(False, description="True when this round moved the sweep mark to `until`.")
 
 
@@ -441,6 +446,7 @@ class Round(BaseModel):
     """`ashigaru work`: everything the check round reads, in one call."""
 
     items: list[CheckRow] = Field(description="The check table: open items, blocked first, then newest.")
+    truncated: bool = Field(False, description="True when `items` stopped at its limit of 1000.")
     seats: list[Seat]
     summary: SeatSummary
     queue: Queue

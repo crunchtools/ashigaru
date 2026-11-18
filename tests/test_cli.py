@@ -236,7 +236,14 @@ def round_(**fields: Any) -> dict[str, Any]:
         "result_or_blocker": "needs a key",
         "next": None,
     }
-    caught = {"since": "2026-11-17T06:00:00Z", "until": "2026-11-18T06:00:00Z", "new": [], "reopened": []}
+    caught: dict[str, Any] = {
+        "since": None,
+        "after": 40,
+        "until": 57,
+        "new": [],
+        "reopened": [],
+        "truncated": False,
+    }
     return {
         "items": [blocked],
         "seats": [seat_row("Max 1"), seat_row("Max 2", missing=True)],
@@ -267,7 +274,7 @@ def test_work_renders_the_whole_round(desk: FakeDesk, capsys: pytest.CaptureFixt
     assert "1 of 2 up, 1 items open" in out
     assert "a3" in out and "vertex" in out
     assert "NEW" in out and "title of a8" in out and "fatherlinux" in out
-    assert "held" in out and "since 2026-11-17T06:00:00Z" in out
+    assert "held" in out and "events 40 to 57" in out
     assert "REOPENED" not in out
 
 
@@ -296,6 +303,15 @@ def test_work_advance_posts(desk: FakeDesk, capsys: pytest.CaptureFixture[str]) 
     assert [s.method for s in desk.seen] == ["POST"]
     assert desk.seen[0].query == {"since": ["2026-11-01T00:00:00Z"]}
     assert "sweep mark moved" in capsys.readouterr().out
+
+
+def test_work_says_when_a_list_was_cut(desk: FakeDesk, capsys: pytest.CaptureFixture[str]) -> None:
+    cut = round_(truncated=True)
+    cut["catch_up"] = cut["catch_up"] | {"truncated": True}
+    desk.on("GET", "/v1/work", (200, cut))
+    assert main(["work"]) == 0
+    out = capsys.readouterr().out
+    assert "the first 1000" in out and "the next --advance reads on" in out
 
 
 def test_work_json_prints_the_whole_round(desk: FakeDesk, capsys: pytest.CaptureFixture[str]) -> None:
