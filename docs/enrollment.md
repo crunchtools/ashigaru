@@ -67,7 +67,7 @@ Callers use the major tag, `@v3`, and each reusable workflow fetches its scripts
 
 **Rolling back.** Every release keeps its own tag. To undo one, move the major tag back: `git tag -f v3 vX.Y.Z && git push -f origin v3`. A repository that needs to stay on one release can call `@vX.Y.Z`, but the scripts are still fetched at `v3`, so this holds only the workflow files.
 
-**A new major.** A change to the public interface is a new major tag, `v3`. Repositories move to it by editing their caller file, on their own schedule.
+**A new major.** A change to the public interface is the next major tag (`v4` after `v3`). Repositories move to it by editing their caller file, on their own schedule.
 
 ## Related
 
