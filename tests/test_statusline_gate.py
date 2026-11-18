@@ -34,14 +34,15 @@ def run(tmp_path: Path) -> Run:
     runtime = tmp_path / "run"
     (runtime / "ashigaru").mkdir(parents=True)
 
-    def go(session: str = SESSION) -> bool:
+    def go(session: str = SESSION, prelude: str = "") -> bool:
         log.unlink(missing_ok=True)
         env = {
             "PATH": f"{bin_dir}:{os.environ['PATH']}",
             "XDG_RUNTIME_DIR": str(runtime),
         }
         status = f'{{"session_id": "{session}", "model": {{}}}}'
-        subprocess.run(["bash", "-c", snippet() + "\nwait"], input=status, text=True, env=env, check=True)
+        script = prelude + snippet() + "\nwait"
+        subprocess.run(["bash", "-c", script], input=status, text=True, env=env, check=True)
         return log.exists()
 
     return go
@@ -71,3 +72,13 @@ def test_runs_with_stale_state_file(run: Run, tmp_path: Path) -> None:
 def test_odd_session_id_maps_to_sanitized_name(run: Run, tmp_path: Path) -> None:
     state(tmp_path, "a_b_c_d")
     assert not run("a/b c.d")
+
+
+def test_runs_with_state_file_from_the_future(run: Run, tmp_path: Path) -> None:
+    state(tmp_path, SESSION, age=-3600)
+    assert run()
+
+
+def test_runs_without_epochseconds(run: Run, tmp_path: Path) -> None:
+    state(tmp_path, SESSION)
+    assert run(prelude="unset EPOCHSECONDS\n")

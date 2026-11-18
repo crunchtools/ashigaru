@@ -171,6 +171,27 @@ def test_usage_bills_by_the_seats_lane(client: TestClient, keys: Keys, conn: sql
     assert row["billing"] == "vertex" and spent(conn) == {"vertex": pytest.approx(0.5)}
 
 
+def test_a_late_lower_report_does_not_rewind_what_is_booked(conn: sqlite3.Connection) -> None:
+    for cost in (2.0, 1.5, 2.1):
+        dispatch.report_usage(conn, MINE, {"session_id": "s1", "billing": "max", "cost_usd": cost})
+    assert spent(conn) == {"max": pytest.approx(2.1)}
+
+
+def test_a_seats_lane_outranks_the_billing_its_own_key_reports(
+    client: TestClient, keys: Keys, conn: sqlite3.Connection
+) -> None:
+    seat(client, keys, MINE)
+    seat(client, keys, OTHER)
+    for name, key in ((MINE, MINE), (OTHER, JOSUI)):
+        response = client.post(
+            f"/v1/seats/{name}/usage",
+            headers=keys[key],
+            json={"session_id": "s1", "billing": "openrouter", "cost_usd": 1.0},
+        )
+        assert response.status_code == OK, response.text
+    assert spent(conn) == {"max": pytest.approx(1.0), "openrouter": pytest.approx(1.0)}
+
+
 def test_usage_on_a_lane_with_no_billing_waits_for_one(
     client: TestClient, keys: Keys, conn: sqlite3.Connection
 ) -> None:

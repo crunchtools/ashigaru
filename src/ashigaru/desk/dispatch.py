@@ -200,14 +200,19 @@ def report_seat(conn: sqlite3.Connection, name: str, fields: dict[str, Any], act
         return store.get_seat(conn, name) or seat
 
 
-def report_usage(conn: sqlite3.Connection, seat: str, report: dict[str, Any]) -> dict[str, Any]:
+def report_usage(
+    conn: sqlite3.Connection, seat: str, report: dict[str, Any], lane_first: bool = False
+) -> dict[str, Any]:
     """Record a seat's usage and book whatever of the session's cost is not yet in spend. Billing is
-    the report's, else the seat's lane's, else what the row had; until one is known the cost waits."""
+    the report's, else the seat's lane's, else what the row had; with `lane_first` (a seat reporting
+    for itself) the lane's comes before the report's. Until one is known the cost waits."""
     with store.transaction(conn):
         current = store.get_seat(conn, seat) or {**store.SEAT_DEFAULTS, "session_id": None}
         cost = report.pop("cost_usd", None)
         fields = {key: value for key, value in report.items() if value is not None}
-        billing = fields.get("billing") or LANE_BILLING.get(current["lane"]) or current["billing"]
+        lane = LANE_BILLING.get(current["lane"])
+        reported = fields.get("billing")
+        billing = ((lane or reported) if lane_first else (reported or lane)) or current["billing"]
         if billing:
             fields["billing"] = billing
         if cost is not None:
@@ -219,7 +224,7 @@ def report_usage(conn: sqlite3.Connection, seat: str, report: dict[str, Any]) ->
                     conn.execute(
                         ADD_SPEND, {"billing": billing, "day": store.now()[:10], "cost": cost - booked}
                     )
-                fields["session_booked_usd"] = cost
+                fields["session_booked_usd"] = max(cost, booked)
             elif not same:
                 fields["session_booked_usd"] = 0.0
         return store.write_seat(conn, seat, fields)

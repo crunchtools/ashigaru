@@ -123,7 +123,7 @@ input=$(cat) skip=0
 if [[ $input =~ \"session_id\"[[:space:]]*:[[:space:]]*\"([^\"]*)\" ]]; then
   f=${XDG_RUNTIME_DIR:+$XDG_RUNTIME_DIR/ashigaru}
   f=${f:-/dev/shm/ashigaru-$UID}/usage-${BASH_REMATCH[1]//[^A-Za-z0-9_-]/_}.json
-  m=$(stat -c %Y "$f" 2>/dev/null) && ((EPOCHSECONDS - m < 30)) && skip=1
+  m=$(stat -c %Y "$f" 2>/dev/null) && ((d = ${EPOCHSECONDS:-0} - m, d >= 0 && d < 30)) && skip=1
 fi
 ((skip)) || printf '%s' "$input" | ashigaru hook statusline >/dev/null 2>&1 &
 ```
