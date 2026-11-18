@@ -191,6 +191,7 @@ def test_a_sweep_after_the_import_is_refused_as_a_duplicate(
         " https://github.com/crunchtools/example/pull/8/ ": "crunchtools/example#8",
         "crunchtools/example#9": "crunchtools/example#9",
         "example:disk-full": "example:disk-full",
+        "  ": None,
     }.items():
         created = client.post("/v1/items", headers=josui, json={"task": "t", "subject_key": sent})
         assert created.json()["subject_key"] == stored

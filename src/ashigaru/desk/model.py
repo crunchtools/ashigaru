@@ -176,8 +176,8 @@ class _Fields(BaseModel):
     @field_validator("subject_key")
     @classmethod
     def _one_form(cls, value: str | None) -> str | None:
-        """A ref is stored as its key; any other key (`repo:alert`) as given."""
-        return subject_key(value) or value
+        """A ref is stored as its key; any other key (`repo:alert`) as given, and a blank one as none."""
+        return subject_key(value) or (value if value and value.strip() else None)
 
 
 class ItemCreate(_Fields):
