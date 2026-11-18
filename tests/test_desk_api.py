@@ -11,7 +11,7 @@ from conftest import Keys
 from fastapi.testclient import TestClient
 
 from ashigaru.desk import __main__ as desk_main
-from ashigaru.desk import store
+from ashigaru.desk import dispatch, store
 from ashigaru.desk.api import create_app
 
 CONTRACT = Path(__file__).resolve().parents[1] / "docs" / "desk-api.json"
@@ -169,6 +169,25 @@ def test_wrap_force_clears_a_seat_mid_turn(client: TestClient, keys: Keys) -> No
     ).json()
     assert (forced["wrap"], forced["state"]) == ("cleared", "abandoned")
     assert client.get(f"/v1/seats/{SEAT}", headers=keys["ci"]).json()["status"] == "free"
+
+
+def test_wrap_takes_a_learned_line_in_place_of_cc_done(client: TestClient, keys: Keys) -> None:
+    item = client.post("/v1/items", headers=keys[JOSUI], json={"task": "t", "state": "review"}).json()
+    path = f"/v1/items/{item['id']}/wrap"
+    assert client.post(path, headers=keys[JOSUI], json={}).status_code == CONFLICT
+    cleared = client.post(path, headers=keys[JOSUI], json={"learned": "pin the base"}).json()
+    assert (cleared["wrap"], cleared["state"], cleared["memorized"]) == ("cleared", "done", False)
+
+
+def test_the_queue_shows_the_newest_up_to_its_limit(
+    client: TestClient, keys: Keys, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(dispatch, "QUEUE_LIMIT", 1)
+    for state in ("queued", "queued", "proposed", "proposed"):
+        client.post("/v1/items", headers=keys[JOSUI], json={"task": "t", "state": state})
+    view = client.get("/v1/queue", headers=keys["ci"]).json()
+    assert [row["id"] for row in view["queued"]] == ["a2"]
+    assert [row["id"] for row in view["proposed"]] == ["a4"]
 
 
 def test_wrap_force_keeps_a_closed_state(client: TestClient, keys: Keys) -> None:

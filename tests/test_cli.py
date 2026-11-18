@@ -6,7 +6,7 @@ import stat
 import time
 from collections.abc import Iterator
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
 from fake_desk import FakeDesk, Seen, serve
@@ -482,6 +482,23 @@ def test_wait_on_a_commit_long_polls_until_it_is_not_pending(desk: FakeDesk) -> 
     queries = [seen.query for seen in desk.calls("GET", "/v1/ci/wait")]
     assert queries[0] == {"repo": ["crunchtools/ashigaru"], "sha": [SHA], "timeout": ["90"]}
     assert len(queries) == len(replies) and clock.slept == [5.0]
+
+
+def test_wait_on_a_commit_rides_out_no_answer() -> None:
+    class Flaky:
+        def __init__(self) -> None:
+            self.answers: list[Any] = [Unreachable("connect"), ci("failure")]
+
+        def request(self, *args: Any, **kwargs: Any) -> Any:
+            answer = self.answers.pop(0)
+            if isinstance(answer, Exception):
+                raise answer
+            return answer
+
+    clock = Clock()
+    waiter = CIWaiter(cast("Desk", Flaky()), sleep=clock.sleep, clock=lambda: clock.now)
+    assert waiter.wait("crunchtools/ashigaru", SHA, None)["status"] == "failure"
+    assert clock.slept == [5.0]
 
 
 def test_wait_on_a_commit_gives_up_at_its_timeout(desk: FakeDesk) -> None:
