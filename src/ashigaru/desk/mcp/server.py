@@ -29,6 +29,7 @@ from starlette.types import ASGIApp, Lifespan, Receive, Scope, Send
 
 from .. import api, auth, store
 from ..model import (
+    MARK_NAME,
     MAX_WAIT,
     Assign,
     CheckRow,
@@ -203,7 +204,7 @@ def desk_create(
 
 @mcp.tool
 def desk_mark(
-    name: Annotated[str, Field(description="The watermark, e.g. sweep.")],
+    name: Annotated[str, Field(pattern=MARK_NAME, description="The watermark, e.g. sweep.")],
     value: Annotated[str | None, Field(description="Set it to this (admin); omit to read it.")] = None,
 ) -> Mark:
     """`ashigaru mark`: read a named watermark, such as how far the last sweep reached, or set it."""

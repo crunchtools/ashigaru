@@ -574,7 +574,9 @@ def test_wait_on_a_commit_exit_follows_the_verdict(
     check = {"name": "sdlc ci", "verdict": status, "url": None, "updated_at": "2026-11-18T00:00:00Z"}
     desk.on("GET", "/v1/ci/wait", (200, ci(status, checks=[check])))
     assert main(["wait", "crunchtools/ashigaru", SHA]) == code
-    assert f"crunchtools/ashigaru@{SHA[:12]}  {status}" in capsys.readouterr().out
+    out = capsys.readouterr().out.splitlines()
+    assert out[0] == f"crunchtools/ashigaru@{SHA[:12]}  {status}"
+    assert out[2].split() == ["CHECK", "VERDICT", "URL"] and out[3].split() == ["sdlc", "ci", status]
 
 
 def test_wait_on_a_commit_says_when_the_desk_has_no_ci_wait(

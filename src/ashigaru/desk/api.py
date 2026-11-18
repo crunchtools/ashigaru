@@ -18,6 +18,7 @@ from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 from . import auth, dispatch, store
 from .model import (
     CLOSED,
+    MARK_NAME,
     SEAT_FIELDS,
     SEAT_ROW_FIELDS,
     SEAT_STATES,
@@ -356,7 +357,7 @@ def claim(conn: Conn, who: Who, item_id: str) -> Item:
     return Item.model_validate(store.get_item(conn, item_id))
 
 
-MarkName = Annotated[str, PathParam(pattern=r"^[a-z][a-z0-9-]{0,63}$", description="e.g. sweep")]
+MarkName = Annotated[str, PathParam(pattern=MARK_NAME, description="e.g. sweep")]
 
 
 @router.get("/v1/marks/{name}", tags=["views"], responses=errors(401, 404))

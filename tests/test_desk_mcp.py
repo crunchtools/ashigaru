@@ -217,6 +217,7 @@ def test_desk_mark_reads_for_all_and_sets_for_an_admin(
     set_ = call(client, urls[JOSUI], "desk_mark", {"name": "sweep", "value": "t1"})["structuredContent"]
     read = call(client, urls["ci"], "desk_mark", {"name": "sweep"})["structuredContent"]
     assert set_ == read == client.get("/v1/marks/sweep", headers=keys["ci"]).json()
+    assert call(client, urls[JOSUI], "desk_mark", {"name": "Bad_Name", "value": "t1"})["isError"] is True
 
 
 def test_views_answer_every_identity(client: TestClient, keys: Keys, urls: dict[str, str]) -> None:

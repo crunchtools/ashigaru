@@ -531,6 +531,10 @@ class WebhookAck(BaseModel):
     handled: bool = Field(description="True when an adapter mapped the event to CI or intake.")
 
 
+MARK_NAME = r"^[a-z][a-z0-9-]{0,63}$"
+"""A watermark's name, the same for REST and MCP."""
+
+
 class Mark(BaseModel):
     """A named watermark Josui keeps on the Desk, such as where the last sweep reached."""
 
