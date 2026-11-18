@@ -106,14 +106,24 @@ command, which gets Claude Code's status JSON on stdin: it posts the model,
 context (`context_window.total_input_tokens` of `context_window_size`), session
 tokens and `cost.total_cost_usd` to `POST /v1/seats/{name}/usage`. Session
 tokens are every input, cache and output token of the session's API calls,
-counted from the transcript a few MiB at a time. Billing comes from the seat's
-lane (`vertex` is Vertex, `dolza-max` and `exedore-max` are Max); any other
-lane sends none, and the Desk keeps what it had. The status line refreshes often, so it posts at most once every 30
+counted from the transcript a few MiB at a time. Cache reads are in that sum and
+every call rereads the context, so a long session reads in the millions. The Desk
+bills by the seat's lane (`vertex` is Vertex, `dolza-max` and `exedore-max` are
+Max) and books the cost it could not bill yet, a seat with no row or a lane with
+no billing, once billing is known. The status line refreshes often, so it posts at most once every 30
 seconds per session, with its state (dropped a day after its last post) in `$XDG_RUNTIME_DIR/ashigaru` (else
-`/dev/shm/ashigaru-<uid>`); it prints nothing at all, failures included. Pipe
-the JSON to it in the background so the bar never waits:
+`/dev/shm/ashigaru-<uid>`); it prints nothing at all, failures included. Python
+costs ~75 ms to start, so the snippet skips it while that state file is under 30
+seconds old (the file's mtime is the last attempt), and pipes the JSON to it in
+the background so the bar never waits:
 
 ```bash
-input=$(cat)
-printf '%s' "$input" | ashigaru hook statusline >/dev/null 2>&1 &
+input=$(cat) skip=0
+# Gate: skip the launch while this session's state file is under 30 s old.
+if [[ $input =~ \"session_id\"[[:space:]]*:[[:space:]]*\"([^\"]*)\" ]]; then
+  f=${XDG_RUNTIME_DIR:+$XDG_RUNTIME_DIR/ashigaru}
+  f=${f:-/dev/shm/ashigaru-$UID}/usage-${BASH_REMATCH[1]//[^A-Za-z0-9_-]/_}.json
+  m=$(stat -c %Y "$f" 2>/dev/null) && ((EPOCHSECONDS - m < 30)) && skip=1
+fi
+((skip)) || printf '%s' "$input" | ashigaru hook statusline >/dev/null 2>&1 &
 ```

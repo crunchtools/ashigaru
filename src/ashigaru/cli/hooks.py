@@ -38,7 +38,7 @@ from urllib.parse import quote
 
 import httpx
 
-from .client import Desk, DeskError
+from .client import Desk
 from .config import load
 
 EVENTS = ("session-start", "prompt-submit", "stop", "statusline")
@@ -55,7 +55,6 @@ TRANSCRIPT_CHUNK = 4 << 20
 # A session's state is dropped this long after its last post, so tmpfs holds only live sessions.
 STATE_KEPT = timedelta(days=1)
 TOKEN_FIELDS = ("input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens", "output_tokens")
-LANE_BILLING = {"vertex": "vertex", "dolza-max": "max", "exedore-max": "max"}
 
 
 class _Deadline(Exception):
@@ -168,14 +167,9 @@ def _part(event: dict[str, Any], key: str) -> dict[str, Any]:
 
 def _statusline(event: dict[str, Any], desk: Desk, path: str) -> None:
     model, cost, window = _part(event, "model"), _part(event, "cost"), _part(event, "context_window")
-    try:
-        lane = desk.get(path).get("lane")
-    except DeskError:  # no seat row yet: this report creates it, without a lane
-        lane = None
     report = {
         "session_id": str(event["session_id"]),
         "model": model.get("id") if isinstance(model.get("id"), str) else None,
-        "billing": LANE_BILLING.get(lane),
         "context_used": _number(window.get("total_input_tokens")),
         "context_window": _number(window.get("context_window_size")),
         "session_tokens": event.get("session_tokens"),

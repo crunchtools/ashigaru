@@ -42,6 +42,16 @@ All notable changes to this project are documented here. The format follows
 - `ashigaru work` and `GET /v1/check` list only open items: `done` rows that
   were never wrapped (old imports) no longer show without `--all`.
 
+### Fixed
+- Usage cost reported before billing was known is no longer lost (a355). The
+  Desk keeps `session_booked_usd`, the part of the session's cost already in
+  spend, and books the rest on the first report that carries billing. Billing
+  now comes from the report, else the seat's lane, else the row; the client no
+  longer hardcodes a lane table or looks up its own seat on every post.
+- The documented status-line wiring skips starting Python (~75 ms) while the
+  session's throttle state file is under 30 seconds old, and the docs say
+  session tokens include cache reads, so they read in the millions.
+
 ## [3.4.0] - 2026-11-18
 
 ### Added
