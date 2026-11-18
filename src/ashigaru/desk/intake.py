@@ -84,6 +84,11 @@ def _authored(item: IntakeItem) -> dict[str, Any]:
     return {"approved_head": item.head} if item.head is not None else {}
 
 
+def _held(item: IntakeItem) -> dict[str, Any]:
+    """A held subject is tied to its head too: the author check is retried only at that head."""
+    return {"held_head": item.head} if item.head is not None else {}
+
+
 def _withdrawal(item: IntakeItem, why: str) -> dict[str, Any]:
     return {"trusted": False, "held_by": item.sender, "held_at": store.now(), "held_for": why}
 
@@ -105,6 +110,8 @@ def _trust(
         hint = item.lane_hint if item.author_writes else item.approves_lane
         return {"lane": lane(hint), "mode": Mode.AUTO} if _ours(conn, existing) else {}
     if not trusted(existing):
+        if item.pushed_by_writer:
+            extra.update(_held(item))
         return {}
     if item.revoked:
         why = "lane removed"
@@ -150,7 +157,13 @@ def upsert(conn: sqlite3.Connection, item: IntakeItem) -> str | None:
                     **_seen(item),
                     "author": item.author,
                     "trusted": item.author_writes or item.approved,
-                    **(_authored(item) if item.author_writes else _approval(item) if item.approved else {}),
+                    **(
+                        _authored(item)
+                        if item.author_writes
+                        else _approval(item)
+                        if item.approved
+                        else _held(item)
+                    ),
                 },
             },
             ACTOR,

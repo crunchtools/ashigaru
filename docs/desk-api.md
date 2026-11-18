@@ -157,8 +157,11 @@ or once a maintainer approves it: a `labeled` event adding a `lane:<lane>`
 label, from a sender who may write. Anything else (an outsider, a bot, a
 failed check, a missing token, or a writer editing, reopening or commenting on
 an outsider's issue) leaves it held, no lane and mode `manual`, for Josui.
-While it is held, each delivery asks about the author again, so a check that
-failed is retried. An approval is recorded under `extra` as `approved_by`,
+While it is held, a delivery at the head it was held at (`held_head`, for a PR)
+asks about the author again, so a check that failed is retried; a writer's push
+from `held_head` moves it, and a delivery at any other head, or with none, does
+not retry: a maintainer's label is needed. A PR held before heads were recorded
+has none, so only a label trusts it. An approval is recorded under `extra` as `approved_by`,
 `approved_at`, `approved_lane` and, for a PR, `approved_head`: approval is tied
 to that commit. A PR trusted because its author writes is tied to its head the
 same way, as `approved_head`, and once withdrawn only an approval restores it. It is withdrawn (held again, `trusted` false, with `held_by`,
