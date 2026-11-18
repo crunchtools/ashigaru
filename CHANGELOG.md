@@ -8,6 +8,11 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 - `ashigaru --version` prints the installed package version and exits 0 (#206).
+- `ashigaru hook statusline` (a328): run from a seat's status line, it posts
+  the model, context, session tokens and running cost to
+  `POST /v1/seats/{name}/usage`, so `ashigaru usage` and its billing table show
+  real numbers. Billing follows the seat's lane. At most one post per 30
+  seconds per session, state on tmpfs, never any output.
 
 ### Fixed
 - A narrow `single_use_helpers` exception for `CIWaiter._ask`, `_poll`'s twin.

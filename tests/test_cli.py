@@ -2,6 +2,7 @@
 
 import io
 import json
+import os
 import stat
 import time
 from collections.abc import Iterator
@@ -705,6 +706,155 @@ def test_the_hook_subcommand_reads_stdin(seat: FakeDesk, monkeypatch: pytest.Mon
     monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps({"hook_event_name": "Stop"})))
     assert main(["hook", "stop"]) == 0
     assert patches(seat) == [{"turn": "idle"}]
+
+
+def statusline(session: str = "s1", **fields: Any) -> dict[str, Any]:
+    return {
+        "session_id": session,
+        "model": {"id": "claude-opus-5-5", "display_name": "Opus 5.5"},
+        "cost": {"total_cost_usd": 1.25},
+        "context_window": {"total_input_tokens": 41000, "context_window_size": 200000},
+    } | fields
+
+
+def usage_posts(desk: FakeDesk) -> list[Any]:
+    return [s.body for s in desk.calls("POST", "/v1/seats/Max%201/usage")]
+
+
+def assistant(message_id: str, **usage: int) -> str:
+    return json.dumps({"type": "assistant", "message": {"id": message_id, "usage": usage}}) + "\n"
+
+
+@pytest.fixture
+def statusline_seat(seat: FakeDesk, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> FakeDesk:
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path / "run"))
+    seat.on("GET", "/v1/seats/Max%201", (200, SEAT | {"lane": "exedore-max"}))
+    seat.on("POST", "/v1/seats/Max%201/usage", (200, SEAT))
+    return seat
+
+
+def test_the_status_line_reports_usage(statusline_seat: FakeDesk, capsys: pytest.CaptureFixture[str]) -> None:
+    assert hook("statusline", statusline()) == 0
+    assert usage_posts(statusline_seat) == [
+        {
+            "session_id": "s1",
+            "model": "claude-opus-5-5",
+            "billing": "max",
+            "context_used": 41000,
+            "context_window": 200000,
+            "cost_usd": 1.25,
+        }
+    ]
+    assert capsys.readouterr() == ("", "")
+
+
+def test_the_status_line_posts_once_per_interval_per_session(
+    statusline_seat: FakeDesk, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    for _ in range(3):
+        hook("statusline", statusline())
+    hook("statusline", statusline("s2"))
+    assert [post["session_id"] for post in usage_posts(statusline_seat)] == ["s1", "s2"]
+    monkeypatch.setattr(hooks, "STATUSLINE_EVERY", 0.0)
+    hook("statusline", statusline())
+    assert [post["session_id"] for post in usage_posts(statusline_seat)] == ["s1", "s2", "s1"]
+
+
+def test_the_status_line_counts_session_tokens_from_the_transcript(
+    statusline_seat: FakeDesk, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(hooks, "STATUSLINE_EVERY", 0.0)
+    transcript = tmp_path / "s1.jsonl"
+    transcript.write_text(
+        json.dumps({"type": "user", "message": {"content": "hi"}})
+        + "\n"
+        + assistant("m1", input_tokens=10, cache_read_input_tokens=100, output_tokens=5)
+        + assistant("m1", input_tokens=10, cache_read_input_tokens=100, output_tokens=5)
+        + "not json\n"
+        + "42\n"
+    )
+    hook("statusline", statusline(transcript_path=str(transcript)))
+    with transcript.open("a") as handle:
+        handle.write(assistant("m2", input_tokens=1, cache_creation_input_tokens=20, output_tokens=4))
+        handle.write('{"type": "assistant", "message": {"id": "m3", "usage": {"input_tokens": 7')
+    hook("statusline", statusline(transcript_path=str(transcript)))
+    assert [post["session_tokens"] for post in usage_posts(statusline_seat)] == [115, 140]
+
+
+def test_the_status_line_carries_a_line_across_the_read_limit(
+    statusline_seat: FakeDesk, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(hooks, "STATUSLINE_EVERY", 0.0)
+    first, second = assistant("m1", input_tokens=3), assistant("m2", output_tokens=4)
+    monkeypatch.setattr(hooks, "TRANSCRIPT_CHUNK", len(first) + 5)
+    transcript = tmp_path / "s1.jsonl"
+    transcript.write_text(first + second)
+    for _ in range(3):
+        hook("statusline", statusline(transcript_path=str(transcript)))
+    assert [post["session_tokens"] for post in usage_posts(statusline_seat)] == [3, 7, 7]
+
+
+def test_the_status_line_skips_a_state_directory_another_user_can_write(
+    statusline_seat: FakeDesk, tmp_path: Path
+) -> None:
+    shared = tmp_path / "run" / "ashigaru"
+    shared.mkdir(parents=True)
+    shared.chmod(0o777)
+    hook("statusline", statusline())
+    assert usage_posts(statusline_seat) == []
+    assert list(shared.iterdir()) == []
+
+
+@pytest.mark.parametrize(("lane", "billing"), [("vertex", "vertex"), ("dolza-max", "max"), ("prime", None)])
+def test_the_status_line_bills_by_lane(statusline_seat: FakeDesk, lane: str, billing: str | None) -> None:
+    statusline_seat.on("GET", "/v1/seats/Max%201", (200, SEAT | {"lane": lane}))
+    hook("statusline", statusline())
+    assert usage_posts(statusline_seat)[0].get("billing") == billing
+
+
+def test_the_status_line_reports_before_the_seat_has_a_row(statusline_seat: FakeDesk) -> None:
+    del statusline_seat.routes[("GET", "/v1/seats/Max%201")]
+    hook("statusline", statusline())
+    assert "billing" not in usage_posts(statusline_seat)[0]
+
+
+def test_the_status_line_is_silent_on_every_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path / "run"))
+    monkeypatch.setattr(hooks, "STATUSLINE_EVERY", 0.0)
+    for name in ("ASHIGARU_URL", "ASHIGARU_API_KEY", "ASHIGARU_API_KEY_FILE"):
+        monkeypatch.delenv(name, raising=False)
+    assert hook("statusline", statusline()) == 0
+    monkeypatch.setenv("ASHIGARU_URL", "http://127.0.0.1:9")
+    monkeypatch.setenv("ASHIGARU_API_KEY", KEY)
+    monkeypatch.setenv("ASHIGARU_SEAT", "Max 1")
+    assert hook("statusline", statusline()) == 0
+    assert hook("statusline", {"model": {"id": "x"}}) == 0
+    assert hooks.run("statusline", io.StringIO("not json")) == 0
+    assert capsys.readouterr() == ("", "")
+
+
+def test_the_status_line_drops_state_a_day_old(statusline_seat: FakeDesk, tmp_path: Path) -> None:
+    stale = hooks.usage_state("gone", {"XDG_RUNTIME_DIR": str(tmp_path / "run")})
+    stale.parent.mkdir(parents=True)
+    stale.write_text("{}")
+    day_ago = time.time() - hooks.STATE_KEPT.total_seconds() - 60
+    os.utime(stale, (day_ago, day_ago))
+    hook("statusline", statusline())
+    assert not stale.exists()
+    assert hooks.usage_state("s1", {"XDG_RUNTIME_DIR": str(tmp_path / "run")}).exists()
+
+
+def test_a_slow_desk_never_holds_the_status_line(
+    statusline_seat: FakeDesk, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(hooks, "HOOK_SECONDS", 0.3)
+    statusline_seat.delay = 2.0
+    started = time.monotonic()
+    assert hook("statusline", statusline()) == 0
+    assert time.monotonic() - started < 1.0
 
 
 # Hosted MCP URLs

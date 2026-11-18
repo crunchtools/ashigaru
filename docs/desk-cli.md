@@ -96,3 +96,20 @@ every failure, so a hook never blocks Claude.
 The Desk lets a seat set only its `turn` and `task`, and infers Scott's hold
 from them ([desk-api.md](desk-api.md#scotts-hold)): the session's first typed
 prompt on a seat with no item opens a manual item, and `/clear` releases it.
+
+`ashigaru hook statusline` feeds `ashigaru usage`. Run it from the status line
+command, which gets Claude Code's status JSON on stdin: it posts the model,
+context (`context_window.total_input_tokens` of `context_window_size`), session
+tokens and `cost.total_cost_usd` to `POST /v1/seats/{name}/usage`. Session
+tokens are every input, cache and output token of the session's API calls,
+counted from the transcript a few MiB at a time. Billing comes from the seat's
+lane (`vertex` is Vertex, `dolza-max` and `exedore-max` are Max); any other
+lane sends none, and the Desk keeps what it had. The status line refreshes often, so it posts at most once every 30
+seconds per session, with its state (dropped a day after its last post) in `$XDG_RUNTIME_DIR/ashigaru` (else
+`/dev/shm/ashigaru-<uid>`); it prints nothing at all, failures included. Pipe
+the JSON to it in the background so the bar never waits:
+
+```bash
+input=$(cat)
+printf '%s' "$input" | ashigaru hook statusline >/dev/null 2>&1 &
+```
