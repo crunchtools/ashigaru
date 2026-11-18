@@ -6,6 +6,10 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- Desk `claim` fails closed on an item with no lane: no seat can claim it, and Josui sets its lane or assigns it directly (a232).
+
 ### Added
 
 - The Desk infers Scott's hold (a238): a seat with no item that reports its session's first typed prompt (turn active with a task) becomes busy and held, on a new manual item carrying that task, the way /agents ledgered untracked manual work; `/clear` or a wrap releases it, and the hold follows the item's mode. Seats still write only `turn` and `task`, so none can claim or drop a hold. Seats carry a computed `hold` (`free`, `busy-auto`, `busy-manual`), which `ashigaru agents` shows.
