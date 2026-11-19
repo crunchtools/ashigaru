@@ -48,6 +48,8 @@ DROP_TASKS = """
 
 @dataclasses.dataclass(frozen=True)
 class Settings:
+    """How reconcile runs: every `every` seconds, ending a silent turn active past `turn_max`."""
+
     every: float = EVERY
     turn_max: timedelta = TURN_MAX
 
