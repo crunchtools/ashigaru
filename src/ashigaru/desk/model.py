@@ -546,8 +546,8 @@ class Verdict(StrEnum):
 
 
 class CIStatus(StrEnum):
-    """A commit's CI as a whole: pending while any check is (or none has reported), else failure when
-    any check failed or was cancelled, else success."""
+    """A commit's CI as a whole: pending while any check is (or none has reported, or a check the
+    target branch requires has not), else failure when any check failed or was cancelled, else success."""
 
     PENDING = "pending"
     SUCCESS = "success"
@@ -571,7 +571,24 @@ class CIResult(BaseModel):
     failing: list[str] = Field(
         default_factory=list, description="Names of the checks that failed or were cancelled."
     )
+    pending: list[str] = Field(
+        default_factory=list,
+        description="Names of the checks with no conclusion yet: the commit's own, and each required check "
+        "that has not reported (one that never started counts).",
+    )
+    branch: str | None = Field(default=None, description="The branch whose required checks were read.")
+    required: list[str] | None = Field(
+        default=None,
+        description="The checks that branch requires; null when they were not, or could not be, read.",
+    )
+    unverified: str | None = Field(
+        default=None,
+        description="Why the required checks could not be read; the status is then never success.",
+    )
 
+
+BRANCH_MAX = 255
+"""The longest branch name GitHub takes (a ref's file name)."""
 
 MAX_WAIT = 90
 """Seconds one wait may block. Cloudflare drops a proxied request at 100s, so a client waits again."""
@@ -583,6 +600,12 @@ class CIWait(BaseModel):
     repo: str = Field(pattern=r"^[^/\s]+/[^/\s]+$", description="owner/name")
     sha: str = Field(pattern=r"^[0-9a-fA-F]{40}([0-9a-fA-F]{24})?$", description="The full commit id.")
     timeout: int = Field(MAX_WAIT, ge=0, le=MAX_WAIT, description="Seconds to wait; 0 reads now.")
+    branch: str | None = Field(
+        None,
+        max_length=BRANCH_MAX,
+        pattern=r"^[^\s~^:?*\[\\]+$",
+        description="The branch the commit targets, whose required checks it must pass; default the repo's.",
+    )
 
 
 class WebhookAck(BaseModel):

@@ -134,6 +134,18 @@
       "CIResult": {
         "description": "The normalized CI result for one commit: what `desk_wait` and `ashigaru wait` read.",
         "properties": {
+          "branch": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The branch whose required checks were read.",
+            "title": "Branch"
+          },
           "checks": {
             "items": {
               "$ref": "#/components/schemas/Check"
@@ -149,10 +161,33 @@
             "title": "Failing",
             "type": "array"
           },
+          "pending": {
+            "description": "Names of the checks with no conclusion yet: the commit's own, and each required check that has not reported (one that never started counts).",
+            "items": {
+              "type": "string"
+            },
+            "title": "Pending",
+            "type": "array"
+          },
           "repo": {
             "description": "owner/name, lower case.",
             "title": "Repo",
             "type": "string"
+          },
+          "required": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The checks that branch requires; null when they were not, or could not be, read.",
+            "title": "Required"
           },
           "sha": {
             "title": "Sha",
@@ -160,6 +195,18 @@
           },
           "status": {
             "$ref": "#/components/schemas/CIStatus"
+          },
+          "unverified": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Why the required checks could not be read; the status is then never success.",
+            "title": "Unverified"
           }
         },
         "required": [
@@ -171,7 +218,7 @@
         "type": "object"
       },
       "CIStatus": {
-        "description": "A commit's CI as a whole: pending while any check is (or none has reported), else failure when\nany check failed or was cancelled, else success.",
+        "description": "A commit's CI as a whole: pending while any check is (or none has reported, or a check the\ntarget branch requires has not), else failure when any check failed or was cancelled, else success.",
         "enum": [
           "pending",
           "success",
@@ -3154,7 +3201,7 @@
     },
     "/v1/ci/wait": {
       "get": {
-        "description": "desk_wait: the commit's CI result as soon as it is no longer pending, or as it stands when\n`timeout` runs out (status still `pending`; wait again). Nothing polls the forge: a CI webhook\ndelivery for the commit is what ends the wait.",
+        "description": "desk_wait: the commit's CI result as soon as it is no longer pending, or as it stands when\n`timeout` runs out (status still `pending`; wait again). A CI webhook delivery for the commit is\nwhat ends the wait; the forge is asked only which checks `branch` requires and what they reported,\nbefore a result is success.",
         "operationId": "ci_wait_v1_ci_wait_get",
         "parameters": [
           {
@@ -3193,6 +3240,26 @@
               "minimum": 0,
               "title": "Timeout",
               "type": "integer"
+            }
+          },
+          {
+            "description": "The branch the commit targets, whose required checks it must pass; default the repo's.",
+            "in": "query",
+            "name": "branch",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 255,
+                  "pattern": "^[^\\s~^:?*\\[\\\\]+$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The branch the commit targets, whose required checks it must pass; default the repo's.",
+              "title": "Branch"
             }
           }
         ],

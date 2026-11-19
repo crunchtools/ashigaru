@@ -9,6 +9,11 @@ check appears once it finishes.
 Intake comes from `issues` (an outcome) and `pull_request` (a story), keyed
 `owner/name#number`; GitHub numbers issues and PRs from one sequence. A label
 `lane:<lane>` is the lane hint.
+
+`required_checks` names the status checks a branch requires (rulesets, org ones included, and classic
+protection), each with the App it must come from, and `reported` what each name and App has said on a
+commit; `GitHub.required` joins them by exact name and App, a required check nobody has reported being
+pending. Errors propagate: the caller turns them into "could not read".
 """
 
 import hashlib
@@ -16,7 +21,9 @@ import hmac
 import json
 import logging
 import re
+import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from collections.abc import Mapping
 from typing import Any
@@ -36,6 +43,9 @@ REPO = re.compile(r"^[a-z0-9_.-]+/[a-z0-9_.-]+$")
 ACTIONS_APP = "github-actions"
 LANE_LABEL = "lane:"
 NOT_A_COLLABORATOR = 404
+RULES_TTL = 60.0
+"""Seconds a branch's required checks are remembered."""
+PAGE = 100
 LOG = logging.getLogger(__name__)
 
 CONCLUSIONS = {
@@ -54,6 +64,160 @@ CONCLUSIONS = {
 
 def _verdict(status: Any, conclusion: Any) -> Verdict:
     return CONCLUSIONS.get(str(conclusion), Verdict.FAILURE) if status == "completed" else Verdict.PENDING
+
+
+def _headers(token: str) -> dict[str, str]:
+    return {
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+        "User-Agent": "ashigaru-desk",
+    }
+
+
+def _get(url: str, token: str) -> Any:
+    """An authenticated GET, parsed as JSON. HTTPError, OSError and ValueError propagate."""
+    request = urllib.request.Request(url, headers=_headers(token))
+    with urllib.request.urlopen(request, timeout=5) as response:
+        return json.load(response)
+
+
+def _items(found: Any, key: str | None = None) -> list[Mapping[str, Any]]:
+    """The mappings in a list (or in `found[key]`); anything else is skipped."""
+    if key is not None:
+        found = found.get(key) if isinstance(found, Mapping) else None
+    return [item for item in found if isinstance(item, Mapping)] if isinstance(found, list) else []
+
+
+Requirement = tuple[str, int | None]
+"""A required check: its exact name, and the App that must report it (None: any App or a commit status)."""
+
+
+def _app(value: Any) -> int | None:
+    """A required App id; absent, null or -1 (GitHub's "any source") is any."""
+    return value if isinstance(value, int) and not isinstance(value, bool) and value > 0 else None
+
+
+def _contexts(found: Any, app: str) -> list[Requirement]:
+    """Each `{context, <app>}` entry as a Requirement: ruleset entries name the App `integration_id`,
+    classic protection's `app_id`."""
+    return [(c, _app(item.get(app))) for item in _items(found) if isinstance(c := item.get("context"), str)]
+
+
+_rules: dict[tuple[str, str | None], tuple[float, tuple[str, tuple[Requirement, ...]]]] = {}
+_clock = time.monotonic
+
+
+def _valid(repo: str, token: str) -> str:
+    repo = repo.lower()
+    if not (token and REPO.match(repo)):
+        raise ValueError("a repo as owner/name and a token are needed")
+    return repo
+
+
+def _default_branch(base: str, token: str) -> str:
+    found = _get(base, token)
+    name = found.get("default_branch") if isinstance(found, Mapping) else None
+    if not isinstance(name, str) or not name:
+        raise ValueError("no default_branch")
+    return name
+
+
+def _ruleset_checks(base: str, quoted: str, token: str) -> set[Requirement]:
+    """Every `required_status_checks` rule on the branch, repo and org rulesets alike, all pages."""
+    names: set[Requirement] = set()
+    page = 1
+    while True:
+        rules = _items(_get(f"{base}/rules/branches/{quoted}?per_page={PAGE}&page={page}", token))
+        for rule in rules:
+            parameters = rule.get("parameters")
+            if rule.get("type") == "required_status_checks" and isinstance(parameters, Mapping):
+                names.update(_contexts(parameters.get("required_status_checks"), "integration_id"))
+        if len(rules) < PAGE:
+            return names
+        page += 1
+
+
+def _classic_checks(base: str, quoted: str, token: str) -> set[Requirement]:
+    """The branch's classic protection: its `checks`, and the legacy `contexts` GitHub mirrors them
+    into, kept only for a name `checks` does not carry; none when it is unprotected."""
+    classic = payload_get(_get(f"{base}/branches/{quoted}", token), "protection", "required_status_checks")
+    checks = set(_contexts(payload_get(classic, "checks"), "app_id"))
+    legacy = payload_get(classic, "contexts")
+    named = {check for check, _ in checks}
+    return checks | {
+        (c, None)
+        for c in (legacy if isinstance(legacy, list) else ())
+        if isinstance(c, str) and c not in named
+    }
+
+
+def required_checks(repo: str, branch: str | None, token: str) -> tuple[str, tuple[Requirement, ...]]:
+    """The branch (the default one when None) and the sorted checks it requires, by ruleset (org
+    rulesets included) or classic protection, each with the App it must come from; remembered for
+    RULES_TTL seconds."""
+    repo = _valid(repo, token)
+    now = _clock()
+    hit = _rules.get((repo, branch))
+    if hit and now - hit[0] < RULES_TTL:
+        return hit[1]
+    base = f"{API}/repos/{repo}"
+    name = _default_branch(base, token) if branch is None else branch
+    quoted = urllib.parse.quote(name, safe="")
+    names = _ruleset_checks(base, quoted, token) | _classic_checks(base, quoted, token)
+    result = (name, tuple(sorted(names, key=lambda need: (need[0], need[1] or 0))))
+    _rules[(repo, branch)] = (now, result)
+    return result
+
+
+STATUSES = {"success": Verdict.SUCCESS, "pending": Verdict.PENDING}
+"""A commit status's state; failure and error (and anything new) count as a failure."""
+PASSING = (Verdict.SUCCESS, Verdict.SKIPPED, Verdict.NEUTRAL)
+
+
+def _combine(verdicts: list[Verdict]) -> Verdict:
+    """One name, several entries: any pending is pending, else any failure or cancel fails, else the
+    first pass (success preferred)."""
+    if Verdict.PENDING in verdicts:
+        return Verdict.PENDING
+    if Verdict.FAILURE in verdicts or Verdict.CANCELLED in verdicts:
+        return Verdict.FAILURE
+    if Verdict.SUCCESS in verdicts:
+        return Verdict.SUCCESS
+    return next((v for v in verdicts if v in PASSING), Verdict.FAILURE)
+
+
+def _pages(url: str, key: str, token: str) -> list[Mapping[str, Any]]:
+    """Every entry under `key` across the pages of `url` (which takes `&page=`), up to `total_count`."""
+    entries: list[Mapping[str, Any]] = []
+    page = 1
+    while True:
+        found = _get(f"{url}&page={page}", token)
+        batch = _items(found, key)
+        entries += batch
+        total = found.get("total_count") if isinstance(found, Mapping) else None
+        if len(batch) < PAGE or (isinstance(total, int) and len(entries) >= total):
+            return entries
+        page += 1
+
+
+def reported(repo: str, sha: str, token: str) -> dict[Requirement, Verdict]:
+    """What each check has reported on the commit, by name and the App that ran it: check runs
+    (latest) and commit statuses (App None). Never cached."""
+    repo = _valid(repo, token)
+    base = f"{API}/repos/{repo}/commits/{urllib.parse.quote(sha, safe='')}"
+    seen: dict[Requirement, list[Verdict]] = {}
+    for run in _pages(f"{base}/check-runs?per_page={PAGE}&filter=latest", "check_runs", token):
+        if isinstance(name := run.get("name"), str):
+            app = _app(payload_get(run, "app", "id"))
+            seen.setdefault((name, app), []).append(_verdict(run.get("status"), run.get("conclusion")))
+    # The combined status: GitHub already keeps only the latest status of each context.
+    for status in _pages(f"{base}/status?per_page={PAGE}", "statuses", token):
+        if isinstance(context := status.get("context"), str):
+            seen.setdefault((context, None), []).append(
+                STATUSES.get(str(status.get("state")), Verdict.FAILURE)
+            )
+    return {name: _combine(verdicts) for name, verdicts in seen.items()}
 
 
 def _ordinal(value: Any, what: str) -> str:
@@ -204,12 +368,7 @@ class GitHub:
             return False
         request = urllib.request.Request(
             f"{API}/repos/{repo}/collaborators/{account}/permission",
-            headers={
-                "Authorization": f"Bearer {token}",
-                "Accept": "application/vnd.github+json",
-                "X-GitHub-Api-Version": "2022-11-28",
-                "User-Agent": "ashigaru-desk",
-            },
+            headers=_headers(token),
         )
         try:
             with urllib.request.urlopen(request, timeout=5) as response:
@@ -223,6 +382,20 @@ class GitHub:
             LOG.warning("permission check for %s on %s failed: %s", account, repo, type(error).__name__)
             return False
         return isinstance(found, Mapping) and found.get("permission") in WRITERS
+
+    def required(self, repo: str, sha: str, branch: str | None, token: str) -> tuple[str, dict[str, Verdict]]:
+        """The branch and each required check's verdict on `sha`; one nobody has reported is pending.
+        Names match exactly, and a check required from an App counts only that App's check runs, as
+        GitHub's merge gate does: a same-named status or another App's run does not satisfy it."""
+        name, wanted = required_checks(repo, branch, token)
+        by_name: dict[str, list[tuple[int | None, Verdict]]] = {}
+        for (check, app), verdict in (reported(repo, sha, token) if wanted else {}).items():
+            by_name.setdefault(check, []).append((app, verdict))
+        verdicts: dict[str, list[Verdict]] = {}
+        for check, app in wanted:
+            matched = [v for a, v in by_name.get(check, []) if app is None or a == app]
+            verdicts.setdefault(check, []).append(_combine(matched) if matched else Verdict.PENDING)
+        return name, {check: _combine(found) for check, found in verdicts.items()}
 
 
 FORGE = GitHub()

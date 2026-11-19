@@ -45,7 +45,7 @@ Every view and action prints a table, or the Desk's JSON with `--json`.
 | `assign <item> [--seat S \| --lane L]` | assign; with no seat, the Desk picks the lane's seat free longest. `--task` (with `--subject-key`, `--done-when`, `--ref`, `--repo`, `--after`, `--mode`) records a new item first; if that `subject_key` is taken, or the assign is refused, it prints the item and exits 1, so the id is never lost. Sending the brief stays with Josui |
 | `auto <item>`, `manual <item>` | hand an item to Josui or to Scott |
 | `wait <item> [--timeout S]` | block until the item reaches review or closes; exit 1 unless review or done |
-| `wait <repo> <sha> [--timeout S]` | block until the commit's CI is no longer pending; print its status and checks; exit 1 unless `success` |
+| `wait <repo> <sha> [--branch B] [--timeout S]` | block until the commit's CI is no longer pending, which includes every check branch `B` (default the repo's) requires having a conclusion; print its status, what is still pending, and its checks; exit 1 unless `success` |
 | `wrap <item> [--stage wrapping\|cleared] [--learned T] [--state done\|wontdo\|abandoned] [--force]` | admin. `--stage wrapping` records that `/cc seat` was sent. `cleared` (the default) refuses until CC-DONE (or a `--learned` other than `none`) and an idle turn (a seat that never reported counts as not idle), unless `--force`, then clears the wrap and closes the item, which frees the seat |
 | `claim <item>` | a seat takes a queued, unowned `auto` item in its lane whose `after` items are all done |
 | `file <item> --task T [--done-when D] [--note N]` | a seat files one proposed child of its story, under the story's outcome; one per assignment |
@@ -58,8 +58,11 @@ config error.
 
 `wait <item>` polls the item every 30 to 60 seconds and rides out a blip.
 `wait <repo> <sha>` long-polls `GET /v1/ci/wait`, which the Desk answers as
-soon as a webhook delivery settles the commit, or with `pending` after 90
-seconds, when the CLI asks again; a blip is retried after 5 seconds. A Desk
+soon as a webhook delivery settles the commit and every required check of the
+target branch has a conclusion, or with `pending` after 90 seconds, when the
+CLI asks again; a blip is retried after 5 seconds. At `--timeout` it prints
+`pending: <names>` (a required check that never started is named too) and
+exits 1. A Desk
 that does not serve the route yet answers 404, and `wait` says so.
 
 `subject_key` is normalised wherever it is written or looked up: an issue or PR

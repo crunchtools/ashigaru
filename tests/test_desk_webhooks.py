@@ -25,7 +25,7 @@ from typing import Any
 
 import httpx
 import pytest
-from conftest import Keys
+from conftest import Keys, RequiredChecks
 from fastapi.testclient import TestClient
 
 import common
@@ -206,6 +206,10 @@ def test_a_completed_workflow_run_is_the_commits_result(hooked: TestClient, keys
         "status": "pending",
         "checks": [],
         "failing": [],
+        "pending": [],
+        "branch": "main",
+        "required": [],
+        "unverified": None,
     }
     assert deliver(hooked, "workflow_run", payload("workflow_run")).json() == {
         "duplicate": False,
@@ -441,6 +445,129 @@ def test_wait_times_out_with_the_result_as_it_stands(hooked: TestClient, keys: K
     deliver(hooked, "workflow_run", payload("workflow_run", status="in_progress", conclusion=None))
     found = result(hooked, keys, timeout=1)
     assert found["status"] == "pending" and found["checks"][0]["verdict"] == "pending"
+
+
+# Required checks
+
+
+def test_a_required_check_that_never_started_is_not_success(
+    hooked: TestClient, keys: Keys, required_checks: RequiredChecks
+) -> None:
+    """memory#45: only another App's suite reported; the ruleset's "sdlc ci" never ran."""
+    required_checks.rules["main"] = ("sdlc ci",)
+    deliver(hooked, "check_suite", payload("check_suite", conclusion="success"))
+    found = result(hooked, keys)
+    assert found["status"] == "pending" and found["checks"][0]["verdict"] == "success"
+    assert found["pending"] == ["sdlc ci"] and found["required"] == ["sdlc ci"] and found["branch"] == "main"
+    required_checks.reported["sdlc ci"] = Verdict.SUCCESS
+    found = result(hooked, keys)
+    assert found["status"] == "success" and found["pending"] == []
+
+
+@pytest.mark.parametrize("sdlc", [Verdict.SUCCESS, Verdict.FAILURE])
+def test_a_wait_held_for_a_required_check_ends_on_the_delivery_that_reports_it(
+    db: Path,
+    keys: Keys,
+    monkeypatch: pytest.MonkeyPatch,
+    required_checks: RequiredChecks,
+    sdlc: Verdict,
+) -> None:
+    """Gatehouse passes first and wakes the waiter, which holds for "sdlc ci"; the CI workflow's
+    delivery wakes it again, and only then does it return."""
+    monkeypatch.setattr(ci, "RECHECK", 60.0)
+    required_checks.rules["main"] = ("sdlc ci",)
+    app = create_app(db, webhook_secrets={"github": [SECRET]})
+
+    async def scenario() -> dict[str, Any]:
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://desk") as client:
+            params: dict[str, str | int] = {"repo": REPO, "sha": SHA, "timeout": 60}
+            waiting = asyncio.create_task(client.get("/v1/ci/wait", headers=keys["ci"], params=params))
+            await asyncio.sleep(0.2)
+            await deliver(client, "check_suite", payload("check_suite", conclusion="success"), "d-1")
+            await asyncio.sleep(0.3)
+            assert not waiting.done()
+            required_checks.reported["sdlc ci"] = sdlc
+            await deliver(client, "workflow_run", payload("workflow_run"), "d-2")
+            response = await asyncio.wait_for(waiting, PROMPTLY)
+            found: dict[str, Any] = response.json()
+            return found
+
+    found = asyncio.run(scenario())
+    assert found["status"] == sdlc.value and found["required"] == ["sdlc ci"]
+    assert required_checks.asked == [(REPO, SHA, None), (REPO, SHA, None)]
+
+
+def test_a_required_check_that_failed_fails_the_commit(
+    hooked: TestClient, keys: Keys, required_checks: RequiredChecks
+) -> None:
+    required_checks.rules["main"] = ("sdlc ci", "lint")
+    required_checks.reported.update({"sdlc ci": Verdict.FAILURE, "lint": Verdict.SKIPPED})
+    deliver(hooked, "workflow_run", payload("workflow_run"))
+    found = result(hooked, keys)
+    assert found["status"] == "failure" and found["failing"] == ["sdlc ci"]
+
+
+def test_a_failed_required_check_fails_a_commit_still_pending_at_the_end(
+    hooked: TestClient, keys: Keys, required_checks: RequiredChecks
+) -> None:
+    required_checks.rules["main"] = ("sdlc ci",)
+    required_checks.reported["sdlc ci"] = Verdict.FAILURE
+    deliver(hooked, "workflow_run", payload("workflow_run", status="in_progress", conclusion=None))
+    found = result(hooked, keys)
+    assert found["status"] == "failure" and found["failing"] == ["sdlc ci"]
+
+
+def test_the_branch_named_is_the_one_whose_checks_count(
+    hooked: TestClient, keys: Keys, required_checks: RequiredChecks
+) -> None:
+    required_checks.rules["release"] = ("sdlc ci",)
+    deliver(hooked, "workflow_run", payload("workflow_run"))
+    assert result(hooked, keys)["status"] == "success"
+    found = result(hooked, keys, branch="release")
+    assert found["status"] == "pending" and found["branch"] == "release"
+    assert required_checks.asked[-1] == (REPO, SHA, "release")
+    bad = hooked.get("/v1/ci/wait", headers=keys["ci"], params={"repo": REPO, "sha": SHA, "branch": "a b"})
+    assert bad.status_code == UNPROCESSABLE_ENTITY
+
+
+def test_required_checks_that_cannot_be_read_never_make_success(
+    hooked: TestClient, keys: Keys, required_checks: RequiredChecks
+) -> None:
+    required_checks.rules["main"] = None
+    deliver(hooked, "workflow_run", payload("workflow_run"))
+    found = result(hooked, keys)
+    assert found["status"] == "pending" and "could not be read" in found["unverified"]
+    assert found["required"] is None
+    required_checks.refusal = urllib.error.HTTPError("u", 403, "Forbidden", Message(), io.BytesIO())
+    assert result(hooked, keys)["unverified"] == "the required checks could not be read (HTTP 403)"
+
+
+def test_a_pending_commit_asks_the_forge_only_at_the_end(
+    hooked: TestClient, keys: Keys, required_checks: RequiredChecks
+) -> None:
+    required_checks.rules["main"] = ("sdlc ci",)
+    deliver(hooked, "workflow_run", payload("workflow_run", status="in_progress", conclusion=None))
+    found = result(hooked, keys, timeout=1)
+    assert found["status"] == "pending" and found["pending"] == ["CI (push)", "sdlc ci"]
+    assert len(required_checks.asked) == 1
+
+
+def test_the_desk_reads_required_checks_with_its_forge_token(
+    db: Path, keys: Keys, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    seen: list[str] = []
+
+    def required(repo: str, sha: str, branch: str | None, token: str) -> tuple[str, dict[str, Verdict]]:
+        seen.append(token)
+        return "main", {}
+
+    monkeypatch.setattr(github.FORGE, "required", required)
+    with TestClient(
+        create_app(db, webhook_secrets={"github": [SECRET]}, forge_tokens={"github": "tok"})
+    ) as app:
+        deliver(app, "workflow_run", payload("workflow_run"))
+        assert result(app, keys)["status"] == "success" and seen == ["tok"]
 
 
 # Intake

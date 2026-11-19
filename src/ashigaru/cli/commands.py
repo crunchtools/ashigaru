@@ -211,16 +211,21 @@ def manual(desk: Desk, item: str) -> dict[str, Any]:
     return result
 
 
-def wait(desk: Desk, target: Sequence[str], timeout: float | None = None) -> dict[str, Any]:
+def wait(
+    desk: Desk, target: Sequence[str], timeout: float | None = None, branch: str | None = None
+) -> dict[str, Any]:
     """`[item]`: block until the item settles (review, done, blocked, wontdo, abandoned); returns it.
-    `[repo, sha]`: block until the commit's CI is no longer pending; returns its CI result. The MCP
-    tool for a commit is desk_wait."""
+    `[repo, sha]`: block until the commit's CI is no longer pending, which includes every check
+    `branch` (default the repo's) requires having a conclusion; returns its CI result. The MCP tool
+    for a commit is desk_wait."""
     item_or_repo, *sha = target
-    if not sha:
-        return waiter_for(desk).wait(item_or_repo, timeout)
     if len(sha) > 1:
         raise CommandError("wait takes an item, or a repo and a sha")
-    return CIWaiter(desk).wait(item_or_repo, sha[0], timeout)
+    if not sha:
+        if branch is not None:
+            raise CommandError("--branch is for a commit: wait <repo> <sha> --branch <branch>")
+        return waiter_for(desk).wait(item_or_repo, timeout)
+    return CIWaiter(desk).wait(item_or_repo, sha[0], timeout, branch)
 
 
 def wrap(desk: Desk, item: str, **options: str | bool | None) -> dict[str, Any]:

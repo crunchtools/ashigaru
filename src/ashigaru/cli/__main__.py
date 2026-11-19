@@ -135,6 +135,17 @@ def _seat_commands(
     file.add_argument("--note")
 
 
+def _wait_parser(
+    sub: "argparse._SubParsersAction[argparse.ArgumentParser]", common: argparse.ArgumentParser
+) -> None:
+    wait = sub.add_parser(
+        "wait", parents=[common], help="block until an item reaches review or closes, or a commit's CI ends"
+    )
+    wait.add_argument("target", nargs="+", metavar="item | repo sha")
+    wait.add_argument("--timeout", type=float, help="give up after this many seconds")
+    wait.add_argument("--branch", help="the branch a commit targets, whose required checks it must pass")
+
+
 def parser() -> argparse.ArgumentParser:
     common = argparse.ArgumentParser(add_help=False)
     common.add_argument("--json", action="store_true", help="print the Desk's JSON instead of a table")
@@ -180,11 +191,7 @@ def parser() -> argparse.ArgumentParser:
     for name, text in (("auto", "hand an item to Josui"), ("manual", "hand an item to Scott")):
         sub.add_parser(name, parents=[common], help=text).add_argument("item")
 
-    wait = sub.add_parser(
-        "wait", parents=[common], help="block until an item reaches review or closes, or a commit's CI ends"
-    )
-    wait.add_argument("target", nargs="+", metavar="item | repo sha")
-    wait.add_argument("--timeout", type=float, help="give up after this many seconds")
+    _wait_parser(sub, common)
 
     wrap = sub.add_parser(
         "wrap", parents=[common], help="mark wrapping, or confirm idle and CC-DONE, clear, close the item"

@@ -54,7 +54,7 @@ can return.
 | `POST /items/{id}/wrap` | admin, `wrap` in the CLI and MCP: `{stage: wrapping}` records that `/cc seat` was sent. `{stage: cleared}` (the default) is 409 until the item is memorized (CC-DONE) or `learned` is sent, and while its seat's turn is active or its seat never reported, unless `force`; then it clears the wrap and closes an open item in `state` (`done`, `wontdo`, `abandoned`), which frees the seat |
 | `POST /items/{id}/claim` | `desk_claim`, seats only: take a `queued`, seatless, `auto` item in the seat's lane whose `after` items are done. Atomic; the loser of a race gets 409. The seat must be free, unheld and have a lane: a seat with no lane claims nothing, and an item with no lane is claimed by no seat (Josui sets its lane or assigns it) |
 | `GET /items/{id}/events` | the item's history, ledger lines included, oldest first; pages of `limit` (200, at most 1000) after `after` (a seq) |
-| `GET /ci/wait` | `desk_wait`: `repo` (owner/name) and full `sha`; the commit's CI result as soon as it is not `pending`, else as it stands after `timeout` seconds (default and most 90; 0 reads now). A client waits again on `pending` |
+| `GET /ci/wait` | `desk_wait`: `repo` (owner/name), full `sha` and optional `branch` (default the repo's); the commit's CI result as soon as it is not `pending`, which needs every check that branch requires to have a conclusion (see CI below), else as it stands after `timeout` seconds (default and most 90; 0 reads now). A client waits again on `pending` |
 | `GET /work` | `ashigaru work`, the whole check round: `items`, the check table (id, seat, mode, task, state, wrap, result or blocker, next) of open items, blocked first, then newest, with `?all=true` adding done, wontdo, abandoned and cleared ones, at most 1000 (`truncated`); `seats` as `GET /seats`; `summary` (`up`: seats not missing, `seats`, `open` items); `queue` as `GET /queue`; and `catch_up`, the issues and PRs intake recorded from the org webhook after a cursor: `new`, first seen, with title, `filed_by` (the author), lane, mode and `held`, and `reopened`, the delivery that took the source from closed to open while the item is closed, each item once. The cursor is an event seq (`after`): the `sweep` mark, or with `?since=` (or a mark that is a time) the event before the first stamped then; with neither, a day back; 422 for a time that is not one. `until` is the last event covered: the last committed when the round began, or the 1000th read when `truncated`. Events are numbered in commit order, so nothing is lost or repeated between rounds. It leaves the mark alone, though like `GET /queue` it abandons proposed children past their expiry |
 | `POST /work` | admin: the same round, then the `sweep` mark becomes its `until` (`advanced` is true), so the next round reads on from there. Only forward: when it is already there, or a concurrent round moved it further, it stays and `advanced` is false. `?since=` is 422 here, since a round read from a time could move the mark past events it never read |
 | `GET /check` | `items` of `GET /work` alone, for clients older than 3.5 |
@@ -134,7 +134,8 @@ forge. GitHub's: `X-Hub-Signature-256`, `X-GitHub-Event`, content type JSON;
 subscribe the org webhook to Workflow runs, Check suites, Issues and Pull
 requests. Its permission checks call the collaborator permission API with
 `ASHIGARU_FORGE_TOKEN_GITHUB`, which needs read access to the repos'
-collaborators and nothing more. GitHub never calls an app's bot a writer, so
+collaborators, metadata (rulesets, branches), checks and commit statuses, and
+nothing more. GitHub never calls an app's bot a writer, so
 the accounts in `ASHIGARU_FORGE_AUTHORS_GITHUB` (the image sets
 `ashigaru-crunchtools[bot]`) are trusted as authors of their own issues and
 PRs, so listing an account makes its own subjects auto-claimable: a `lane:*`
@@ -156,6 +157,22 @@ checks are kept 30 days after their last delivery. GitHub: each workflow on each
 `check_suite` completed is a check named for the App (an org webhook gets no
 `requested` for those, so they appear once they finish); the Actions App's
 suites are left to `workflow_run`.
+
+**Required checks.** A branch requires jobs (`sdlc ci`) where the Desk's
+checks are workflows, and a workflow the forge never started sends no delivery
+at all. So before a commit is `success` the Desk asks the forge which checks
+the target branch requires and what each has reported on the commit: one with
+no conclusion yet (never started counts) keeps it `pending` and is named in
+`pending`; one that failed makes it `failure`. When the commit is still
+`pending` at the end of a wait, the required ones are named too. The result
+carries `branch` and `required`; when the forge cannot say (no token, an
+error), `unverified` says why and the status is never `success`. GitHub: the
+union of `GET /repos/{repo}/rules/branches/{branch}` (repo and org rulesets)
+and the branch's classic protection, held 60 seconds; each matched against the
+commit's check runs and commit statuses, read fresh, by exact name (`CI / sdlc
+ci` is not `sdlc ci`). A check required from an App (the ruleset's
+`integration_id`, protection's `app_id`) counts only that App's check runs, as
+GitHub's merge gate does; without one, any run or status of that name counts.
 
 **Intake.** An issue or PR becomes an item keyed `owner/repo#N`, lower case as
 GitHub's names are case-insensitive (`crunchtools/ashigaru#190`): an issue a
@@ -230,7 +247,7 @@ Settings are flags on `ashigaru-desk serve`, else these environment variables:
 | `ASHIGARU_TRUSTED_PROXIES` | comma-separated addresses or CIDRs of the reverse proxies in front | none |
 | `ASHIGARU_WEBHOOK_SECRET_GITHUB` | GitHub's webhook secret; each forge has its own `ASHIGARU_WEBHOOK_SECRET_<FORGE>` | none: its deliveries are refused |
 | `ASHIGARU_WEBHOOK_SECRET_GITHUB_FILE` | a file of GitHub's secrets, one per line, all accepted while one rotates | none |
-| `ASHIGARU_FORGE_TOKEN_GITHUB` | a GitHub token that can read collaborator permissions; each forge has its own `ASHIGARU_FORGE_TOKEN_<FORGE>` | none: all intake is held for Josui |
+| `ASHIGARU_FORGE_TOKEN_GITHUB` | a GitHub token that can read collaborator permissions, rulesets, branches, checks and commit statuses; each forge has its own `ASHIGARU_FORGE_TOKEN_<FORGE>` | none: all intake is held for Josui, and no commit's CI is `success` |
 | `ASHIGARU_FORGE_TOKEN_GITHUB_FILE` | a file holding that token | none |
 | `ASHIGARU_FORGE_AUTHORS_GITHUB` | comma-separated accounts, such as the app's bot, whose own issues and PRs are trusted as a writer's, so a lane label on one makes it auto-claimable; each forge has its own `ASHIGARU_FORGE_AUTHORS_<FORGE>` | none; the image sets `ashigaru-crunchtools[bot]` |
 | `ASHIGARU_WEBHOOK_SECRET` | GitHub's secret under the bare name the first deploy used; added to `_GITHUB` | none |

@@ -312,19 +312,23 @@ async def desk_wait(
     repo: Annotated[str | None, Field(description="owner/name, e.g. crunchtools/ashigaru.")] = None,
     sha: Annotated[str | None, Field(description="The full commit id.")] = None,
     timeout: Annotated[int, Field(description="Seconds to wait, at most 90; 0 reads now.")] = MAX_WAIT,
+    branch: Annotated[
+        str | None, Field(description="The branch the commit targets; its required checks must pass.")
+    ] = None,
 ) -> Item | CIResult:
     """`ashigaru wait`: with `item_id`, the item as soon as it is review, done, blocked, wontdo or
-    abandoned; with `repo` and `sha`, the commit's CI result as soon as a webhook delivery settles it.
-    Either way, as it stands after `timeout` (still working or `pending`: call again)."""
+    abandoned; with `repo` and `sha`, the commit's CI result as soon as a webhook delivery settles it
+    and every check `branch` (default the repo's) requires has a conclusion. Either way, as it stands
+    after `timeout` (still working or `pending`: call again)."""
     commit = repo is not None and sha is not None
     if (repo is None) != (sha is None) or (item_id is not None) == commit:
         raise ToolError("422: name an item_id, or a repo and a sha")
     with desk() as (conn, who):
         if item_id is not None:
             return await wait_item(conn, item_id, min(max(timeout, 0), MAX_WAIT))
-        query = CIWait(repo=repo or "", sha=sha or "", timeout=timeout)
+        query = CIWait(repo=repo or "", sha=sha or "", timeout=timeout, branch=branch)
         waiters = get_http_request().scope["state"][WAITERS]
-        return await waiters.wait(conn, query.repo, query.sha, query.timeout)
+        return await waiters.wait(conn, query.repo, query.sha, query.timeout, query.branch)
 
 
 async def wait_item(conn: sqlite3.Connection, item_id: str, timeout: int) -> Item:

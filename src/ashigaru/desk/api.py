@@ -487,7 +487,8 @@ def create_app(
     The client address and scheme come from X-Forwarded-For and X-Forwarded-Proto only when the
     request arrives from one of `trusted_proxies` (addresses or CIDRs); with none, never.
     `webhook_secrets` maps a forge adapter's name to its secrets; with none, every delivery is refused.
-    `forge_tokens` maps it to an API token for permission checks; with none, all intake is held.
+    `forge_tokens` maps it to an API token for permission checks and required checks; with none, all
+    intake is held and no commit's CI is success.
     `forge_authors` maps it to accounts whose own subjects are trusted as a writer's: the app's bot.
     """
     from . import (
@@ -495,6 +496,7 @@ def create_app(
         mcp,  # imported here: its tools call this module's routes
         webhooks,
     )
+    from .forges import DEFAULT, FORGES
     from .mcp import routes as mcp_routes
 
     conn = store.connect(db_path)
@@ -511,7 +513,7 @@ def create_app(
     app.state.webhook_secrets = webhooks.secrets(webhook_secrets or {})
     app.state.forge_tokens = dict(forge_tokens or {})
     app.state.forge_authors = {forge: frozenset(names) for forge, names in (forge_authors or {}).items()}
-    app.state.waiters = ci.Waiters()
+    app.state.waiters = ci.Waiters(ci.from_forge(FORGES[DEFAULT], app.state.forge_tokens.get(DEFAULT, "")))
     app.include_router(router)
     app.include_router(webhooks.router)
     app.include_router(mcp_routes.router)

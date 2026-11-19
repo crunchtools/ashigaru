@@ -9,9 +9,38 @@ from fastapi.testclient import TestClient
 
 from ashigaru.desk import auth, store
 from ashigaru.desk.api import create_app
+from ashigaru.desk.forges import github
+from ashigaru.desk.model import Verdict
 
 LEDGER = Path(__file__).parent / "fixtures" / "agents-ledger.jsonl"
 """Every line of a real ledger with its keys, ids, states and times; the free text is placeholder."""
+
+
+class RequiredChecks:
+    """The forge's required-check lookup in GitHub's place: what each branch requires, and what each
+    check has reported; a check with no report is pending. `None` for a branch makes it unreadable."""
+
+    def __init__(self) -> None:
+        self.rules: dict[str, tuple[str, ...] | None] = {}
+        self.reported: dict[str, Verdict] = {}
+        self.asked: list[tuple[str, str, str | None]] = []
+        self.refusal: OSError = OSError("unreadable")
+
+    def __call__(self, repo: str, sha: str, branch: str | None, token: str) -> tuple[str, dict[str, Verdict]]:
+        self.asked.append((repo, sha, branch))
+        branch = branch or "main"
+        names = self.rules.get(branch, ())
+        if names is None:
+            raise self.refusal
+        return branch, {name: self.reported.get(name, Verdict.PENDING) for name in names}
+
+
+@pytest.fixture(autouse=True)
+def required_checks(monkeypatch: pytest.MonkeyPatch) -> RequiredChecks:
+    """No test reaches GitHub for required checks; by default a branch requires none."""
+    fake = RequiredChecks()
+    monkeypatch.setattr(github.FORGE, "required", fake)
+    return fake
 
 
 @pytest.fixture

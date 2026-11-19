@@ -693,9 +693,36 @@ def test_wait_on_a_commit_gives_up_at_its_timeout(desk: FakeDesk) -> None:
 
     desk.on("GET", "/v1/ci/wait", held)
     waiter = CIWaiter(Desk(config.load()), sleep=clock.sleep, clock=lambda: clock.now)
-    with pytest.raises(TimeoutError, match="still pending"):
+    with pytest.raises(TimeoutError, match="pending: no check has reported"):
         waiter.wait("crunchtools/ashigaru", SHA, 30)
     assert [seen.query["timeout"] for seen in desk.calls("GET", "/v1/ci/wait")] == [["30"]]
+
+
+def test_wait_on_a_commit_names_the_required_checks_still_pending_at_its_timeout(
+    desk: FakeDesk, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """memory#45: Gatehouse passed, but the branch's required "sdlc ci" never started."""
+    gatehouse = {"name": "Gatehouse", "verdict": "success", "url": None, "updated_at": "2026-11-18T00:00:00Z"}
+    held = ci("pending", checks=[gatehouse], pending=["sdlc ci"], branch="main", required=["sdlc ci"])
+    desk.on("GET", "/v1/ci/wait", (200, held))
+    assert main(["wait", "crunchtools/memory", SHA, "--branch", "main", "--timeout", "0"]) == 1
+    captured = capsys.readouterr()
+    assert "success" not in captured.out + captured.err
+    assert captured.err.strip().endswith("pending: sdlc ci")
+    assert desk.calls("GET", "/v1/ci/wait")[0].query["branch"] == ["main"]
+
+
+def test_wait_shows_what_a_commit_still_waits_on(desk: FakeDesk, capsys: pytest.CaptureFixture[str]) -> None:
+    unread = "the required checks could not be read (HTTPError)"
+    desk.on("GET", "/v1/ci/wait", (200, ci("failure", pending=["Container"], unverified=unread)))
+    assert main(["wait", "crunchtools/ashigaru", SHA]) == 1
+    out = capsys.readouterr().out.splitlines()
+    assert out[1:3] == ["pending: Container", unread]
+
+
+def test_wait_takes_a_branch_only_for_a_commit(desk: FakeDesk, capsys: pytest.CaptureFixture[str]) -> None:
+    assert main(["wait", "a1", "--branch", "main"]) == 1
+    assert "--branch is for a commit" in capsys.readouterr().err and not desk.seen
 
 
 @pytest.mark.parametrize(("status", "code"), [("success", 0), ("failure", 1)])

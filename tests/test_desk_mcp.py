@@ -13,13 +13,14 @@ from typing import Any
 import httpx
 import pytest
 import uvicorn
-from conftest import Keys
+from conftest import Keys, RequiredChecks
 from fastapi.testclient import TestClient
 
 from ashigaru.desk import mcp as mcp_package
 from ashigaru.desk import store
 from ashigaru.desk.api import create_app
 from ashigaru.desk.mcp import codes
+from ashigaru.desk.model import Verdict
 
 JOSUI = "Josui Prime"
 SEAT = "Exedore 1 - Max"
@@ -387,6 +388,37 @@ def test_desk_assign_with_a_task_creates_then_assigns(
     assert (item["task"], item["done_when"], item["subject_key"]) == ("do it", "merged", "RT#9")
     assert item["seat"] == SEAT and store.get_item(conn, item["id"]) is not None
     assert mcp_status(call(client, urls[JOSUI], "desk_assign", {"seat": SEAT})) == UNPROCESSABLE_ENTITY
+
+
+def test_desk_wait_holds_a_commit_to_the_branch_it_names(
+    client: TestClient,
+    keys: Keys,
+    urls: dict[str, str],
+    conn: sqlite3.Connection,
+    required_checks: RequiredChecks,
+) -> None:
+    sha = "b" * 40
+    check = {"repo": "crunchtools/ashigaru", "sha": sha, "key": "workflow:1:push", "name": "CI (push)"}
+    with store.transaction(conn):
+        store.write_check(
+            conn,
+            {**check, "verdict": "success", "run": "1", "url": None, "source": "github", "updated_at": "t"},
+        )
+    required_checks.rules["release"] = ("sdlc ci",)
+    query: dict[str, str | int] = {"repo": "crunchtools/ashigaru", "sha": sha, "timeout": 0}
+    assert call(client, urls[SEAT], "desk_wait", query)["structuredContent"]["result"]["status"] == "success"
+    held = call(client, urls[SEAT], "desk_wait", {**query, "branch": "release"})["structuredContent"][
+        "result"
+    ]
+    assert held["status"] == "pending" and held["pending"] == ["sdlc ci"] and held["branch"] == "release"
+    required_checks.reported["sdlc ci"] = Verdict.FAILURE
+    failed = call(client, urls[SEAT], "desk_wait", {**query, "branch": "release"})["structuredContent"][
+        "result"
+    ]
+    assert failed["status"] == "failure" and failed["failing"] == ["sdlc ci"]
+    assert (
+        mcp_status(call(client, urls[SEAT], "desk_wait", {**query, "branch": "a b"})) == UNPROCESSABLE_ENTITY
+    )
 
 
 def test_desk_wait_on_an_item_reads_it(
