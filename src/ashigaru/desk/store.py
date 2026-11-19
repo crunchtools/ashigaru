@@ -189,6 +189,27 @@ MIGRATIONS: tuple[str, ...] = (
     """
     ALTER TABLE seats ADD COLUMN waiting_on TEXT;
     """,
+    # The forge's own state of each subject, and the PR that carries a story's work.
+    """
+    CREATE TABLE subjects (
+        subject_key TEXT PRIMARY KEY,
+        repo TEXT,
+        kind TEXT NOT NULL,
+        state TEXT NOT NULL,
+        head_sha TEXT,
+        draft INTEGER,
+        review TEXT,
+        title TEXT,
+        author TEXT,
+        labels TEXT NOT NULL DEFAULT '[]',
+        source TEXT NOT NULL,
+        source_updated_at TEXT,
+        seen_at TEXT NOT NULL
+    );
+    ALTER TABLE items ADD COLUMN pr TEXT;
+    ALTER TABLE items ADD COLUMN landed_at TEXT;
+    CREATE INDEX items_pr ON items(pr) WHERE pr IS NOT NULL;
+    """,
 )
 
 ITEM_DEFAULTS: dict[str, Any] = {
@@ -197,7 +218,7 @@ ITEM_DEFAULTS: dict[str, Any] = {
     "result": None, "next": None, "learned": None, "note": None, "blocked_reason": None, "memorized": False,
     "verified_by": None, "priority": 0, "wrap": None, "filed_by": None, "filed_under": None,
     "assigned_at": None, "queued_at": None, "closed_at": None, "cleared_at": None, "expires_at": None,
-    "extra": {},
+    "extra": {}, "pr": None, "landed_at": None,
 }  # fmt: skip
 """Every column but the four insert_item always sets: id, state, created_at, updated_at."""
 
@@ -206,12 +227,12 @@ INSERT_ITEM = """
         id, kind, parent, subject_key, task, done_when, ref, repo, lane, seat, mode, state, after,
         check_after, result, next, learned, note, blocked_reason, memorized, verified_by, priority, wrap,
         filed_by, filed_under, created_at, updated_at, assigned_at, queued_at, closed_at, cleared_at,
-        expires_at, extra
+        expires_at, extra, pr, landed_at
     ) VALUES (
         :id, :kind, :parent, :subject_key, :task, :done_when, :ref, :repo, :lane, :seat, :mode, :state,
         :after, :check_after, :result, :next, :learned, :note, :blocked_reason, :memorized, :verified_by,
         :priority, :wrap, :filed_by, :filed_under, :created_at, :updated_at, :assigned_at, :queued_at,
-        :closed_at, :cleared_at, :expires_at, :extra
+        :closed_at, :cleared_at, :expires_at, :extra, :pr, :landed_at
     )
 """
 
@@ -224,7 +245,7 @@ UPDATE_ITEM = """
         priority = :priority, wrap = :wrap, filed_by = :filed_by, filed_under = :filed_under,
         created_at = :created_at, updated_at = :updated_at, assigned_at = :assigned_at,
         queued_at = :queued_at, closed_at = :closed_at, cleared_at = :cleared_at,
-        expires_at = :expires_at, extra = :extra
+        expires_at = :expires_at, extra = :extra, pr = :pr, landed_at = :landed_at
     WHERE id = :id
 """
 

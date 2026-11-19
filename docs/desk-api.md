@@ -45,9 +45,9 @@ can return.
 | `POST /webhook/{forge}` | a forge's webhook delivery (`/webhook/github`); its signature, not a key, authenticates it (see Webhooks) |
 | `GET /me` | the caller's identity and role |
 | `GET /items` | list, newest first; filters `state` (repeat it for any of several), `seat`, `lane`, `kind`, `mode`, `parent`, `subject_key` (normalised the same way), `ref`, `learned` (true: a Learned line other than `none` is recorded) and `memorized`; pages of `limit` (200, at most 1000) from `offset` |
-| `POST /items` | admin: create; `id` defaults to the next `a<N>`, `state` to `queued`; 409 on a taken id or `subject_key`, whose detail names the item holding it (`subject_key RT#9 is taken by a3`). A `subject_key` that is a ref is stored as its key: a GitHub issue or PR URL or `owner/repo#N` becomes `owner/repo#N` in lowercase, an RT URL or `RT #N` becomes `RT#N`; any other key is stored as given. An admin may set `filed_by` |
+| `POST /items` | admin: create; `id` defaults to the next `a<N>`, `state` to `queued`; 409 on a taken id or `subject_key`, whose detail names the item holding it (`subject_key RT#9 is taken by a3`). A `subject_key` that is a ref is stored as its key: a GitHub issue or PR URL or `owner/repo#N` becomes `owner/repo#N` in lowercase, an RT URL or `RT #N` becomes `RT#N`; any other key is stored as given. An admin may set `filed_by`, and `pr`, the PR carrying a story's work as `owner/repo#N` (a seat may set it on its own item); `landed_at` is server-set when that subject merges |
 | `GET /items/{id}` | one item |
-| `PATCH /items/{id}` | the fields sent change; `null` clears; a `subject_key` is stored as `POST /items` stores it |
+| `PATCH /items/{id}` | the fields sent change; `null` clears; a `subject_key` is stored as `POST /items` stores it; `pr` is settable by an admin and by the item's seat |
 | `POST /items/{id}/report` | the report contract: `DONE` to `review` with `text` as the result, `BLOCKED` to `blocked` with `text` as the reason, `WORKING` to `working`, `CC-DONE` sets `memorized`; a `learned` of `none` is not recorded |
 | `POST /items/{id}/file` | `desk_file`: a `proposed` child under the story's outcome; one per assignment (409 on the second); abandoned 14 days later unless Josui promotes it |
 | `POST /items/{id}/assign` | admin: `{seat}` names one; `{}` or `{lane}` picks the seat in the lane (default: the item's) free longest and not held by Scott. 409 when the item is closed or waits on an `after` item not done, or the seat is busy, held or unknown |
@@ -58,6 +58,7 @@ can return.
 | `GET /work` | `ashigaru work`, the whole check round: `items`, the check table (id, seat, mode, task, state, wrap, result or blocker, next) of open items, blocked first, then newest, with `?all=true` adding done, wontdo, abandoned and cleared ones, at most 1000 (`truncated`); `seats` as `GET /seats`; `summary` (`up`: seats not missing, `seats`, `open` items); `queue` as `GET /queue`; and `catch_up`, the issues and PRs intake recorded from the org webhook after a cursor: `new`, first seen, with title, `filed_by` (the author), lane, mode and `held`, and `reopened`, the delivery that took the source from closed to open while the item is closed, each item once. The cursor is an event seq (`after`): the `sweep` mark, or with `?since=` (or a mark that is a time) the event before the first stamped then; with neither, a day back; 422 for a time that is not one. `until` is the last event covered: the last committed when the round began, or the 1000th read when `truncated`. Events are numbered in commit order, so nothing is lost or repeated between rounds. It leaves the mark alone, though like `GET /queue` it abandons proposed children past their expiry |
 | `POST /work` | admin: the same round, then the `sweep` mark becomes its `until` (`advanced` is true), so the next round reads on from there. Only forward: when it is already there, or a concurrent round moved it further, it stays and `advanced` is false. `?since=` is 422 here, since a round read from a time could move the mark past events it never read |
 | `GET /status` | `ashigaru status` (`desk_status`), the `Board`: `busy` seats (seat, mode, item, `since`, last check-in, whole task), `free` and `missing` seat names, `summary` (`up`, `seats`, `open`), and `needs_you`: manual seats idle with their `waiting_on`, Scott's blocked manual items, and subjects intake holds for approval |
+| `GET /subjects/{key}` | a `Subject`: the forge's own state of one issue or PR (`owner/repo#N`, `#` URL-encoded as `%23`): open, closed or merged, head, draft, review, title, labels, source and `source_updated_at`; 404 if no delivery has named it (migration 8) |
 | `GET /check` | `items` of `GET /work` alone, for clients older than 3.5 |
 | `GET /marks/{name}` | a named watermark (`sweep`: the event `GET /work`'s catch-up starts after; a time is read too): value, updated_at, updated_by; 404 until first set |
 | `PUT /marks/{name}` | admin: `{value}` sets it; names are `[a-z][a-z0-9-]*` |
@@ -132,8 +133,9 @@ delivery that failed is applied whole when the forge retries.
 
 Adapters live in `src/ashigaru/desk/forges/`, and nothing outside them names a
 forge. GitHub's: `X-Hub-Signature-256`, `X-GitHub-Event`, content type JSON;
-subscribe the org webhook to Workflow runs, Check suites, Issues and Pull
-requests. Its permission checks call the collaborator permission API with
+subscribe the org webhook to Workflow runs, Check suites, Issues, Pull
+requests and Pull request reviews (`pull_request_review`: submitted or dismissed
+sets the subject's review to approved, changes_requested or dismissed). Its permission checks call the collaborator permission API with
 `ASHIGARU_FORGE_TOKEN_GITHUB`, which needs read access to the repos'
 collaborators, metadata (rulesets, branches), checks and commit statuses, and
 nothing more. GitHub never calls an app's bot a writer, so
@@ -145,6 +147,19 @@ labels on anyone else's subject approve nothing. The record issues the sweep
 keeps (labeled `ashigaru-inbox`, `ashigaru-releases`, `ashigaru-red` or
 `ashigaru-observe`) are
 never queued, and one queued before is held on its next delivery.
+
+**Settling.** Each delivery records the subject; one older by `updated_at`
+never overwrites, and merged is sticky. It then settles items whose
+`subject_key` or `pr` names it. A seatless `auto` item goes `done` ("merged at
+<sha12>") when merged, `done` ("closed at the source") for a closed issue, or
+`wontdo` ("closed unmerged at the source") for a closed-unmerged PR, with
+`verified_by` desk. A seat-held or `manual` item is never closed, only given
+`landed_at` on merge. An item settling closed (by its events, not by
+`verified_by`, which an admin can write) is queued again when its own subject
+reopens and nothing else it names is closed or merged. A `pr` link acts only on
+merge. `GET /work` and `GET /status` run the same pass as a fallback, as they do
+proposed expiry; the pass matches only items it will change, so a read with
+nothing due takes no write lock.
 
 **CI.** One result per (repo, commit): each check's name and verdict
 (`pending`, `success`, `failure`, `cancelled`, `skipped`, `neutral`), and a

@@ -25,7 +25,7 @@ from fastapi import APIRouter, HTTPException, Request, status
 from fastapi import Query as Param
 from starlette.concurrency import run_in_threadpool
 
-from . import ci, intake, store
+from . import ci, intake, store, subjects
 from .api import Conn, Who, errors
 from .forges import FORGES, Delivery, Forge, IntakeItem
 from .model import CIResult, CIWait, Kind, Problem, WebhookAck
@@ -171,6 +171,8 @@ def _apply(db_path: str, source: str, signed: str, delivery: Delivery) -> tuple[
             commits = [ci.record(conn, update, source) for update in delivery.ci]
             for item in delivery.intake:
                 intake.upsert(conn, item)
+                if subjects.record(conn, item, "webhook"):
+                    subjects.settle(conn, item.subject_key)
         return commits, True
     finally:
         conn.close()
@@ -187,7 +189,8 @@ def _apply(db_path: str, source: str, signed: str, delivery: Delivery) -> tuple[
 )
 async def webhook(request: Request, forge: str) -> WebhookAck:
     """A forge's webhook delivery, authenticated by its signature rather than an API key. CI events
-    update the commit's result and wake its waiters; issue and PR events upsert queue items."""
+    update the commit's result and wake its waiters; issue, PR and review events upsert queue items,
+    record the subject's state, and settle the items it moves (subjects.py)."""
     body = await _body(request)
     adapter: Forge | None = FORGES.get(forge)
     configured: list[bytes] = request.app.state.webhook_secrets.get(forge, [])

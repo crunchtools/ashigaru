@@ -15,3 +15,11 @@ file = "src/ashigaru/desk/importer.py"
 evidence = "for key, items in wanting.items():\n    if conn.execute(\"SELECT 1 FROM items WHERE subject_key = ?\", (key,)).fetchone():"
 status = "not-a-bug"
 reason = "Each check is a lookup on the unique items_subject_key index, a few hundred at most, in one transaction on a one-time import; preloading the whole key set would cost more."
+
+[[findings]]
+agent = "bugs"
+category = "bug"
+file = "src/ashigaru/desk/subjects.py"
+evidence = "if item.updated_at and stored_at and item.updated_at < stored_at:\n    return False"
+status = "not-a-bug"
+reason = "GitHub stamps updated_at to the second and sends nothing finer, so two changes in one second cannot be ordered by any field it gives; equal wins so a second change in that second lands, merged is sticky regardless, and the subject's next delivery (any later edit, label, push or review) records its state again."

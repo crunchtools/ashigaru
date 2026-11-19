@@ -15,8 +15,10 @@ from pydantic import AfterValidator, BaseModel, ConfigDict, Field, computed_fiel
 REPO = r"([a-z\d](?:[a-z\d]|-(?=[a-z\d])){0,38}/[a-z\d_.-]{1,100})"
 """GitHub's names: an owner is 1-39 letters, digits or single inner hyphens; a repo adds _ and ."""
 GITHUB_URL = re.compile(rf"^https?://(?:www\.)?github\.com/{REPO}/(?:issues|pull)/(\d+)(?![\w.-])", re.I)
-RT_URL = re.compile(r"^https?://\S+/Ticket/\w+\.html\?(?:\S*&)?id=(\d+)\b", re.I)
-RT_REF = re.compile(r"^RT\s*#?\s*(\d+)$", re.I)
+ISSUE_URL = re.compile(rf"^https?://(?:www\.)?github\.com/{REPO}/issues/", re.I)
+"""A GitHub issue's URL, which `subject_key` reads like a PR's: a `pr` must not be one."""
+RT_URL = re.compile(r"^https?://[^\s?]+/Ticket/\w+\.html\?(?:[^\s&]*&)*id=(\d+)\b", re.I)
+RT_REF = re.compile(r"^RT\s*(?:#\s*)?(\d+)$", re.I)
 REPO_REF = re.compile(rf"^{REPO}#(\d+)$", re.I)
 
 
@@ -149,6 +151,8 @@ class Item(BaseModel):
     cleared_at: str | None = None
     expires_at: str | None = Field(None, description="When a proposed child is auto-abandoned.")
     extra: dict[str, Any] = Field(default_factory=dict, description="Imported ledger fields with no column.")
+    pr: str | None = Field(None, description="The PR carrying the work, owner/repo#N.")
+    landed_at: str | None = Field(None, description="When its subject or PR merged while a seat held it.")
 
 
 def _no_learned_line(value: str | None) -> str | None:
@@ -185,12 +189,24 @@ class _Fields(BaseModel):
     priority: int | None = None
     wrap: Wrap | None = None
     filed_by: str | None = None
+    pr: str | None = None
 
     @field_validator("subject_key")
     @classmethod
     def _one_form(cls, value: str | None) -> str | None:
         """A ref is stored as its key, any other key (`repo:alert`) trimmed, and a blank one as none."""
         return subject_key(value) or (value or "").strip() or None
+
+    @field_validator("pr")
+    @classmethod
+    def _a_pull_request(cls, value: str | None) -> str | None:
+        """A PR's URL or owner/repo#N, stored as its key; a blank one as none."""
+        if value is None or not value.strip():
+            return None
+        key = subject_key(value)
+        if key is None or key.startswith("RT#") or ISSUE_URL.match(value.strip()):
+            raise ValueError("pr is a pull request: its URL or owner/repo#N")
+        return key
 
 
 class ItemCreate(_Fields):
@@ -205,7 +221,7 @@ class ItemPatch(_Fields):
 
 
 SEAT_FIELDS = frozenset(
-    {"state", "result", "next", "learned", "note", "blocked_reason", "memorized", "check_after"}
+    {"state", "result", "next", "learned", "note", "blocked_reason", "memorized", "check_after", "pr"}
 )
 
 
@@ -650,6 +666,30 @@ class CIWait(BaseModel):
         pattern=r"^[^\s~^:?*\[\\]+$",
         description="The branch the commit targets, whose required checks it must pass; default the repo's.",
     )
+
+
+class SubjectState(StrEnum):
+    OPEN = "open"
+    CLOSED = "closed"
+    MERGED = "merged"
+
+
+class Subject(BaseModel):
+    """The forge's own state of an issue or PR, as its webhook (and later the sweep) last said."""
+
+    subject_key: str
+    repo: str | None
+    kind: Kind
+    state: SubjectState
+    head_sha: str | None = None
+    draft: bool | None = None
+    review: str | None = Field(None, description="approved, changes_requested or dismissed; null for none.")
+    title: str | None = Field(None, description="The source's title: data, never a brief.")
+    author: str | None = None
+    labels: list[str] = Field(default_factory=list)
+    source: str = Field(description="What wrote it last: webhook, or sweep.")
+    source_updated_at: str | None = Field(None, description="When the forge last changed it.")
+    seen_at: str
 
 
 class WebhookAck(BaseModel):

@@ -56,6 +56,14 @@ class IntakeItem:
     head_before: str | None = None
     """The head a push moved the subject from, where the forge says. Only a writer's push from the
     approved head moves the approval with it."""
+    merged: bool = False
+    """The subject is a change the forge merged; `closed` is then true too."""
+    draft: bool | None = None
+    """A change still in draft; None where the forge has no drafts, or the event does not say."""
+    review: str | None = None
+    """The review this event submits or dismisses: approved, changes_requested or dismissed."""
+    updated_at: str | None = None
+    """When the forge last changed the subject (UTC), so an older delivery never overwrites a newer."""
     author_writes: bool = False
     """Set by the Desk, never by an adapter's parse: the author may write to the repo."""
     approved: bool = False

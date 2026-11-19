@@ -15,7 +15,7 @@ from fastapi import Path as PathParam
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 
-from . import auth, dispatch, store
+from . import auth, dispatch, store, subjects
 from .model import (
     CLOSED,
     MARK_NAME,
@@ -49,12 +49,14 @@ from .model import (
     Seat,
     SeatPatch,
     State,
+    Subject,
     Usage,
     UsageReport,
     Verb,
     Wrap,
     WrapUp,
 )
+from .model import subject_key as model_subject_key
 
 VERSION = "3.0.0-dev"
 bearer = HTTPBearer(auto_error=False, description="An API key: `Authorization: Bearer ash_<id>_<secret>`.")
@@ -315,6 +317,13 @@ def board(conn: Conn, who: Who) -> Board:
         if need["why"] != "waiting" or who.admin or need["seat"] == who.name
     ]
     return Board.model_validate({**found, "needs_you": needs})
+
+
+@router.get("/v1/subjects/{key:path}", tags=["views"], responses=errors(401, 404))
+def subject(conn: Conn, who: Who, key: str) -> Subject:
+    """The forge's own state of an issue or PR, by owner/repo#N or its URL (encode the `#`): open,
+    closed or merged, head, draft, review, title and labels, as the webhook last said."""
+    return Subject.model_validate(_found(subjects.get(conn, model_subject_key(key) or key), "subject"))
 
 
 @router.get("/v1/queue", tags=["views"], responses=errors(401))

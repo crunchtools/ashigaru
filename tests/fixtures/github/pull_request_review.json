@@ -1,0 +1,29 @@
+{
+  "action": "submitted",
+  "review": {
+    "state": "approved",
+    "user": {
+      "login": "fatherlinux"
+    }
+  },
+  "pull_request": {
+    "number": 191,
+    "title": "feat(desk): webhook receiver",
+    "html_url": "https://github.com/crunchtools/ashigaru/pull/191",
+    "state": "open",
+    "updated_at": "2026-11-19T10:00:00Z",
+    "labels": [],
+    "user": {
+      "login": "someone"
+    },
+    "head": {
+      "sha": "ACB5820CED9479C074F688CC328BF03F341A511D"
+    }
+  },
+  "repository": {
+    "full_name": "crunchtools/ashigaru"
+  },
+  "sender": {
+    "login": "fatherlinux"
+  }
+}
