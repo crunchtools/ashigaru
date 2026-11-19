@@ -13,7 +13,7 @@ from fastapi import Request
 from fastapi.testclient import TestClient
 
 from ashigaru.desk import api, auth, dispatch, store
-from ashigaru.desk.model import NextWait, Role
+from ashigaru.desk.model import NextItem, NextWait, Role
 
 MONTHLY_LIMIT = 500
 WAIT = 1
@@ -256,6 +256,34 @@ def test_a_claim_made_as_the_client_leaves_is_handed_back(
     left, freed = store.get_item(conn, work), store.get_seat(conn, MINE)
     assert left is not None and (left["seat"], left["state"]) == (None, "queued")
     assert freed is not None and (freed["status"], freed["item"]) == ("free", None)
+
+
+def test_one_long_poll_rides_out_a_wrap_and_claims_once_the_item_closes(
+    client: TestClient, keys: Keys, conn: sqlite3.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    class Wrapped:
+        """Listening throughout; Prime closes the wrapping item between the first look and the second."""
+
+        looks = 0
+        closed = False
+
+        async def is_disconnected(self) -> bool:
+            self.looks += 1
+            if self.looks > 1 and not self.closed:
+                self.closed = True
+                dispatch.wrap(conn, first, {"stage": "cleared", "state": "done", "force": True}, JOSUI)
+            return False
+
+    monkeypatch.setattr(api, "NEXT_TICK", 0.05)
+    seat(client, keys, MINE)
+    switch(client, keys, "on")
+    first = item(client, keys, lane="exedore-max")
+    second = item(client, keys, lane="exedore-max")
+    assert dispatch.next_item(conn, MINE) is not None
+    client.post(f"/v1/items/{first}/wrap", headers=keys[JOSUI], json={"stage": "wrapping"})
+    caller = auth.Caller(name=MINE, role=Role.SEAT, key_id="k")
+    answer = asyncio.run(api.next_item(cast(Request, Wrapped()), conn, caller, MINE, NextWait(wait=WAIT)))
+    assert isinstance(answer, NextItem) and answer.item.id == second
 
 
 def test_unclaim_leaves_work_that_moved_on_alone(

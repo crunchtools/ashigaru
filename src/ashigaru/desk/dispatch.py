@@ -218,8 +218,8 @@ def _waiting_seat(conn: sqlite3.Connection, seat: str) -> sqlite3.Row | None:
     its lane is ready. Raises Conflict when the seat cannot take work at all (busy, held, unseen or
     laneless). /clear comes before `wrap` closes a wrapping item, so the hook /clear starts waits."""
     current = store.get_seat(conn, seat)
-    held = current["item"] if current and not current["owner"] else None
-    wrapping = held is not None and (store.get_item(conn, held) or {}).get("wrap") == Wrap.WRAPPING
+    item_id = current["item"] if current and not current["owner"] else None
+    wrapping = item_id is not None and (store.get_item(conn, item_id) or {}).get("wrap") == Wrap.WRAPPING
     row = current if current and wrapping else _free(current, seat)
     if row["lane"] is None:
         raise store.Conflict(f"seat {seat!r} has no lane; Josui sets it before it can claim")
