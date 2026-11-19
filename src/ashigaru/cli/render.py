@@ -183,7 +183,27 @@ def status(board: dict[str, Any]) -> str:
     parts = [table(board["busy"], BOARD) if board["busy"] else "no seat is busy", "   ".join(seats)]
     if board["needs_you"]:
         parts.append(f"NEEDS YOU\n{_rows(board['needs_you'], NEEDS)}")
+    if (found := board.get("changes")) and found["items"]:
+        when = seen(found["seen_at"]) if found.get("seen_at") else "a first look: the last day"
+        parts.append(f"CHANGED SINCE YOU LOOKED ({when})\n{_rows(found['items'], CHANGES)}")
     return "\n\n".join(parts)
+
+
+def looked(found: dict[str, Any]) -> str:
+    """Where a look began: `since you looked 3h05m ago`, `since <time>`, or the default day."""
+    if found.get("since"):
+        return f"since {found['since']}"
+    return f"since you looked {seen(found['seen_at'])}" if found.get("seen_at") else "in the last day"
+
+
+def changes(found: dict[str, Any]) -> str:
+    """What others changed, last first, then the window and whether the mark moved."""
+    window = f"{len(found['items'])} changed {looked(found)}; events {found['after']} to {found['until']}"
+    if found.get("truncated"):
+        window += ", cut at 1000: the next --ack reads on"
+    if found.get("acked"):
+        window += " (seen mark moved)"
+    return f"{table(found['items'], CHANGES)}\n{window}" if found["items"] else window
 
 
 def queue(lists: dict[str, Any]) -> str:
@@ -290,6 +310,15 @@ NEEDS: list[Column] = [
     ("WHY", lambda n: n["why"] if n["why"] != "blocked" else n["state"]),
     ("TEXT", lambda n: Whole(f"{n['seat']}: {n['text']}" if n.get("seat") else n.get("text") or "")),
 ]
+CHANGES: list[Column] = [
+    ("WORK", lambda r: r["id"]),
+    ("WHEN", lambda r: seen(r["at"])),
+    ("STATE", lambda r: state(r)),
+    ("BY", lambda r: ", ".join(r["by"])),
+    ("CHANGED", lambda r: "new" if r["new"] else ", ".join(r["fields"])),
+    ("TASK", lambda r: Whole(r["task"])),
+    ("NEXT", lambda r: Tail(r.get("step") or "")),
+]
 WORK: list[Column] = [
     ("WORK", lambda r: r["id"]),
     ("TIME", lambda r: age(r.get("since") or r.get("updated_at"))),
@@ -368,6 +397,7 @@ VIEWS: dict[str, Callable[[Any], str]] = {
     "usage": usage,
     "agents": agents,
     "status": status,
+    "changes": changes,
     "sweep": sweep,
     "queue": queue,
     "work": work,

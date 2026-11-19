@@ -381,6 +381,38 @@ class CatchUp(BaseModel):
     advanced: bool = Field(False, description="True when this round moved the sweep mark to `until`.")
 
 
+class ChangeRow(BaseModel):
+    """An item someone else changed since the reader looked: what moved, who moved it, its NEXT now."""
+
+    id: str
+    kind: Kind
+    task: str
+    state: State
+    mode: Mode
+    seat: str | None
+    outcome_label: str | None = Field(None, description="The outcome the work serves.")
+    new: bool = Field(description="Created in the window.")
+    fields: list[str] = Field(description="The fields its writes in the window set.")
+    by: list[str] = Field(description="Who wrote them, first writer first.")
+    writes: int = Field(description="How many writes in the window.")
+    at: str = Field(description="When it last changed.")
+    step: str | None = Field(
+        None, description="NEXT: its blocker, a landed or overdue flag, else its next or result."
+    )
+
+
+class Changes(BaseModel):
+    """`ashigaru changes`: what others changed after the reader's own seen mark, each item once."""
+
+    since: str | None = Field(description="The time the window was read from, when `since` was given.")
+    seen_at: str | None = Field(description="When the reader last acked: the mark this window starts at.")
+    after: int = Field(description="The event seq it starts after: the seen mark, or the one before `since`.")
+    until: int = Field(description="The last event it covers; an ack stores it as the seen mark.")
+    items: list[ChangeRow] = Field(description="Items changed in the window, last changed first.")
+    truncated: bool = Field(False, description="True when the window stopped at 1000 events.")
+    acked: bool = Field(False, description="True when this look moved the reader's seen mark to `until`.")
+
+
 class Seat(BaseModel):
     name: str
     lane: Lane | None = None
@@ -574,6 +606,7 @@ class Board(BaseModel):
     summary: SeatSummary
     needs_you: list[NeedsYou]
     sweep: SweepRun | None = Field(None, description="The last sweep, so a person sees the fallback alive.")
+    changes: Changes | None = Field(None, description="CHANGED SINCE YOU LOOKED, without moving the mark.")
 
 
 class Usage(BaseModel):

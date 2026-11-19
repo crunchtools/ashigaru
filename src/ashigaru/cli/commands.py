@@ -54,6 +54,20 @@ def status(desk: Desk) -> dict[str, Any]:
     return result
 
 
+def changes(desk: Desk, since: str | None = None, ack: bool = False) -> dict[str, Any]:
+    """Each item someone else changed since you last acked (else the last day, or from `since`): the
+    fields that moved, who moved them and its NEXT now. With `ack`, your own seen mark then moves to
+    the look's `until`, never from `since`, which could pass events you never read. The MCP tool is
+    desk_changes."""
+    if since and ack:
+        raise CommandError("--since cannot go with --ack")
+    if ack:
+        acked: dict[str, Any] = desk.request("POST", "/v1/changes", body={})
+        return acked
+    result: dict[str, Any] = desk.get("/v1/changes", **({"since": since} if since else {}))
+    return result
+
+
 def work(desk: Desk, since: str | None = None, **flags: bool) -> dict[str, Any]:
     """The whole check round: open items blocked first then newest, the seats with how many are up
     and how many items are open, the queue, and the forge catch-up from `since` (default the sweep
@@ -340,7 +354,7 @@ def mcp_revoke(desk: Desk, code_id: str, identity: str | None = None) -> dict[st
 COMMANDS: dict[str, Callable[..., Any]] = {
     command.__name__: command
     for command in (
-        *(usage, agents, status, work, queue, sweep, outcomes, get, mark),
+        *(usage, agents, status, changes, work, queue, sweep, outcomes, get, mark),
         *(create, update, report, assign, auto, manual, wait, wrap, claim, file),
         *(mcp_mint, mcp_list, mcp_revoke),
     )
