@@ -1,13 +1,18 @@
 """`GET /v1/changes` and `POST /v1/changes`: what others changed since each reader last looked."""
 
+import sqlite3
 from http.client import CREATED, OK, UNPROCESSABLE_ENTITY
 from typing import Any
 
+import pytest
 from conftest import Keys
 from fastapi.testclient import TestClient
 
+from ashigaru.desk import changes, dispatch, store
+
 JOSUI, SEAT, OTHER = "Josui Prime", "Exedore 1 - Max", "Exedore 2 - Max"
 WRITES = 2
+THREE = 3
 
 
 def create(client: TestClient, keys: Keys, **body: Any) -> str:
@@ -64,3 +69,43 @@ def test_the_board_shows_changes_without_moving_the_mark(client: TestClient, key
     board = client.get("/v1/status", headers=keys[SEAT]).json()
     assert [row["id"] for row in board["changes"]["items"]] == [item]
     assert [row["id"] for row in look(client, keys, SEAT)["items"]] == [item]
+
+
+def test_a_look_folds_each_items_writers_and_drops_quiet_ones(
+    client: TestClient, keys: Keys, conn: sqlite3.Connection
+) -> None:
+    item, quiet = create(client, keys), create(client, keys)
+    look(client, keys, SEAT, ack=True)
+    with store.transaction(conn):
+        store.update_item(conn, item, {"note": "one"}, "desk", "sweep")
+        store.update_item(conn, item, {"next": "two"}, JOSUI)
+        store.update_item(conn, item, {"note": "three"}, "desk", "sweep")
+        store.update_item(conn, quiet, {"extra": {"source_state": "open"}}, "desk", "webhook")
+    (row,) = look(client, keys, SEAT)["items"]
+    assert row["id"] == item and not row["new"] and row["by"] == ["desk", JOSUI]
+    assert row["writes"] == THREE and row["fields"] == ["next", "note"]
+
+
+def test_a_look_cut_at_the_limit_acks_only_what_it_read(
+    client: TestClient, keys: Keys, conn: sqlite3.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    first, second, third = create(client, keys), create(client, keys), create(client, keys)
+    monkeypatch.setattr(dispatch, "QUEUE_LIMIT", 2)
+    cut = look(client, keys, SEAT, ack=True)
+    assert cut["truncated"] and {row["id"] for row in cut["items"]} == {first, second}
+    rest = look(client, keys, SEAT, ack=True)
+    assert not rest["truncated"] and [row["id"] for row in rest["items"]] == [third]
+
+
+def test_an_ack_never_moves_the_mark_back(client: TestClient, keys: Keys, conn: sqlite3.Connection) -> None:
+    create(client, keys)
+    ahead = dispatch.QUEUE_LIMIT * 10
+    with store.transaction(conn):
+        store.set_mark(conn, changes.mark(SEAT), str(ahead), SEAT)
+    assert not look(client, keys, SEAT, ack=True)["acked"]
+    assert (store.get_mark(conn, changes.mark(SEAT)) or {})["value"] == str(ahead)
+
+
+def test_a_first_look_says_it_covers_the_last_day(client: TestClient, keys: Keys) -> None:
+    found = look(client, keys, SEAT)
+    assert found["since"] is None and found["seen_at"] is None

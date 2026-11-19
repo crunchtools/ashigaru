@@ -13,7 +13,7 @@ import pytest
 from fake_desk import FakeDesk, Seen, serve
 
 from ashigaru import __version__
-from ashigaru.cli import commands, config, hooks
+from ashigaru.cli import commands, config, hooks, render
 from ashigaru.cli.__main__ import main
 from ashigaru.cli.client import Desk, DeskError, Unreachable
 from ashigaru.cli.wait import CIWaiter, PollWaiter
@@ -1343,3 +1343,8 @@ def test_status_lists_what_changed_since_you_looked(
     assert main(["status"]) == 0
     out = capsys.readouterr().out
     assert "CHANGED SINCE YOU LOOKED" in out and "a685" in out
+
+
+def test_a_first_look_renders_as_the_last_day() -> None:
+    first = changed() | {"seen_at": None, "items": []}
+    assert render.changes(first).startswith("0 changed in the last day")

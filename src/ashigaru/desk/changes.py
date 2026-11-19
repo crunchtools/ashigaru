@@ -32,7 +32,8 @@ def mark(identity: str) -> str:
 
 def _touched(rows: list[sqlite3.Row]) -> dict[str, dict[str, Any]]:
     """Each item's events folded into one: new when its first event is among them, the fields they
-    set, their writers in order, how many, and when the last was."""
+    set, their writers in order, how many, and when the last was. An item whose events set only
+    QUIET keys is left out: nothing a reader acts on moved."""
     touched: dict[str, dict[str, Any]] = {}
     for row in rows:
         entry = touched.setdefault(
@@ -43,7 +44,7 @@ def _touched(rows: list[sqlite3.Row]) -> dict[str, dict[str, Any]]:
             entry["by"].append(row["actor"])
         entry["writes"] += 1
         entry["at"] = row["at"]
-    return touched
+    return {key: entry for key, entry in touched.items() if entry["new"] or entry["fields"]}
 
 
 def read(conn: sqlite3.Connection, identity: str, since: str | None = None) -> dict[str, Any]:
@@ -69,7 +70,7 @@ def read(conn: sqlite3.Connection, identity: str, since: str | None = None) -> d
     found.sort(key=lambda row: (row["at"], row["id"]), reverse=True)
     seen = store.get_mark(conn, mark(identity))
     return {
-        "since": read_from,
+        "since": read_from if since is not None else None,
         "seen_at": seen["updated_at"] if seen and since is None else None,
         "after": after,
         "until": until,
