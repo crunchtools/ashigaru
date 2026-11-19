@@ -132,6 +132,9 @@ def arrange(conn: sqlite3.Connection, rows: list[dict[str, Any]]) -> list[dict[s
     for members in groups.values():
         members.sort(key=lambda row: not row["needs_you"])
 
-    order = sorted(groups, key=lambda key: max(row["updated_at"] for row in groups[key]), reverse=True)
-    order.sort(key=lambda key: (key is None, not any(row["needs_you"] for row in groups[key])))
+    newest = sorted(groups, key=lambda key: max(row["updated_at"] for row in groups[key]), reverse=True)
+    rank = {key: place for place, key in enumerate(newest)}
+    order = sorted(
+        groups, key=lambda key: (key is None, not any(row["needs_you"] for row in groups[key]), rank[key])
+    )
     return [row for key in order for row in groups[key]]
