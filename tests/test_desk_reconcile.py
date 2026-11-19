@@ -17,6 +17,7 @@ from ashigaru.desk.api import create_app
 
 JOSUI, SEAT = "Josui Prime", "Exedore 1 - Max"
 TWO_HOURS = 7200.0
+ONE_MINUTE = 60.0
 
 
 def ago(**span: float) -> str:
@@ -45,7 +46,7 @@ def test_a_silent_turn_past_the_limit_ends_without_touching_updated_at(
 ) -> None:
     seat(conn, "dead", ago(minutes=30), turn="active")
     conn.execute("UPDATE seats SET turn_started_at = ? WHERE name = 'dead'", (ago(hours=4),))
-    assert reconciling(db) == {"turns": 1, "tasks": 0}
+    assert reconciling(db) == {"turns": 1, "tasks": 0, "silent": 0}
     found = row(conn, "dead")
     assert found["turn"] == "idle" and found["turn_reconciled_at"]
     assert found["updated_at"] == ago(minutes=30), "a dead seat still goes missing on time"
@@ -84,7 +85,7 @@ def test_a_day_idle_drops_an_unheld_seats_task_and_keeps_a_hold(conn: sqlite3.Co
     seat(conn, "idle", ago(hours=25), task="old first prompt", waiting_on="anything else?")
     seat(conn, "held", ago(hours=25), task="Scott's work", owner=store.MANUAL_OWNER, status="busy")
     seat(conn, "recent", ago(hours=1), task="today's first prompt")
-    assert reconciling(db) == {"turns": 0, "tasks": 1}
+    assert reconciling(db) == {"turns": 0, "tasks": 1, "silent": 1}
     assert (row(conn, "idle")["task"], row(conn, "idle")["waiting_on"]) == (None, None)
     assert row(conn, "held")["task"] == "Scott's work"
     assert row(conn, "recent")["task"] == "today's first prompt"
@@ -133,5 +134,61 @@ def test_the_app_reconciles_at_startup_and_spares_turns_an_outage_silenced(
 
 def test_serve_reconciles_with_its_turn_limit(monkeypatch: pytest.MonkeyPatch, db: Path) -> None:
     assert desk_main.reconciler(str(db)).settings.turn_max == reconcile.TURN_MAX
+    assert desk_main.reconciler(str(db)).settings.silent == reconcile.SILENT
+    monkeypatch.setenv("ASHIGARU_SILENT_AFTER", "60")
+    assert desk_main.reconciler(str(db)).settings.silent.total_seconds() == ONE_MINUTE
     monkeypatch.setenv("ASHIGARU_TURN_MAX", "7200")
     assert desk_main.reconciler(str(db)).settings.turn_max.total_seconds() == TWO_HOURS
+
+
+def test_a_busy_seat_quiet_past_silent_is_flagged_without_touching_updated_at(
+    conn: sqlite3.Connection, db: Path
+) -> None:
+    seat(conn, "quiet", ago(minutes=80), status="busy", item="w1")
+    seat(conn, "heard", ago(minutes=5), status="busy", item="w2")
+    assert reconciling(db)["silent"] == 1
+    assert row(conn, "quiet")["silent_since"] and row(conn, "heard")["silent_since"] is None
+    assert row(conn, "quiet")["updated_at"] == ago(minutes=80)
+    assert reconciling(db)["silent"] == 0, "flagged once"
+
+
+def test_a_free_seat_is_never_flagged_silent(conn: sqlite3.Connection, db: Path) -> None:
+    seat(conn, "free", ago(hours=2))
+    assert reconciling(db)["silent"] == 0 and row(conn, "free")["silent_since"] is None
+
+
+@pytest.mark.parametrize(("up", "flagged"), [(timedelta(minutes=5), 0), (timedelta(minutes=90), 1)])
+def test_silence_is_flagged_only_once_the_desk_has_been_up_for_silent(
+    conn: sqlite3.Connection, db: Path, up: timedelta, flagged: int
+) -> None:
+    seat(conn, "quiet", ago(minutes=100), status="busy", item="w1")
+    started = datetime.now(UTC) - up
+    assert reconcile.run(str(db), reconcile.Settings(), started)["silent"] == flagged
+
+
+def test_a_write_clears_silent_since_unless_it_sets_it(conn: sqlite3.Connection, db: Path) -> None:
+    seat(conn, "quiet", ago(minutes=80), status="busy", item="w1")
+    reconciling(db)
+    assert row(conn, "quiet")["silent_since"]
+    with store.transaction(conn):
+        assert store.write_seat(conn, "quiet", {"context_used": 5})["silent_since"] is None
+        store.write_seat(conn, "quiet", {"silent_since": ago(minutes=1)})
+    assert row(conn, "quiet")["silent_since"] == ago(minutes=1)
+
+
+def test_a_silent_busy_seat_needs_scott_once(
+    client: TestClient, keys: Keys, conn: sqlite3.Connection, db: Path
+) -> None:
+    with store.transaction(conn):
+        work = store.insert_item(
+            conn, {"task": "Build it", "mode": "auto", "state": "working"}, JOSUI, source="test"
+        )
+    seat(conn, SEAT, ago(minutes=80), status="busy", item=work)
+    reconciling(db)
+    board = client.get("/v1/status", headers=keys[JOSUI]).json()
+    silent = [need for need in board["needs_you"] if need["why"] == "silent"]
+    assert [(need["seat"], need["work"], need["mode"]) for need in silent] == [(SEAT, work, "auto")]
+    assert (
+        silent[0]["text"].endswith(f"check the seat or wrap {work}") and "silent since" in silent[0]["text"]
+    )
+    assert not [need for need in board["needs_you"] if need["why"] == "stale"]

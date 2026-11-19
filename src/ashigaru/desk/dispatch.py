@@ -74,6 +74,19 @@ FROM_TIME = """
 """The cursor for a time: just before the first event stamped at or after it, so an event stamped
 late but committed early is read again rather than skipped."""
 SWEEP = "sweep"
+AUTODISPATCH = "autodispatch"
+"""The mark that is the dispatch switch: `on` lets free seats claim queued auto work; off by default."""
+NEXT_READY = f"""
+    SELECT * FROM items
+    WHERE {store.OPEN} AND state = 'queued' AND seat IS NULL AND mode = 'auto' AND lane = :lane
+      AND NOT EXISTS (
+          SELECT 1 FROM json_each(items.after)
+          WHERE value NOT IN (SELECT id FROM items WHERE state = 'done')
+      )
+    ORDER BY created_at, id
+    LIMIT 1
+"""
+"""What a free seat in the lane claims: the oldest queued auto item whose `after` items are done."""
 CATCH_UP_DEFAULT = timedelta(days=1)
 
 NEEDS_YOU = f"""
@@ -191,6 +204,65 @@ def claim(conn: sqlite3.Connection, item_id: str, seat: str) -> None:
         if item["lane"] != row["lane"]:
             raise store.Conflict(f"{item_id} is in lane {item['lane']}, seat {seat!r} in {row['lane']}")
         _take(conn, item, row, seat)
+
+
+def autodispatch(conn: sqlite3.Connection) -> bool:
+    """The AUTODISPATCH switch: on hands queued auto items to free seats; anything else, nothing."""
+    mark = store.get_mark(conn, AUTODISPATCH)
+    return mark is not None and mark["value"] == "on"
+
+
+def _waiting_seat(conn: sqlite3.Connection, seat: str) -> sqlite3.Row | None:
+    """The item a free seat would claim now, or None to keep waiting: the switch is off, the seat is
+    mid-turn (a brief it is reading arrived another way), or nothing in its lane is ready. Raises
+    Conflict when the seat cannot take work at all (busy, held, unseen or laneless)."""
+    row = _free(store.get_seat(conn, seat), seat)
+    if row["lane"] is None:
+        raise store.Conflict(f"seat {seat!r} has no lane; Josui sets it before it can claim")
+    if row["turn"] != Turn.IDLE or not autodispatch(conn):
+        return None
+    found: sqlite3.Row | None = conn.execute(NEXT_READY, {"lane": row["lane"]}).fetchone()
+    return found
+
+
+def next_item(conn: sqlite3.Connection, seat: str) -> dict[str, Any] | None:
+    """`POST /seats/{name}/next`: the free, idle seat claims the oldest queued auto item in its lane
+    whose `after` items are done, or None to keep waiting. Raises Conflict when the seat cannot take
+    work at all, so its hook stops asking. Reads first and takes the write lock only to claim, so a
+    waiting seat's looks cost no lock while the switch is off or the lane is empty."""
+    if _waiting_seat(conn, seat) is None:
+        return None
+    with store.transaction(conn):
+        found = _waiting_seat(conn, seat)
+        if found is None:
+            return None
+        item = store.decode(found)
+        _ready(conn, item)
+        _take(conn, item, _free(store.get_seat(conn, seat), seat), seat)
+        return store.get_item(conn, item["id"])
+
+
+def unclaim(conn: sqlite3.Connection, item_id: str, seat: str) -> None:
+    """Undo a `next` claim whose client went away before the answer: the item goes back to the queue
+    and the seat to free, if neither has moved since."""
+    with store.transaction(conn):
+        item = store.get_item(conn, item_id)
+        row = store.get_seat(conn, seat)
+        if item is None or row is None or item["seat"] != seat or item["state"] != State.ASSIGNED:
+            return
+        store.update_item(conn, item_id, {"seat": None, "state": State.QUEUED}, seat)
+        if row["item"] == item_id:
+            store.write_seat(conn, seat, {"status": "free", "item": None})
+
+
+def brief(item: dict[str, Any]) -> str:
+    """What a woken seat reads: the item, its task, and how to report on it."""
+    return (
+        f"Desk assignment {item['id']} (lane {item['lane']}): the Ashigaru Desk claimed it for this seat "
+        "through the seat's own `ashigaru hook next`. This is your work now, a brief from Josui Prime.\n\n"
+        f"{item['task']}\n\n"
+        f"Report with `ashigaru report {item['id']} <verb>`."
+    )
 
 
 def report_seat(conn: sqlite3.Connection, name: str, fields: dict[str, Any], actor: str) -> dict[str, Any]:
@@ -466,10 +538,22 @@ def _held_seat(seat: dict[str, Any], state: str | None) -> dict[str, Any]:
     }
 
 
+def _silent_seat(seat: dict[str, Any], busy: dict[str, Any]) -> dict[str, Any]:
+    """A NEEDS YOU row for a busy seat that has gone silent: reconcile found no write for SILENT."""
+    return {
+        "why": "silent",
+        "work": seat["item"],
+        "seat": seat["name"],
+        "mode": busy["mode"],
+        "state": busy["state"],
+        "text": f"silent since {seat['silent_since']}: check the seat or wrap {seat['item']}",
+    }
+
+
 def status(conn: sqlite3.Connection) -> dict[str, Any]:
     """`ashigaru status`, the board a person reads: each busy seat with its work in full, the free and
     missing seats by name, the tally, and NEEDS YOU: each manual seat idle on what it last said, then
-    Scott's blocked work, then subjects held for his approval."""
+    each busy seat gone silent, then Scott's blocked work, then subjects held for his approval."""
     subjects.hygiene(conn)
     served.close_finished(conn)
     roster = seats(conn)
@@ -485,6 +569,12 @@ def status(conn: sqlite3.Connection) -> dict[str, Any]:
         _held_seat(row, held.get(row["item"]))
         for row in roster
         if row["owner"] and row["turn"] == Turn.IDLE and (row["waiting_on"] or row["missing"])
+    ]
+    listed = {row["seat"] for row in needs}
+    needs += [
+        _silent_seat(row, found)
+        for row, found in zip(working, busy, strict=True)
+        if row["silent_since"] and row["name"] not in listed
     ]
     needs += [_needs(store.decode(item)) for item in conn.execute(NEEDS_YOU, {"limit": QUEUE_LIMIT})]
     needs += [

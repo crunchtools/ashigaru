@@ -69,6 +69,7 @@ can return.
 | `GET /queue` | `ashigaru queue`: the newest 1000 `queued` items, each with `waits_on` (every `after` id and its state, `unknown` for no such item), and the newest 1000 `proposed` children; `truncated` is true when either list was cut |
 | `GET /seats`, `GET /seats/{name}` | seat state: free/busy, owner, `hold` (`free`, `busy-auto` or `busy-manual`), turn, task, item, since, and the last usage report. `missing` is true for a seat whose row has not changed in 24 hours; the list ends with each seat identity that never checked in, `missing` with a null `updated_at` |
 | `PATCH /seats/{name}` | created on first call; a seat sends `turn`, `task` and `waiting_on` (what it last asked before going idle; the `stop` hook sets it, best effort, a new turn or `/clear` clears it; migration 7 adds the column). Only an admin and the seat itself read `waiting_on`: every other caller gets null from `GET /seats`, `GET /seats/{name}` and `GET /work`, and no `waiting` rows in `GET /status`. `since` is server-set when `status` changes, `turn_started_at` when the turn goes active. The Desk infers Scott's hold (below) |
+| `POST /seats/{name}/next?wait=S` | the seat or an admin, for `ashigaru hook next`: when the `autodispatch` mark is `on`, claim the oldest queued auto item in the seat's lane whose `after` items are done, as `desk_claim` would, and return `{item, brief}`; waits up to `wait` seconds (at most 90) for one, then 204. Claims only while the seat's turn is idle, and never once the client has gone. 204 also while the switch is off; 409 when the seat is busy, held, unseen or has no lane |
 | `POST /seats/{name}/usage` | the seat or an admin: `session_id`, `model`, `billing` (max / vertex / openrouter; else the seat's lane's, else what the row had; from a seat key the lane's comes first), `context_used`, `context_window`, `session_tokens`, `cost_usd` (the session's running total; what of it is not yet booked goes to today's spend, held until billing is known) |
 | `GET /usage` | `ashigaru usage`: per seat model, context, session tokens and cost, turn and seconds in it; spend by billing source today and this month (UTC) with limits |
 | `PUT /billing/{billing}` | admin: `daily_usd`, `monthly_usd` limits |
@@ -161,7 +162,9 @@ goes `idle` with `turn_reconciled_at` set: its `stop` hook never arrived. A
 seat idle for a day with no hold of Scott's loses its `task`, as a `/clear`
 would. Both update the row without moving `updated_at`, so a dead seat still
 goes `missing`. It never closes an item: a hold of Scott's on a seat silent for
-a day shows under NEEDS YOU as `stale` (migration 10 adds the column).
+a day shows under NEEDS YOU as `stale` (migration 10 adds the column). A busy
+seat with no write for `ASHIGARU_SILENT_AFTER` (an hour) gets `silent_since`
+and shows as `silent`; any write clears it (migration 11).
 
 **Sweep.** With `ASHIGARU_FORGE_TOKEN_GITHUB` and `ASHIGARU_FORGE_ORG_GITHUB`
 set, `serve` runs a sweep at startup, every `ASHIGARU_SWEEP_EVERY` seconds and
@@ -308,6 +311,7 @@ Settings are flags on `ashigaru-desk serve`, else these environment variables:
 | `ASHIGARU_FORGE_ORG_GITHUB` | the GitHub org the sweep searches; the sweep runs only with this and the token | none: no sweep |
 | `ASHIGARU_SWEEP_EVERY` | seconds between sweeps | `600` |
 | `ASHIGARU_TURN_MAX` | seconds a seat turn may stay active, with no write to its row for 10 minutes, before seat reconcile ends it | `10800` |
+| `ASHIGARU_SILENT_AFTER` | seconds a busy seat may go without a write before seat reconcile flags it silent | `900` |
 | `ASHIGARU_WEBHOOK_SECRET` | GitHub's secret under the bare name the first deploy used; added to `_GITHUB` | none |
 | `ASHIGARU_WEBHOOK_SECRET_FILE` | the same, as a file | none |
 

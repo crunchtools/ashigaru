@@ -414,6 +414,9 @@ Not run by hand, and like `mcp` the CLI's alone. `ashigaru hook session-start`, 
 the seats' Claude Code hooks (`docs/desk-cli.md`), which report each seat's
 turn and task to the Desk; `ashigaru hook statusline`, run from the seat's
 status line, reports its model, context, session tokens and cost for `usage`.
+`ashigaru hook next` runs on SessionStart, async with asyncRewake: it waits for
+the Desk to hand this free seat its next queued item and wakes it with the
+brief. Nothing flows until `ashigaru mark autodispatch --set on`.
 When `agents` shows a seat's turn or task wrong, or `usage` shows it blank,
 check that its settings and status line carry them.
 

@@ -33,7 +33,7 @@ Every view and action prints a table, or the Desk's JSON with `--json`.
 |---|---|
 | `usage` | per seat: model, context, session tokens and cost, turn and time in it; spend by billing source today and this month against limits |
 | `agents` | per seat: `free`, `busy-auto` or `busy-manual` (Scott's hold), `WORK` (the item), `TIME` held, turn, last check-in (`SEEN`) and the whole task, last and never clipped; ends `N of M up`. A seat identity that never checked in, or whose seat row has not changed in 24 hours, shows as `missing` |
-| `status` | the board, from `GET /v1/status` (`desk_status`): each busy seat with its `OUTCOME`, mode, seat, `WORK`, `TIME`, `ACTIVE` and its whole task; one line of free and missing seats with `X of Y up, Z open`; then NEEDS YOU: manual seats idle with the question they last asked (`waiting_on`), Scott's holds on seats silent for a day (`stale`: `/clear` the seat or wrap the item), Scott's blocked manual work, and subjects intake holds for approval; a last line says when the sweep ran and what it found (`swept 4m ago (31 subjects, 2 new, 2 closed)`) or its error; then CHANGED SINCE YOU LOOKED, as `changes` shows it, without moving the mark |
+| `status` | the board, from `GET /v1/status` (`desk_status`): each busy seat with its `OUTCOME`, mode, seat, `WORK`, `TIME`, `ACTIVE` and its whole task; one line of free and missing seats with `X of Y up, Z open`; then NEEDS YOU: manual seats idle with the question they last asked (`waiting_on`), Scott's holds on seats silent for a day (`stale`: `/clear` the seat or wrap the item), busy seats with no write for an hour (`silent`: check the seat or wrap the item), Scott's blocked manual work, and subjects intake holds for approval; a last line says when the sweep ran and what it found (`swept 4m ago (31 subjects, 2 new, 2 closed)`) or its error; then CHANGED SINCE YOU LOOKED, as `changes` shows it, without moving the mark |
 | `changes [--since T] [--ack]` | what others changed since you last acked, from `GET /v1/changes` (`desk_changes`): each item once, last changed first, with when, its state, who wrote it, `new` or the fields that moved, its whole task and NEXT, then the event window; your own writes are left out. `--ack` (`POST /v1/changes`) then moves your `seen:<identity>` mark to the window's end; `--since T` looks from a time instead and cannot go with `--ack`; a first look covers the last day |
 | `work [--all] [--since T] [--advance]` | the whole check round, from `GET /v1/work`: open items as `WORK TIME SEAT STATE OUTCOME TASK NEXT`, grouped by outcome (groups with work only Scott can move first, then newest, then work serving none, `-`); STATE carries the mode (`manual · blocked`, auto bare), TASK is whole and word-wraps inside its own column to fit the terminal (120 columns when there is none) while every other cell stays on the row's first line, NEXT is the one next step (a blocker, `landed: wrap it`, `overdue since 15:00`, a PR's `CI red`, else the item's next). `--all` adds closed and cleared; every seat (task never clipped) and `N of M up, K open`; the queue with `waits_on`; and the catch-up, the issues and PRs the org webhook brought in after the `sweep` mark (or from `--since`, a time), as `new` (queued, or `held` for a maintainer) and `reopened` (open again while the item is closed). `--advance` (admin, `POST /v1/work`) then moves the mark to the last event the round covered; a round cut at 1000 events reads on from there next time, losing and repeating nothing |
 | `queue` | queued items and the state of each item they wait on; `proposed` children and their expiry |
@@ -94,12 +94,28 @@ command line in the skill with the CLI's parser.
 `<cross-session-message>` or `<task-notification>`) that is the session's first
 becomes the seat's task; `stop` (also for StopFailure and the `idle_prompt`
 Notification) ends the turn and records the final assistant message as the seat's `waiting_on` (a new turn drops it); `/clear` drops the task; compact changes nothing.
-Each run is bounded at 2 seconds, prints nothing on stdout, and exits 0 on
-every failure, so a hook never blocks Claude.
+Each run but `next` is bounded at 2 seconds, prints nothing on stdout, and
+exits 0 on every failure, so a hook never blocks Claude. `next` runs in the
+background for up to a day, as below.
+
+`ashigaru hook next` is how the Desk hands out work without Josui's round. It
+runs on SessionStart (startup and `/clear`, the points where a seat's context is
+clean), registered `async` with `asyncRewake`, so it never holds the prompt. It
+long-polls `POST /v1/seats/{name}/next` for up to a day; when the Desk
+hands this free seat an item, it prints the brief on stderr and exits 2, which
+wakes the idle session with it. The Desk claims only while the seat's turn is
+idle, so a seat reading a brief that came another way is never handed a second.
+It exits 0 once the seat cannot take work (busy, held, laneless) or its key is
+refused (401, 403, 404, 409); a Desk that is down or restarting (5xx, 429) is
+asked again with backoff up to 5 minutes. Nothing flows until an admin sets the `autodispatch` mark to
+`on` (`ashigaru mark autodispatch --set on`); any other value is off.
 
 ```json
 "UserPromptSubmit": [{"hooks": [{"type": "command", "command": "ashigaru hook prompt-submit", "timeout": 5}]}],
-"SessionStart": [{"hooks": [{"type": "command", "command": "ashigaru hook session-start", "timeout": 5}]}],
+"SessionStart": [{"hooks": [
+  {"type": "command", "command": "ashigaru hook session-start", "timeout": 5},
+  {"type": "command", "command": "ashigaru hook next", "async": true, "asyncRewake": true, "timeout": 86400}
+]}],
 "Stop": [{"hooks": [{"type": "command", "command": "ashigaru hook stop", "timeout": 5}]}]
 ```
 
