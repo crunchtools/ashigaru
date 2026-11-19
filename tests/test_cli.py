@@ -13,13 +13,14 @@ import pytest
 from fake_desk import FakeDesk, Seen, serve
 
 from ashigaru import __version__
-from ashigaru.cli import commands, config, hooks
+from ashigaru.cli import commands, config, hooks, render
 from ashigaru.cli.__main__ import main
 from ashigaru.cli.client import Desk, DeskError, Unreachable
 from ashigaru.cli.wait import CIWaiter, PollWaiter
 
 KEY = "ash_k1_secret"
 USAGE_ERROR = 2
+NARROW_TABLE = 40
 
 
 def item(**fields: Any) -> dict[str, Any]:
@@ -278,6 +279,63 @@ def test_work_renders_the_whole_round(desk: FakeDesk, capsys: pytest.CaptureFixt
     assert "NEW" in out and "title of a8" in out and "fatherlinux" in out
     assert "held" in out and "events 40 to 57" in out
     assert "REOPENED" not in out
+
+
+def test_work_shows_scotts_columns_with_the_mode_inside_state(
+    desk: FakeDesk, capsys: pytest.CaptureFixture[str]
+) -> None:
+    served = round_()["items"][0] | {"outcome_label": "RT#1652", "step": "blocked: needs a key"}
+    loose = served | {"id": "a4", "mode": "auto", "state": "review", "outcome_label": None, "step": None}
+    desk.on("GET", "/v1/work", (200, round_(items=[served, loose])))
+    assert main(["work"]) == 0
+    lines = capsys.readouterr().out.splitlines()
+    assert lines[0].split() == ["WORK", "TIME", "SEAT", "STATE", "OUTCOME", "TASK", "NEXT"]
+    assert "manual · blocked" in lines[1] and "RT#1652" in lines[1] and "blocked: needs a key" in lines[1]
+    assert lines[2].split()[3:5] == ["review", "-"], "auto shows bare; no outcome shows -"
+
+
+STEP = "blocked: Dolza 2's review wants the lease renewer to log and stop, see r4630065164"
+WIDE = 200
+LONG_TASK = (
+    "Move the check round server-side: the Desk keeps its own status from hooks and webhooks, "
+    "with timers to reconcile what they miss, and Prime's round only reads it"
+)
+
+
+WRAPPED_LINES = {120: 9, 200: 5}
+"""The header and the task's lines: narrower terminals give the task more of them."""
+
+
+@pytest.mark.parametrize("columns", [120, WIDE])
+def test_work_wraps_the_task_in_its_column_and_keeps_next_on_the_first_line(
+    desk: FakeDesk, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch, columns: int
+) -> None:
+    monkeypatch.setenv("COLUMNS", str(columns))
+    row = round_()["items"][0] | {
+        "id": "a686", "seat": "Exedore 3 - Max", "task": LONG_TASK,
+        "outcome_label": "crunchtools/trentina#842",
+        "step": STEP,
+    }  # fmt: skip
+    desk.on("GET", "/v1/work", (200, round_(items=[row])))
+    assert main(["work"]) == 0
+    lines = capsys.readouterr().out.split("\n\n")[0].splitlines()
+    header, first, *more = lines
+    task_at, next_at = header.index("TASK"), header.index("NEXT")
+    assert all(len(line) <= columns for line in lines)
+    assert first[next_at:].startswith("blocked:"), "NEXT on the first line, under its header"
+    assert (first[next_at:] == STEP) is (columns == WIDE), "NEXT whole when there is room, else clipped"
+    assert " ".join(line[task_at:next_at].strip() for line in [first, *more]) == LONG_TASK, "never cut"
+    assert all(not line[:task_at].strip() and not line[next_at:].strip() for line in more)
+    assert len(lines) == WRAPPED_LINES[columns]
+
+
+def test_assign_sets_an_items_outcome_before_assigning_it(desk: FakeDesk) -> None:
+    desk.on("PATCH", "/v1/items/a1", (200, item(parent="a9")))
+    desk.on("POST", "/v1/items/a1/assign", (200, item(seat="Vertex 1", state="assigned")))
+    assert main(["assign", "a1", "--seat", "Vertex 1", "--outcome", "board", "--outcome-text", "do it"]) == 0
+    patch, assigned = desk.seen
+    assert patch.body == {"outcome": "board", "outcome_text": "do it"}
+    assert assigned.body == {"seat": "Vertex 1"}
 
 
 def test_work_shows_what_reopened(desk: FakeDesk, capsys: pytest.CaptureFixture[str]) -> None:
@@ -1165,7 +1223,10 @@ def test_mcp_mint_says_when_the_rollback_fails_too(
     assert "ashigaru mcp revoke c0de01" in capsys.readouterr().err and not out.exists()
 
 
-def test_status_renders_the_board(desk: FakeDesk, capsys: pytest.CaptureFixture[str]) -> None:
+def test_status_renders_the_board(
+    desk: FakeDesk, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("COLUMNS", "200")
     task = "Constitution: fleet rule for build-artifact images, written out in full so nothing clips it"
     busy = {
         "seat": "Exedore 2 - Max", "mode": "auto", "work": "a676", "state": "working", "turn": "active",
@@ -1186,7 +1247,7 @@ def test_status_renders_the_board(desk: FakeDesk, capsys: pytest.CaptureFixture[
     desk.on("GET", "/v1/status", (200, board))
     assert main(["status"]) == 0
     lines = capsys.readouterr().out.splitlines()
-    assert lines[0].split() == ["SEAT", "MODE", "WORK", "TIME", "ACTIVE", "TASK"]
+    assert lines[0].split() == ["OUTCOME", "MODE", "SEAT", "WORK", "TIME", "ACTIVE", "TASK"]
     assert lines[1].endswith(task)
     assert "4 free: Dolza 1/2/4 - Max, Dolza 1 - Vertex" in lines[3]
     assert "1 missing: Exedore 4 - Max" in lines[3] and "11 of 12 up, 9 open" in lines[3]
@@ -1234,3 +1295,10 @@ def test_sweep_run_posts(desk: FakeDesk) -> None:
     desk.on("POST", "/v1/sweep", (200, {"configured": True, "every": 600, "running": True, "last": None}))
     assert main(["sweep", "--run"]) == 0
     assert [seen.method for seen in desk.seen] == ["POST"]
+
+
+def test_table_clips_past_a_short_tail_and_never_widens_it() -> None:
+    columns = [("NAME", lambda row: row["name"]), ("NEXT", lambda row: render.Tail(row["next"]))]
+    out = render.table([{"name": "n" * 50, "next": "soon"}], columns, width=NARROW_TABLE)
+    assert all(len(line) <= NARROW_TABLE for line in out.splitlines())
+    assert "soon" in out and "…" in out

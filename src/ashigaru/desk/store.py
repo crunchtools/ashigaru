@@ -280,9 +280,15 @@ LIST_ITEMS = """
 
 OPEN = "coalesce(wrap, '') != 'cleared' AND state NOT IN ('done', 'wontdo', 'abandoned')"
 CHECK_ORDER = "ORDER BY state = 'blocked' DESC, updated_at DESC, id DESC LIMIT :limit"
-CHECK_ACTIVE = f"SELECT * FROM items WHERE {OPEN} {CHECK_ORDER}"
-CHECK_ALL = f"SELECT * FROM items {CHECK_ORDER}"
-COUNT_OPEN = f"SELECT count(*) FROM items WHERE {OPEN}"
+STATE_SINCE = """(
+    SELECT max(e.at) FROM events e WHERE e.item_id = items.id AND json_type(e.patch, '$.state') IS NOT NULL
+) AS since"""
+"""When the item entered its state: the last event that set one."""
+CHECK_ACTIVE = f"SELECT *, {STATE_SINCE} FROM items WHERE kind != 'outcome' AND {OPEN} {CHECK_ORDER}"
+CHECK_ALL = f"SELECT *, {STATE_SINCE} FROM items WHERE kind != 'outcome' {CHECK_ORDER}"
+"""The check table: work, so never an outcome, which `outcomes` shows."""
+COUNT_OPEN = f"SELECT count(*) FROM items WHERE kind != 'outcome' AND {OPEN}"
+"""Open work: an outcome is what work serves, not work."""
 
 UPSERT_SEAT = """
     INSERT INTO seats (
@@ -596,12 +602,13 @@ def count_open(conn: sqlite3.Connection) -> int:
 
 
 def check(conn: sqlite3.Connection, show_all: bool = False, limit: int = -1) -> list[dict[str, Any]]:
-    """The check table: blocked first, then newest, at most `limit` rows (-1: all). Only open items
+    """The check table's items, whole, with `since` (when each entered its state) and
+    `result_or_blocker`: blocked first, then newest, at most `limit` rows (-1: all). Only open items
     unless `show_all`: a closed item, or a cleared one, is history."""
     rows = conn.execute(CHECK_ALL if show_all else CHECK_ACTIVE, {"limit": limit})
     return [
         {
-            **{key: item[key] for key in ("id", "seat", "mode", "task", "state", "wrap", "next")},
+            **item,
             "result_or_blocker": item["blocked_reason"] if item["state"] == State.BLOCKED else item["result"],
         }
         for item in (decode(row) for row in rows)

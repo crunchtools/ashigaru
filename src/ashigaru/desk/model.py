@@ -190,6 +190,14 @@ class _Fields(BaseModel):
     wrap: Wrap | None = None
     filed_by: str | None = None
     pr: str | None = None
+    outcome: str | None = Field(
+        default=None,
+        description="The outcome it serves: an outcome's id, RT#N or an issue (recorded as an outcome if "
+        "new), or with outcome_text a short name for a new one-off outcome. Sets `parent`.",
+    )
+    outcome_text: str | None = Field(
+        default=None, description="Scott's instruction with no ticket: kept as a new one-off outcome's note."
+    )
 
     @field_validator("subject_key")
     @classmethod
@@ -320,7 +328,7 @@ class Event(BaseModel):
 
 
 class CheckRow(BaseModel):
-    """One row of the /agents check table."""
+    """One row of the check table: WORK, TIME, SEAT, STATE, OUTCOME, TASK, NEXT."""
 
     id: str
     seat: str | None
@@ -330,6 +338,15 @@ class CheckRow(BaseModel):
     wrap: Wrap | None
     result_or_blocker: str | None
     next: str | None
+    since: str | None = Field(None, description="When the item entered its state.")
+    outcome: str | None = Field(None, description="The outcome it serves: its parent, or its PR's story's.")
+    outcome_label: str | None = Field(None, description="RT#N, owner/repo#N, or a one-off outcome's name.")
+    step: str | None = Field(
+        None, description="NEXT: its blocker, a landed or overdue flag, a red PR, else its next or result."
+    )
+    needs_you: bool = Field(
+        False, description="Scott's to move: his blocked work, or a subject held for him."
+    )
 
 
 class CatchUpRow(BaseModel):
@@ -489,6 +506,7 @@ class BoardRow(BaseModel):
     turn: Turn
     task: str | None = Field(description="The work's task, else the session's first prompt; never clipped.")
     missing: bool = False
+    outcome_label: str | None = Field(None, description="The outcome the work serves.")
 
 
 class NeedsYou(BaseModel):
@@ -598,6 +616,8 @@ class NewItem(BaseModel):
     after: list[str] = Field(default_factory=list)
     mode: Mode | None = None
     subject_key: str | None = None
+    outcome: str | None = Field(None, description="As ItemCreate's: the outcome it serves.")
+    outcome_text: str | None = Field(None, description="As ItemCreate's: Scott's instruction, no ticket.")
 
 
 class Identity(BaseModel):

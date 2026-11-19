@@ -1,6 +1,8 @@
 """Human tables for the views and actions. `--json` bypasses all of this."""
 
 import re
+import shutil
+import textwrap
 from collections.abc import Callable, Sequence
 from datetime import UTC, datetime
 from typing import Any
@@ -11,6 +13,14 @@ TEXT_WIDTH = 60
 NARROW = 40
 NARROWER = 30
 HOURS_A_DAY = 24
+WIDTH = 120
+"""A table's width when there is no terminal to measure."""
+NO_TERMINAL = (WIDTH, 24)
+"""shutil's fallback size, columns and lines, when stdout is no terminal and COLUMNS is unset."""
+WRAP_MIN = 24
+"""The narrowest a wrapped column gets, however wide the rest."""
+CLIP_MIN = 12
+"""The narrowest a clipped column gets to make room for a wrapped one."""
 
 
 SEAT_NAME = re.compile(r"^(.*\S) (\d+) - (.+)$")
@@ -21,9 +31,13 @@ class Whole(str):
     """A cell table() never clips: a task is read in full."""
 
 
+class Tail(str):
+    """A cell table() keeps on one line and clips only when its row overflows: NEXT."""
+
+
 def clip(value: Any, width: int = TEXT_WIDTH) -> str:
     text = "" if value is None else " ".join(str(value).split())
-    return text if isinstance(value, Whole) or len(text) <= width else text[: width - 1] + "…"
+    return text if isinstance(value, Whole | Tail) or len(text) <= width else text[: width - 1] + "…"
 
 
 def age(stamp: str | None, now: datetime | None = None) -> str:
@@ -73,12 +87,40 @@ def money(value: float | None) -> str:
     return "" if value is None else f"${value:,.2f}"
 
 
-def table(rows: Sequence[dict[str, Any]], columns: Sequence[Column]) -> str:
-    cells = [[h for h, _ in columns]] + [[clip(get(row)) for _, get in columns] for row in rows]
+def table(rows: Sequence[dict[str, Any]], columns: Sequence[Column], width: int | None = None) -> str:
+    """Rows under their headers, each column as wide as its widest cell. When the table is wider than
+    `width` (the terminal's, else 120), a Whole column word-wraps, never cut, in the room the others
+    leave (WRAP_MIN at least); then, while the row still overflows, a Tail column and then the widest
+    others are clipped, none below CLIP_MIN and none widened. Every cell but a Whole one stays on its
+    row's first line, so the columns line up."""
+    raw = [[get(row) for _, get in columns] for row in rows]
+    whole, tail = (
+        {i for i in range(len(columns)) if any(isinstance(line[i], kind) for line in raw)}
+        for kind in (Whole, Tail)
+    )
+    cells = [[h for h, _ in columns]] + [[clip(value) for value in line] for line in raw]
     widths = [max(len(line[i]) for line in cells) for i in range(len(columns))]
-    lines = [
-        "  ".join(cell.ljust(w) for cell, w in zip(line, widths, strict=True)).rstrip() for line in cells
-    ]
+    room = (width or shutil.get_terminal_size(NO_TERMINAL).columns) - 2 * (len(columns) - 1)
+    if whole and sum(widths) > room:
+        free = room - sum(w for i, w in enumerate(widths) if i not in whole)
+        for i in whole:
+            widths[i] = min(widths[i], max(WRAP_MIN, free // len(whole)))
+    others = sorted(
+        (i for i in range(len(columns)) if i not in whole), key=lambda i: (i not in tail, -widths[i])
+    )
+    for i in others:
+        if (over := sum(widths) - room) <= 0:
+            break
+        widths[i] = max(min(CLIP_MIN, widths[i]), widths[i] - over)
+    lines: list[str] = []
+    for line in cells:
+        parts = [
+            textwrap.wrap(cell, widths[i]) or [""] if i in whole else [clip(cell, widths[i])]
+            for i, cell in enumerate(line)
+        ]
+        for depth in range(max(len(part) for part in parts)):
+            row = [part[depth] if depth < len(part) else "" for part in parts]
+            lines.append("  ".join(cell.ljust(w) for cell, w in zip(row, widths, strict=True)).rstrip())
     return "\n".join(lines)
 
 
@@ -146,6 +188,12 @@ def status(board: dict[str, Any]) -> str:
 
 def queue(lists: dict[str, Any]) -> str:
     return f"{table(lists['queued'], QUEUED)}\n\n{table(lists['proposed'], PROPOSED)}"
+
+
+def state(row: dict[str, Any]) -> str:
+    """STATE: `review`, `manual · blocked`; auto, the default, shows bare; a wrap stage follows."""
+    shown = row["state"] + (f"/{row['wrap']}" if row.get("wrap") else "")
+    return f"manual · {shown}" if row.get("mode") == "manual" else shown
 
 
 def work(round_: dict[str, Any]) -> str:
@@ -228,8 +276,9 @@ AGENTS: list[Column] = [
     ("TASK", lambda s: Whole(s.get("task") or "")),
 ]
 BOARD: list[Column] = [
-    ("SEAT", lambda r: r["seat"]),
+    ("OUTCOME", lambda r: r.get("outcome_label") or "-"),
     ("MODE", lambda r: r["mode"]),
+    ("SEAT", lambda r: r["seat"]),
     ("WORK", lambda r: r.get("work")),
     ("TIME", lambda r: age(r.get("since"))),
     ("ACTIVE", lambda r: "missing" if r.get("missing") else seen(r.get("active"))),
@@ -242,14 +291,20 @@ NEEDS: list[Column] = [
     ("TEXT", lambda n: Whole(f"{n['seat']}: {n['text']}" if n.get("seat") else n.get("text") or "")),
 ]
 WORK: list[Column] = [
-    ("ID", lambda r: r["id"]),
+    ("WORK", lambda r: r["id"]),
+    ("TIME", lambda r: age(r.get("since") or r.get("updated_at"))),
     ("SEAT", lambda r: r.get("seat")),
-    ("MODE", lambda r: r["mode"]),
-    ("STATE", lambda r: r["state"] + (f"/{r['wrap']}" if r.get("wrap") else "")),
+    ("STATE", lambda r: state(r)),
+    ("OUTCOME", lambda r: r.get("outcome_label") or "-"),
     ("TASK", lambda r: Whole(r["task"])),
-    ("RESULT OR BLOCKER", lambda r: clip(r.get("result_or_blocker"), NARROW)),
-    ("NEXT", lambda r: clip(r.get("next"), NARROWER)),
+    (
+        "NEXT",
+        lambda r: Tail(
+            " ".join(str(r.get("step") or r.get("next") or r.get("result_or_blocker") or "").split())
+        ),
+    ),
 ]
+"""Scott's `work` columns: the mode shows inside STATE, and NEXT is the one next step."""
 QUEUED: list[Column] = [
     ("QUEUED", lambda i: i["id"]),
     ("LANE", lambda i: i.get("lane")),

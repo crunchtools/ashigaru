@@ -119,8 +119,8 @@ missing seat, the likely cause and fix:
 
 ## `status`
 
-`ashigaru status`: the board Scott reads. Each busy seat (SEAT, MODE, WORK,
-TIME, ACTIVE, whole TASK), one line of free and missing seats with `X of Y up,
+`ashigaru status`: the board Scott reads. Each busy seat (OUTCOME, MODE, SEAT,
+WORK, TIME, ACTIVE, whole TASK), one line of free and missing seats with `X of Y up,
 Z open`, then NEEDS YOU: manual seats idle with the question they last asked
 (`waiting_on`, from the seat's `stop` hook, dropped on a new turn or `/clear`),
 Scott's blocked manual work, and subjects intake holds for approval. Show it
@@ -168,9 +168,11 @@ only marks it landed. A seat records its PR with
      a report, SendMessage `"[a7] status? Reply DONE/BLOCKED/WORKING with one line."`
    - Stuck in a loop or waiting on a prompt nobody will answer: tell Scott.
 3. Drain the queue (`queue` step 1) from the round's queue and seats.
-4. Report one table: id, seat, mode, task, state, result/blocker, next.
-   Blocked items that need Scott come first; within that group and the rest,
-   sort by seat name. Below it, the seat line, then **Queued** items, then
+4. Report the check table as the Desk orders it, in Scott's columns: WORK,
+   TIME, SEAT, STATE (`manual · blocked`; auto bare), OUTCOME (`-` when none),
+   the whole TASK, and NEXT, the one next step (a blocker, `landed: wrap it`,
+   `overdue since 15:00`, `owner/repo#N CI red`, else the item's next). Rows
+   come grouped by outcome, groups holding work only Scott can move first. Below it, the seat line, then **Queued** items, then
    **New since last check** from the catch-up: ref, title, lane (or `held`),
    `filed_by`, and any **Reopened**.
 
@@ -206,8 +208,13 @@ returns at once).
 
 ## `outcomes`
 
-`ashigaru outcomes`: each outcome (an RT ticket or GitHub issue) with its
-stories' done, blocked and open counts. Use it when Scott asks how a feature or program is going.
+`ashigaru outcomes`: each outcome (an RT ticket, a GitHub issue, or Scott's
+one-off instruction) with its stories' done, blocked and open counts. Name the
+outcome when recording work: `--outcome RT#1652` (or an issue, or an outcome's
+id) finds or records it; for an instruction with no ticket,
+`--outcome board --outcome-text "<Scott's words>"` records a one-off outcome
+named `board` that keeps the words. A review or fix-up of a story's PR inherits
+its outcome, so give it none. Use it when Scott asks how a feature or program is going.
 
 ## `list`
 
@@ -261,8 +268,9 @@ item's learnings memorized. A Learned of `none` records nothing.
    lines that cannot collide: separate repositories, or separate files with
    no shared edits. Three to five seats at once is the useful ceiling.
 3. **Record and assign** before briefing, so the brief carries the Desk's id:
-   `ashigaru assign --task "<one line>" --done-when "<one line>" --ref <url> --subject-key <key> --repo <owner/repo> --lane exedore-max`,
-   or `ashigaru assign a7 --lane exedore-max` for an item already recorded.
+   `ashigaru assign --task "<one line>" --done-when "<one line>" --ref <url> --subject-key <key> --repo <owner/repo> --lane exedore-max --outcome RT#1652`,
+   or `ashigaru assign a7 --lane exedore-max` for an item already recorded
+   (`--outcome`/`--outcome-text` set its outcome first; see `outcomes`).
    The Desk picks the lane's seat that has been free longest and isn't held by
    Scott, and never a busy one; `--seat` names a seat instead. If the assign is
    refused, the CLI prints the item, which stays `queued`: start the loop, tell
