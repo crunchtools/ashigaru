@@ -221,10 +221,11 @@ def _read(conn: sqlite3.Connection, settings: Settings, keys: set[str], counts: 
                 counts.subjects += 1
 
 
-def _ask(settings: Settings, hits: list[Found], counts: Counts) -> None:
-    """Ask the forge, FETCHERS at a time, whether each member who authored a hit may write to its
-    repo, once per (repo, author), so `_found` reads the answers from `counts.writers`. A failed
-    check is a no, as the forge's own permission check makes it."""
+def _ask(conn: sqlite3.Connection, settings: Settings, hits: list[Found], counts: Counts) -> None:
+    """Ask the forge, FETCHERS at a time, whether each member who authored a hit that needs a
+    decision (a new subject, or a PR naming an item) may write to its repo, once per (repo, author),
+    so `_found` reads the answers from `counts.writers`. A failed check is a no, as the forge's own
+    permission check makes it. Org members are few, so this is a handful of calls."""
     pairs = {
         (hit.item.repo, hit.item.author)
         for hit in hits
@@ -232,6 +233,10 @@ def _ask(settings: Settings, hits: list[Found], counts: Counts) -> None:
         and hit.item.repo
         and hit.item.author
         and hit.item.author not in settings.authors
+        and (
+            LINK.search(f"{hit.item.title}\n{hit.body}")
+            or store.item_by_subject(conn, hit.item.subject_key) is None
+        )
     }
     with ThreadPoolExecutor(FETCHERS) as pool:
         answers = {pair: pool.submit(settings.forge.may_write, *pair, settings.token) for pair in pairs}
@@ -247,7 +252,7 @@ def _search(
         counts.errors.insert(0, f"search: {_why(failed)}")
         LOG.warning("sweep search stopped: %s", counts.errors[0], exc_info=failed)
         return
-    _ask(settings, [hit for hit in search.hits if hit.item.subject_key not in keys], counts)
+    _ask(conn, settings, [hit for hit in search.hits if hit.item.subject_key not in keys], counts)
     for hit in search.hits:
         try:
             if hit.item.subject_key not in keys:
