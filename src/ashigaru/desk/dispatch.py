@@ -442,6 +442,20 @@ def _busy(seat: dict[str, Any], work: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _held_seat(seat: dict[str, Any], state: str | None) -> dict[str, Any]:
+    """A NEEDS YOU row for a seat Scott holds that is idle: on a question it asked him (`waiting`), or
+    silent for STALE_SEAT (`stale`), a /clear that never fired, which only he can settle."""
+    stale = f"held, silent since {seat['updated_at']}: /clear the seat or wrap {seat['item']}"
+    return {
+        "why": "stale" if seat["missing"] else "waiting",
+        "work": seat["item"],
+        "seat": seat["name"],
+        "mode": "manual",
+        "state": state,
+        "text": stale if seat["missing"] else seat["waiting_on"],
+    }
+
+
 def status(conn: sqlite3.Connection) -> dict[str, Any]:
     """`ashigaru status`, the board a person reads: each busy seat with its work in full, the free and
     missing seats by name, the tally, and NEEDS YOU: each manual seat idle on what it last said, then
@@ -458,16 +472,9 @@ def status(conn: sqlite3.Connection) -> dict[str, Any]:
     idle = [row for row in roster if row["status"] != SeatStatus.BUSY]
     held = {row["work"]: row["state"] for row in busy}
     needs = [
-        {
-            "why": "waiting",
-            "work": row["item"],
-            "seat": row["name"],
-            "mode": "manual",
-            "state": held.get(row["item"]),
-            "text": row["waiting_on"],
-        }
+        _held_seat(row, held.get(row["item"]))
         for row in roster
-        if row["owner"] and row["turn"] == Turn.IDLE and row["waiting_on"]
+        if row["owner"] and row["turn"] == Turn.IDLE and (row["waiting_on"] or row["missing"])
     ]
     needs += [_needs(store.decode(item)) for item in conn.execute(NEEDS_YOU, {"limit": QUEUE_LIMIT})]
     needs += [

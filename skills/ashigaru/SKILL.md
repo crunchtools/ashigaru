@@ -123,7 +123,10 @@ missing seat, the likely cause and fix:
 WORK, TIME, ACTIVE, whole TASK), one line of free and missing seats with `X of Y up,
 Z open`, then NEEDS YOU: manual seats idle with the question they last asked
 (`waiting_on`, from the seat's `stop` hook, dropped on a new turn or `/clear`),
-Scott's blocked manual work, and subjects intake holds for approval. Show it
+Scott's blocked manual work, his holds on seats silent for a day (`stale`: the
+Desk never closes them; tell Scott), and subjects intake holds for approval. A
+seat whose `stop` hook never arrived is ended by the Desk itself after three
+hours of silence (`turn_reconciled_at`). Show it
 for "show the board" or "what needs me"; `work` is the round that acts.
 
 ## `work`

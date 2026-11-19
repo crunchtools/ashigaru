@@ -2076,7 +2076,7 @@
         "type": "string"
       },
       "NeedsYou": {
-        "description": "Something only Scott can move: his blocked work, a subject held for approval, a manual seat\nidle on a question, or an outsider's subject the sweep found and did not store.",
+        "description": "Something only Scott can move: his blocked work, a subject held for approval, a manual seat\nidle on a question, a hold of his on a seat silent for a day, or an outsider's subject the sweep\nfound and did not store.",
         "properties": {
           "mode": {
             "anyOf": [
@@ -2126,7 +2126,8 @@
               "blocked",
               "held",
               "waiting",
-              "outsider"
+              "outsider",
+              "stale"
             ],
             "title": "Why",
             "type": "string"
@@ -2895,6 +2896,18 @@
           "turn": {
             "$ref": "#/components/schemas/Turn",
             "default": "idle"
+          },
+          "turn_reconciled_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When seat reconcile ended a turn no hook did (active past ASHIGARU_TURN_MAX with no write for 10 minutes); null once a turn starts.",
+            "title": "Turn Reconciled At"
           },
           "turn_started_at": {
             "anyOf": [

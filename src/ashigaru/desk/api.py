@@ -587,7 +587,8 @@ def create_app(
     intake is held and no commit's CI is success.
     `forge_authors` maps it to accounts whose own subjects are trusted as a writer's: the app's bot.
     A `sweep.Sweeper` set as `app.state.sweeper` before startup runs while the app does (serve sets
-    one when the forge has a token and an org); with none, nothing is swept.
+    one when the forge has a token and an org); with none, nothing is swept. A `reconcile.Reconciler`
+    set as `app.state.reconciler` runs the same way (serve always sets one).
     """
     from . import (
         ci,
@@ -604,8 +605,9 @@ def create_app(
 
     @contextlib.asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-        sweeper: sweep.Sweeper | None = app.state.sweeper
-        timer = asyncio.create_task(sweeper.loop()) if sweeper else None
+        timers = [
+            asyncio.create_task(each.loop()) for each in (app.state.sweeper, app.state.reconciler) if each
+        ]
         try:
             if mcp_lifespan is None:
                 yield
@@ -613,7 +615,7 @@ def create_app(
                 async with mcp_lifespan(app):
                     yield
         finally:
-            if timer:
+            for timer in timers:
                 timer.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
                     await timer
@@ -625,6 +627,7 @@ def create_app(
         lifespan=lifespan,
     )
     app.state.sweeper = None
+    app.state.reconciler = None
     app.state.db_path = str(db_path)
     app.state.webhook_secrets = webhooks.secrets(webhook_secrets or {})
     app.state.forge_tokens = dict(forge_tokens or {})
