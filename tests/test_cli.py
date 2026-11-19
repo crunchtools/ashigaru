@@ -302,12 +302,11 @@ LONG_TASK = (
 )
 
 
-WRAPPED_LINES = {120: 9, 200: 5}
 """The header and the task's lines: narrower terminals give the task more of them."""
 
 
 @pytest.mark.parametrize("columns", [120, WIDE])
-def test_work_wraps_the_task_in_its_column_and_keeps_next_on_the_first_line(
+def test_work_keeps_every_row_on_one_line(
     desk: FakeDesk, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch, columns: int
 ) -> None:
     monkeypatch.setenv("COLUMNS", str(columns))
@@ -319,14 +318,13 @@ def test_work_wraps_the_task_in_its_column_and_keeps_next_on_the_first_line(
     desk.on("GET", "/v1/work", (200, round_(items=[row])))
     assert main(["work"]) == 0
     lines = capsys.readouterr().out.split("\n\n")[0].splitlines()
-    header, first, *more = lines
+    header, first = lines
     task_at, next_at = header.index("TASK"), header.index("NEXT")
     assert all(len(line) <= columns for line in lines)
-    assert first[next_at:].startswith("blocked:"), "NEXT on the first line, under its header"
+    assert first[next_at:].startswith("blocked:"), "NEXT under its header"
     assert (first[next_at:] == STEP) is (columns == WIDE), "NEXT whole when there is room, else clipped"
-    assert " ".join(line[task_at:next_at].strip() for line in [first, *more]) == LONG_TASK, "never cut"
-    assert all(not line[:task_at].strip() and not line[next_at:].strip() for line in more)
-    assert len(lines) == WRAPPED_LINES[columns]
+    task = first[task_at:next_at].strip()
+    assert LONG_TASK.startswith(task.removesuffix("…")) and task.endswith("…"), "the task is clipped"
 
 
 def test_assign_sets_an_items_outcome_before_assigning_it(desk: FakeDesk) -> None:

@@ -2,7 +2,6 @@
 
 import re
 import shutil
-import textwrap
 from collections.abc import Callable, Sequence
 from datetime import UTC, datetime
 from typing import Any
@@ -28,7 +27,7 @@ SEAT_NAME = re.compile(r"^(.*\S) (\d+) - (.+)$")
 
 
 class Whole(str):
-    """A cell table() never clips: a task is read in full."""
+    """A cell table() clips last: a task keeps the room the others leave, on one line."""
 
 
 class Tail(str):
@@ -89,10 +88,10 @@ def money(value: float | None) -> str:
 
 def table(rows: Sequence[dict[str, Any]], columns: Sequence[Column], width: int | None = None) -> str:
     """Rows under their headers, each column as wide as its widest cell. When the table is wider than
-    `width` (the terminal's, else 120), a Whole column word-wraps, never cut, in the room the others
-    leave (WRAP_MIN at least); then, while the row still overflows, a Tail column and then the widest
-    others are clipped, none below CLIP_MIN and none widened. Every cell but a Whole one stays on its
-    row's first line, so the columns line up."""
+    `width` (the terminal's, else 120), a Whole column is clipped to the room the others leave
+    (WRAP_MIN at least); then, while the row still overflows, a Tail column and then the widest
+    others are clipped, none below CLIP_MIN and none widened. Every row is one line; `get` shows a
+    task in full."""
     raw = [[get(row) for _, get in columns] for row in rows]
     whole, tail = (
         {i for i in range(len(columns)) if any(isinstance(line[i], kind) for line in raw)}
@@ -115,7 +114,7 @@ def table(rows: Sequence[dict[str, Any]], columns: Sequence[Column], width: int 
     lines: list[str] = []
     for line in cells:
         parts = [
-            textwrap.wrap(cell, widths[i]) or [""] if i in whole else [clip(cell, widths[i])]
+            [cell if len(cell) <= widths[i] else cell[: widths[i] - 1] + "…"] if i in whole else [clip(cell, widths[i])]
             for i, cell in enumerate(line)
         ]
         for depth in range(max(len(part) for part in parts)):
