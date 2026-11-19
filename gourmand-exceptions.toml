@@ -81,3 +81,10 @@ path = "src/ashigaru/desk/forges/github.py"
 pattern = "_combine"
 justification = "the one rule for several reports of a check, called from both reported and GitHub.required; Gourmand misses the comprehension call site"
 classification = "gourmand_bug"
+
+[[exceptions]]
+check = "copy_paste_detection"
+path = "src/ashigaru/desk/dispatch.py"
+item = "_waiting_seat"
+justification = "matched against store.write_seat (and before that release.survey) on statement shape alone: a seat lookup, guards and one query, no shared logic"
+classification = "gourmand_bug"

@@ -387,7 +387,9 @@ Auto items only.
    ```
 4. Close it with `ashigaru wrap a7`. The Desk refuses without CC-DONE or while
    the turn is active, then clears the wrap, closes the item `done` and frees
-   the seat. Seat text never goes on its command line: the Learned line
+   the seat. The seat's `next` hook, started by the clear, waits while the
+   item is `wrapping` and claims its next work once this closes it. Seat text
+   never goes on its command line: the Learned line
    already reached the Desk through `report`, so `--learned` stays unused.
    Confirm with `agents` that the seat shows `free`.
 
