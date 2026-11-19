@@ -37,8 +37,51 @@ def test_a_ref_names_one_outcome_recorded_once(
     second = create(client, keys, outcome="rt #1652")
     outcome = store.get_item(conn, first["parent"]) or {}
     assert first["parent"] == second["parent"]
-    assert (outcome["kind"], outcome["subject_key"], outcome["mode"]) == ("outcome", "RT#1652", "manual")
+    assert (outcome["kind"], outcome["task"], outcome["mode"]) == ("outcome", "RT#1652", "auto")
     assert create(client, keys, outcome=outcome["id"])["parent"] == outcome["id"], "an id names it too"
+    assert {row["id"]: row["outcome_label"] for row in rows(client, keys)}[first["id"]] == "RT#1652"
+
+
+def test_a_story_holding_the_key_is_never_taken_for_its_outcome(
+    client: TestClient, keys: Keys, conn: sqlite3.Connection
+) -> None:
+    intake = create(
+        client, keys, subject_key="crunchtools/trentina#842", task="the issue, as intake recorded it"
+    )
+    story = create(client, keys, outcome="https://github.com/crunchtools/trentina/issues/842")
+    outcome = store.get_item(conn, story["parent"]) or {}
+    assert story["parent"] != intake["id"] and outcome["kind"] == "outcome"
+    assert {row["id"]: row["outcome_label"] for row in rows(client, keys)}[
+        story["id"]
+    ] == "crunchtools/trentina#842"
+
+
+def test_a_pr_or_blank_text_is_no_outcome(client: TestClient, keys: Keys) -> None:
+    create(client, keys, pr="crunchtools/ashigaru#221")
+    for body in (
+        {"outcome": "https://github.com/crunchtools/ashigaru/pull/224"},
+        {"outcome": "crunchtools/ashigaru#221"},
+        {"outcome": "board", "outcome_text": "   "},
+        {"outcome_text": ""},
+    ):
+        made = client.post("/v1/items", headers=keys[JOSUI], json={"task": "t"} | body)
+        assert made.status_code == UNPROCESSABLE_ENTITY, body
+
+
+def test_outcomes_are_not_work_rows_and_close_with_their_last_story(
+    client: TestClient, keys: Keys, conn: sqlite3.Connection
+) -> None:
+    first = create(client, keys, outcome="RT#7")
+    second = create(client, keys, outcome="RT#7")
+    outcome = first["parent"]
+    assert outcome not in {row["id"] for row in rows(client, keys)}
+    for story in (first, second):
+        closed = client.patch(f"/v1/items/{story['id']}", headers=keys[JOSUI], json={"state": "done"})
+        assert closed.status_code == OK, closed.text
+        rows(client, keys)
+        done = (store.get_item(conn, outcome) or {})["state"] == "done"
+        assert done is (story is second), "open while a story is"
+    assert (store.get_item(conn, outcome) or {})["result"] == "all its stories closed"
 
 
 def test_an_instruction_with_no_ticket_is_a_one_off_outcome(
@@ -48,7 +91,7 @@ def test_an_instruction_with_no_ticket_is_a_one_off_outcome(
         store.get_item(conn, create(client, keys, outcome="board", outcome_text=INSTRUCTION)["parent"]) or {}
     )
     bare = store.get_item(conn, create(client, keys, outcome_text=INSTRUCTION)["parent"]) or {}
-    assert (named["task"], named["note"], named["subject_key"]) == ("board", INSTRUCTION, None)
+    assert (named["task"], named["note"], named["mode"]) == ("board", INSTRUCTION, "auto")
     assert bare["task"] == INSTRUCTION[: outcomes.LABEL] and bare["note"] == INSTRUCTION
     assert named["id"] != bare["id"]
 
@@ -59,11 +102,15 @@ def test_an_unknown_outcome_without_its_text_is_422(client: TestClient, keys: Ke
     assert "give its instruction text" in made.text
 
 
-def test_an_update_sets_the_outcome(client: TestClient, keys: Keys) -> None:
+def test_an_update_sets_the_outcome_and_a_null_one_clears_it(client: TestClient, keys: Keys) -> None:
     story = create(client, keys)
     patched = client.patch(f"/v1/items/{story['id']}", headers=keys[JOSUI], json={"outcome": "RT#9"})
     assert patched.status_code == OK, patched.text
     assert patched.json()["parent"]
+    untouched = client.patch(f"/v1/items/{story['id']}", headers=keys[JOSUI], json={"note": "n"})
+    assert untouched.json()["parent"] == patched.json()["parent"], "an omitted outcome leaves it"
+    cleared = client.patch(f"/v1/items/{story['id']}", headers=keys[JOSUI], json={"outcome": None})
+    assert cleared.status_code == OK and cleared.json()["parent"] is None
 
 
 def test_a_review_and_a_filed_child_inherit_the_storys_outcome(
@@ -146,3 +193,32 @@ def test_next_says_a_prs_ci_is_red_from_one_query(
     assert found[red["id"]]["step"] == "crunchtools/x#5 CI red"
     assert found[green["id"]]["step"] == "keep going"
     assert len([query for query in queries if "ci_checks" in query]) == 1
+
+
+def test_a_held_subject_needs_you_and_its_group_comes_first(
+    client: TestClient, keys: Keys, conn: sqlite3.Connection
+) -> None:
+    quiet = create(client, keys, outcome="RT#1")
+    held = create(client, keys, outcome="RT#2", mode="manual")
+    trusted = create(client, keys, outcome="RT#3")
+    with store.transaction(conn):
+        store.update_item(conn, held["id"], {"extra": {"trusted": False}}, JOSUI)
+        store.update_item(conn, trusted["id"], {"extra": {"trusted": True}}, JOSUI)
+    found = {row["id"]: row for row in rows(client, keys)}
+    assert found[held["id"]]["needs_you"] and not found[trusted["id"]]["needs_you"]
+    assert [row["id"] for row in rows(client, keys)][0] == held["id"]
+    assert not found[quiet["id"]]["needs_you"]
+
+
+def test_since_is_the_latest_state_change(client: TestClient, keys: Keys, conn: sqlite3.Connection) -> None:
+    story = create(client, keys)
+    conn.execute("UPDATE events SET at = '2026-11-19T09:00:00Z' WHERE item_id = ?", (story["id"],))
+    for state, at in (("working", "2026-11-19T10:00:00Z"), ("blocked", "2026-11-19T11:00:00Z")):
+        client.patch(f"/v1/items/{story['id']}", headers=keys[JOSUI], json={"state": state})
+        conn.execute(
+            "UPDATE events SET at = ? WHERE seq = (SELECT max(seq) FROM events WHERE item_id = ?)",
+            (at, story["id"]),
+        )
+    client.patch(f"/v1/items/{story['id']}", headers=keys[JOSUI], json={"note": "not a state change"})
+    found = {row["id"]: row for row in store.check(conn)}
+    assert found[story["id"]]["since"] == "2026-11-19T11:00:00Z"

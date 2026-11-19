@@ -293,6 +293,38 @@ def test_work_shows_scotts_columns_with_the_mode_inside_state(
     assert lines[2].split()[3:5] == ["review", "-"], "auto shows bare; no outcome shows -"
 
 
+LONG_TASK = (
+    "Move the check round server-side: the Desk keeps its own status from hooks and webhooks, "
+    "with timers to reconcile what they miss, and Prime's round only reads it"
+)
+
+
+WRAPPED_LINES = {120: 9, 200: 3}
+"""The header and the task's lines: narrower terminals give the task more of them."""
+
+
+@pytest.mark.parametrize("columns", [120, 200])
+def test_work_wraps_the_task_in_its_column_and_keeps_next_on_the_first_line(
+    desk: FakeDesk, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch, columns: int
+) -> None:
+    monkeypatch.setenv("COLUMNS", str(columns))
+    row = round_()["items"][0] | {
+        "id": "a686", "seat": "Exedore 3 - Max", "task": LONG_TASK,
+        "outcome_label": "crunchtools/trentina#842",
+        "step": "APPROVE once triage green, then wrap the seat",
+    }  # fmt: skip
+    desk.on("GET", "/v1/work", (200, round_(items=[row])))
+    assert main(["work"]) == 0
+    lines = capsys.readouterr().out.split("\n\n")[0].splitlines()
+    header, first, *more = lines
+    task_at, next_at = header.index("TASK"), header.index("NEXT")
+    assert all(len(line) <= columns for line in lines)
+    assert first[next_at:].startswith("APPROVE"), "NEXT on the first line, under its header"
+    assert " ".join(line[task_at:next_at].strip() for line in [first, *more]) == LONG_TASK, "never cut"
+    assert all(not line[:task_at].strip() and not line[next_at:].strip() for line in more)
+    assert len(lines) == WRAPPED_LINES[columns]
+
+
 def test_assign_sets_an_items_outcome_before_assigning_it(desk: FakeDesk) -> None:
     desk.on("PATCH", "/v1/items/a1", (200, item(parent="a9")))
     desk.on("POST", "/v1/items/a1/assign", (200, item(seat="Vertex 1", state="assigned")))
@@ -1187,7 +1219,10 @@ def test_mcp_mint_says_when_the_rollback_fails_too(
     assert "ashigaru mcp revoke c0de01" in capsys.readouterr().err and not out.exists()
 
 
-def test_status_renders_the_board(desk: FakeDesk, capsys: pytest.CaptureFixture[str]) -> None:
+def test_status_renders_the_board(
+    desk: FakeDesk, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("COLUMNS", "200")
     task = "Constitution: fleet rule for build-artifact images, written out in full so nothing clips it"
     busy = {
         "seat": "Exedore 2 - Max", "mode": "auto", "work": "a676", "state": "working", "turn": "active",

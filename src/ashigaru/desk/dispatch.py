@@ -447,6 +447,7 @@ def status(conn: sqlite3.Connection) -> dict[str, Any]:
     missing seats by name, the tally, and NEEDS YOU: each manual seat idle on what it last said, then
     Scott's blocked work, then subjects held for his approval."""
     subjects.hygiene(conn)
+    served.close_finished(conn)
     roster = seats(conn)
     working = [row for row in roster if row["status"] == SeatStatus.BUSY]
     items = {
@@ -495,6 +496,7 @@ def work(conn: sqlite3.Connection, show_all: bool = False, since: str | None = N
     (`truncated`); GET /v1/items pages the rest. Like every view of the queue, it first settles items
     whose subject moved (subjects.hygiene)."""
     subjects.hygiene(conn)
+    served.close_finished(conn)
     items = store.check(conn, show_all, limit=QUEUE_LIMIT + 1)
     roster = seats(conn)
     return {

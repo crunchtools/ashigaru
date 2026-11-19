@@ -343,6 +343,7 @@ def _ask(conn: sqlite3.Connection, settings: Settings, hits: list[Found], counts
             counts.writers[pair] = answer.result()
         except UNREADABLE as failed:
             counts.unasked[pair] = _why(failed)
+            LOG.warning("sweep could not ask whether %s may write to %s", pair[1], pair[0], exc_info=failed)
 
 
 def _search(

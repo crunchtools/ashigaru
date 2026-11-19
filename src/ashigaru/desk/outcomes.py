@@ -24,6 +24,26 @@ LABEL = 40
 """The longest one-off outcome name drawn from its instruction."""
 
 OUTCOMES = "SELECT id, subject_key, task FROM items WHERE kind = 'outcome'"
+OUTCOME_BY_KEY = """
+    SELECT id FROM items
+    WHERE kind = 'outcome' AND (subject_key = :key OR (subject_key IS NULL AND ref = :key))
+    ORDER BY state IN ('done', 'wontdo', 'abandoned'), updated_at DESC LIMIT 1
+"""
+"""The outcome item a ref names: one recorded with that subject_key, or one minted here that carries
+it as its ref; an open one first."""
+IS_PR = "SELECT 1 FROM items WHERE pr = ? LIMIT 1"
+FINISHED = """
+    SELECT o.id FROM items o
+    WHERE o.kind = 'outcome' AND o.mode = 'auto' AND o.seat IS NULL
+      AND coalesce(o.wrap, '') != 'cleared' AND o.state NOT IN ('done', 'wontdo', 'abandoned')
+      AND EXISTS (SELECT 1 FROM items c WHERE c.parent = o.id)
+      AND NOT EXISTS (
+          SELECT 1 FROM items c WHERE c.parent = o.id
+          AND coalesce(c.wrap, '') != 'cleared' AND c.state NOT IN ('done', 'wontdo', 'abandoned')
+      )
+"""
+"""Open auto outcomes no seat holds whose stories, of which there is one at least, are all closed."""
+ACTOR = "desk"
 STORIES = "SELECT pr, parent FROM items WHERE pr IS NOT NULL AND parent IS NOT NULL ORDER BY updated_at"
 FILED = "SELECT id, parent FROM items WHERE parent IS NOT NULL AND id IN (SELECT value FROM json_each(:ids))"
 RED = f"""
@@ -46,41 +66,75 @@ def label(outcome: dict[str, Any]) -> str:
     return str(outcome["subject_key"] or outcome["task"][:LABEL])
 
 
+def _is_pr(conn: sqlite3.Connection, name: str, key: str) -> bool:
+    """A PR is a story's `pr`, never an outcome: its URL says so, or an item has it as its pr or
+    records it from a PR's URL."""
+    found = store.item_by_subject(conn, key) or {}
+    return (
+        "/pull/" in name
+        or "/pull/" in (found.get("ref") or "")
+        or bool(conn.execute(IS_PR, (key,)).fetchone())
+    )
+
+
 def resolve(conn: sqlite3.Connection, name: str | None, text: str | None, actor: str) -> str:
     """The id of the outcome `name` means, recording it if new; the caller holds the transaction.
-    `name` is an outcome's id, or a ref (RT#N, an issue's URL or owner/repo#N) for an outcome that
-    is found or recorded; with `text`, anything else is the short name of a new one-off outcome, and
-    with `text` alone the name is its start. Raises Unknown otherwise."""
+    `name` is an outcome's id, or a ref (RT#N, an issue's URL or owner/repo#N) for the outcome item
+    of kind outcome that names it, recorded if there is none: a story or intake row holding that key
+    is never taken for it. With `text`, anything else is the short name of a new one-off outcome, and
+    with `text` alone the name is its start. Raises Unknown for a PR, blank text, or an unknown name
+    without text."""
     name = (name or "").strip()
-    if name and (found := store.get_item(conn, name)) and found["kind"] == Kind.OUTCOME:
-        return str(found["id"])
+    if text is not None and not text.strip():
+        raise Unknown("an outcome's instruction text cannot be blank")
     key = subject_key(name)
-    if key is not None:
-        found = store.item_by_subject(conn, key)
-        if found is not None:
-            return str(found["id"])
-        fields = {"kind": Kind.OUTCOME, "subject_key": key, "task": key, "mode": Mode.MANUAL}
-        return store.insert_item(conn, {**fields, "state": State.WORKING}, actor)
-    if not text:
-        raise Unknown(f"no outcome {name!r}: name an outcome's id or ref, or give its instruction text")
-    one_off = {"kind": Kind.OUTCOME, "task": name or " ".join(text.split())[:LABEL], "note": text}
-    return store.insert_item(conn, {**one_off, "mode": Mode.MANUAL, "state": State.WORKING}, actor)
+    match store.get_item(conn, name) if name else None, key:
+        case {"kind": Kind.OUTCOME, "id": found}, _:
+            return str(found)
+        case _, str() if _is_pr(conn, name, key):
+            raise Unknown(f"{key} is a PR: set it as the story's pr, and name the issue or ticket it serves")
+        case _, str():
+            known = conn.execute(OUTCOME_BY_KEY, {"key": key}).fetchone()
+            # The key may be held by a story or an intake row, so the outcome carries it as task and ref.
+            minted = {"kind": Kind.OUTCOME, "task": key, "ref": key}
+        case _, None if text:
+            known = None
+            minted = {
+                "kind": Kind.OUTCOME,
+                "task": name or " ".join(text.split())[:LABEL],
+                "note": text.strip(),
+            }
+        case _:
+            raise Unknown(f"no outcome {name!r}: name an outcome's id or ref, or give its instruction text")
+    if known is not None:
+        return str(known["id"])
+    return store.insert_item(
+        conn, {**minted, "mode": Mode.AUTO, "state": State.WORKING}, actor, source="outcome"
+    )
+
+
+def close_finished(conn: sqlite3.Connection) -> list[str]:
+    """Close each open auto outcome no seat holds once it has stories and all of them are closed, from
+    a read, as subjects.hygiene settles: one lookup, then a transaction only when one is due."""
+    due = [row[0] for row in conn.execute(FINISHED)]
+    if due:
+        with store.transaction(conn):
+            for outcome in due:
+                store.update_item(
+                    conn, outcome, {"state": State.DONE, "result": "all its stories closed"}, ACTOR, "outcome"
+                )
+    return due
 
 
 def attach(conn: sqlite3.Connection, rows: list[dict[str, Any]]) -> None:
-    """Give each row its `outcome` and `outcome_label`: its own id for an outcome, else its parent,
-    else the outcome of the story whose PR it is, else that of the story it was filed under."""
+    """Give each row its `outcome` and `outcome_label`: its parent, else the outcome of the story whose
+    PR it is, else that of the story it was filed under."""
     names = {row["id"]: label(dict(row)) for row in conn.execute(OUTCOMES)}
     by_pr = {row["pr"]: row["parent"] for row in conn.execute(STORIES)}
     under = sorted({row["filed_under"] for row in rows if row.get("filed_under")})
     filed = {row["id"]: row["parent"] for row in conn.execute(FILED, {"ids": json.dumps(under)})}
     for row in rows:
-        if row.get("kind") == Kind.OUTCOME:
-            found = row["id"]
-        else:
-            found = (
-                row.get("parent") or by_pr.get(row.get("subject_key")) or filed.get(row.get("filed_under"))
-            )
+        found = row.get("parent") or by_pr.get(row.get("subject_key")) or filed.get(row.get("filed_under"))
         row["outcome"] = found
         row["outcome_label"] = names.get(found) if found else None
 

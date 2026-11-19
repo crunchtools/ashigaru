@@ -197,11 +197,14 @@ def list_items(conn: Conn, who: Who, filters: Annotated[ItemFilter, Query()]) ->
 
 
 def with_outcome(conn: sqlite3.Connection, fields: dict[str, Any], actor: str) -> dict[str, Any]:
-    """The fields with `outcome`/`outcome_text` turned into the `parent` they name (served.resolve);
-    422 for an outcome that is neither found nor given the text a new one needs."""
-    name, text = fields.pop("outcome", None), fields.pop("outcome_text", None)
-    if name is None and text is None:
+    """The fields with `outcome`/`outcome_text` turned into the `parent` they name (served.resolve), or
+    a null `parent` when both are sent as null; 422 for an outcome that is neither found nor given the
+    text a new one needs."""
+    if "outcome" not in fields and "outcome_text" not in fields:
         return fields
+    name, text = fields.pop("outcome", None), fields.pop("outcome_text", None)
+    if name is None and text is None:  # sent as null: the item serves no outcome
+        return {**fields, "parent": None}
     try:
         return {**fields, "parent": served.resolve(conn, name, text, actor)}
     except served.Unknown as error:

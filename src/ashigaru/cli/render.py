@@ -1,6 +1,8 @@
 """Human tables for the views and actions. `--json` bypasses all of this."""
 
 import re
+import shutil
+import textwrap
 from collections.abc import Callable, Sequence
 from datetime import UTC, datetime
 from typing import Any
@@ -11,6 +13,14 @@ TEXT_WIDTH = 60
 NARROW = 40
 NARROWER = 30
 HOURS_A_DAY = 24
+WIDTH = 120
+"""A table's width when there is no terminal to measure."""
+NO_TERMINAL = (WIDTH, 24)
+"""shutil's fallback size, columns and lines, when stdout is no terminal and COLUMNS is unset."""
+WRAP_MIN = 24
+"""The narrowest a wrapped column gets, however wide the rest."""
+CLIP_MIN = 12
+"""The narrowest a clipped column gets to make room for a wrapped one."""
 
 
 SEAT_NAME = re.compile(r"^(.*\S) (\d+) - (.+)$")
@@ -73,12 +83,35 @@ def money(value: float | None) -> str:
     return "" if value is None else f"${value:,.2f}"
 
 
-def table(rows: Sequence[dict[str, Any]], columns: Sequence[Column]) -> str:
-    cells = [[h for h, _ in columns]] + [[clip(get(row)) for _, get in columns] for row in rows]
+def table(rows: Sequence[dict[str, Any]], columns: Sequence[Column], width: int | None = None) -> str:
+    """Rows under their headers, each column as wide as its widest cell. When the table is wider than
+    `width` (the terminal's, else 120), a Whole column word-wraps inside its own width, never cut, and
+    then, if it must, the widest other column is clipped; every other cell stays on its row's first
+    line, so the columns line up."""
+    raw = [[get(row) for _, get in columns] for row in rows]
+    whole = {i for i in range(len(columns)) if any(isinstance(line[i], Whole) for line in raw)}
+    cells = [[h for h, _ in columns]] + [[clip(value) for value in line] for line in raw]
     widths = [max(len(line[i]) for line in cells) for i in range(len(columns))]
-    lines = [
-        "  ".join(cell.ljust(w) for cell, w in zip(line, widths, strict=True)).rstrip() for line in cells
-    ]
+    room = (width or shutil.get_terminal_size(NO_TERMINAL).columns) - 2 * (len(columns) - 1)
+    if whole and sum(widths) > room:
+        rest = sum(w for i, w in enumerate(widths) if i not in whole)
+        for i in whole:
+            widths[i] = min(widths[i], max(WRAP_MIN, (room - rest) // len(whole)))
+        over = sum(widths) - room
+        widest = max(
+            (i for i in range(len(columns)) if i not in whole), key=lambda i: widths[i], default=None
+        )
+        if over > 0 and widest is not None:
+            widths[widest] = max(CLIP_MIN, widths[widest] - over)
+    lines: list[str] = []
+    for line in cells:
+        parts = [
+            textwrap.wrap(cell, widths[i]) or [""] if i in whole else [clip(cell, widths[i])]
+            for i, cell in enumerate(line)
+        ]
+        for depth in range(max(len(part) for part in parts)):
+            row = [part[depth] if depth < len(part) else "" for part in parts]
+            lines.append("  ".join(cell.ljust(w) for cell, w in zip(row, widths, strict=True)).rstrip())
     return "\n".join(lines)
 
 

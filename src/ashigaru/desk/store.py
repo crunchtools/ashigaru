@@ -284,8 +284,9 @@ STATE_SINCE = """(
     SELECT max(e.at) FROM events e WHERE e.item_id = items.id AND json_type(e.patch, '$.state') IS NOT NULL
 ) AS since"""
 """When the item entered its state: the last event that set one."""
-CHECK_ACTIVE = f"SELECT *, {STATE_SINCE} FROM items WHERE {OPEN} {CHECK_ORDER}"
-CHECK_ALL = f"SELECT *, {STATE_SINCE} FROM items {CHECK_ORDER}"
+CHECK_ACTIVE = f"SELECT *, {STATE_SINCE} FROM items WHERE kind != 'outcome' AND {OPEN} {CHECK_ORDER}"
+CHECK_ALL = f"SELECT *, {STATE_SINCE} FROM items WHERE kind != 'outcome' {CHECK_ORDER}"
+"""The check table: work, so never an outcome, which `outcomes` shows."""
 COUNT_OPEN = f"SELECT count(*) FROM items WHERE {OPEN}"
 
 UPSERT_SEAT = """
