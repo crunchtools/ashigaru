@@ -150,7 +150,8 @@ def _fired(entry: Any, prompt: str) -> bool:
 
 
 def _scheduled(event: dict[str, Any], prompt: str) -> bool:
-    """True when the transcript says a scheduled task just fired this prompt."""
+    """True when the transcript says a scheduled task just fired this prompt: the entry comes after
+    the last assistant entry, so one that fired an earlier turn never matches a prompt typed later."""
     transcript = event.get("transcript_path")
     if not isinstance(transcript, str):
         return False
@@ -160,10 +161,13 @@ def _scheduled(event: dict[str, Any], prompt: str) -> bool:
         return False
     for line in reversed(lines):
         try:
-            if _fired(json.loads(line), prompt):
-                return True
+            entry = json.loads(line)
         except ValueError:
             continue
+        if _fired(entry, prompt):
+            return True
+        if isinstance(entry, dict) and entry.get("type") == "assistant":
+            return False
     return False
 
 

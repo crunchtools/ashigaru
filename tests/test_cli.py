@@ -881,6 +881,24 @@ def test_a_scheduled_prompt_is_not_the_task(seat: FakeDesk, tmp_path: Path) -> N
     ]
 
 
+def test_a_prompt_fired_in_an_earlier_turn_and_typed_again_is_the_task(
+    seat: FakeDesk, tmp_path: Path
+) -> None:
+    transcript = tmp_path / "t.jsonl"
+    transcript.write_text(fire("status") + entry({"type": "text", "text": "done"}))
+    hook("prompt-submit", {"session_id": "s1", "prompt": "status", "transcript_path": str(transcript)})
+    assert patches(seat) == [{"turn": "active", "task": "status"}]
+
+
+def test_a_scheduled_prompt_is_found_in_the_tail_of_a_long_transcript(seat: FakeDesk, tmp_path: Path) -> None:
+    transcript = tmp_path / "t.jsonl"
+    transcript.write_text("x" * hooks.WAITING_TAIL + "\n" + fire("run the report"))
+    hook(
+        "prompt-submit", {"session_id": "s1", "prompt": "run the report", "transcript_path": str(transcript)}
+    )
+    assert patches(seat) == [{"turn": "active"}]
+
+
 def test_a_missing_transcript_leaves_a_typed_prompt_the_task(seat: FakeDesk, tmp_path: Path) -> None:
     hook("prompt-submit", {"session_id": "s1", "prompt": "go", "transcript_path": str(tmp_path / "gone")})
     assert patches(seat) == [{"turn": "active", "task": "go"}]

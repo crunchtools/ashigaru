@@ -95,15 +95,19 @@ PENDING = """
     WHERE author = :bot AND kind = 'story' AND state = 'open' AND subject_key NOT IN (
         SELECT subject_key FROM items WHERE subject_key IS NOT NULL
     )
-    UNION SELECT json_extract(o.value, '$.subject_key') FROM sweeps s, json_each(s.outsiders) o
+"""
+"""Dependabot's open PRs with no item, read back every run until one is queued or closes."""
+LISTED = """
+    SELECT DISTINCT json_extract(o.value, '$.subject_key') FROM sweeps s, json_each(s.outsiders) o
     WHERE json_extract(o.value, '$.author') = :bot
       AND json_extract(o.value, '$.subject_key') NOT IN (SELECT subject_key FROM subjects)
       AND json_extract(o.value, '$.subject_key') NOT IN (
           SELECT subject_key FROM items WHERE subject_key IS NOT NULL
       )
 """
-"""Dependabot's open PRs with no item, read back every run until one is queued or closes; and those
-a run before this rule listed as outsiders, read once to record them."""
+"""Dependabot's PRs that runs before PENDING listed as outsiders, read back once to record them."""
+BACKFILLED = "sweep-dependabot-backfill"
+"""Set once a run has read LISTED back without an error, so no later run scans old runs again."""
 START = "INSERT INTO sweeps (trigger, started_at) VALUES (?, ?)"
 SKIP = "INSERT INTO sweeps (trigger, started_at, finished_at, skipped) VALUES (?, ?, ?, ?)"
 RENEW = "UPDATE marks SET value = ?, updated_at = ? WHERE name = ? AND value LIKE ?"
@@ -470,7 +474,12 @@ def run(db_path: str, settings: Settings, trigger: str) -> dict[str, Any]:
             with _renewing(db_path, settings, run_id, counts.lost):
                 keys = {row[0] for row in conn.execute(OPEN_SUBJECTS)}
                 keys |= {row[0] for row in conn.execute(PENDING, {"bot": DEPENDABOT}) if row[0]}
+                backfill = store.get_mark(conn, BACKFILLED) is None
+                if backfill:
+                    keys |= {row[0] for row in conn.execute(LISTED, {"bot": DEPENDABOT}) if row[0]}
                 _read(conn, settings, keys, counts, started)
+                if backfill and not counts.errors:
+                    store.set_mark(conn, BACKFILLED, _stamp(started), ACTOR)
                 _search(conn, settings, keys, started, counts)
                 counts.closed += len(subjects.hygiene(conn))
         except LeaseLostError:  # the next run reads it all again; the mark has not moved

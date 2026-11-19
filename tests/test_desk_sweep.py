@@ -537,3 +537,33 @@ def test_a_queued_dependabot_item_settles_when_its_pr_closes(conn: sqlite3.Conne
     merged = bump(1, timedelta(days=2), closed=True, merged=True, head="ab" * 20)
     sweeping(db, FakeForge(subjects={1: merged}))
     assert item(conn, queued)["state"] == "done"
+
+
+@pytest.mark.parametrize(
+    "unfit",
+    [
+        {"kind": Kind.OUTCOME},
+        {"opened_at": None},
+        {"opened_at": ago(sweep.DEPENDABOT_AFTER - timedelta(minutes=5))},
+    ],
+)
+def test_a_dependabot_subject_that_is_not_a_pr_has_no_age_or_is_young_is_not_queued(
+    conn: sqlite3.Connection, db: Path, unfit: dict[str, Any]
+) -> None:
+    hit = dataclasses.replace(bump(1, timedelta(days=2)), **unfit)
+    run = sweeping(db, FakeForge(hits=[Found(hit, "NONE", "")]))
+    assert (run["new"], run["outsiders"], store.list_items(conn)) == (0, [], [])
+
+
+def test_the_backfill_reads_old_runs_once(conn: sqlite3.Connection, db: Path) -> None:
+    listed = [{"subject_key": "crunchtools/x#1", "ref": "r1", "author": BOT}]
+    conn.execute(
+        "INSERT INTO sweeps (trigger, started_at, finished_at, outsiders) VALUES (?, ?, ?, ?)",
+        ("timer", ago(HOURS_AGO), ago(HOURS_AGO), json.dumps(listed)),
+    )
+    conn.commit()
+    failing = FakeForge(refuse={1: OSError("down")})
+    sweeping(db, failing)
+    assert store.get_mark(conn, sweep.BACKFILLED) is None
+    sweeping(db, FakeForge(subjects={1: bump(1, timedelta(hours=1), closed=True)}))
+    assert store.get_mark(conn, sweep.BACKFILLED) is not None
