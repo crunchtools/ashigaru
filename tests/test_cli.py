@@ -13,13 +13,14 @@ import pytest
 from fake_desk import FakeDesk, Seen, serve
 
 from ashigaru import __version__
-from ashigaru.cli import commands, config, hooks
+from ashigaru.cli import commands, config, hooks, render
 from ashigaru.cli.__main__ import main
 from ashigaru.cli.client import Desk, DeskError, Unreachable
 from ashigaru.cli.wait import CIWaiter, PollWaiter
 
 KEY = "ash_k1_secret"
 USAGE_ERROR = 2
+NARROW_TABLE = 40
 
 
 def item(**fields: Any) -> dict[str, Any]:
@@ -1294,3 +1295,10 @@ def test_sweep_run_posts(desk: FakeDesk) -> None:
     desk.on("POST", "/v1/sweep", (200, {"configured": True, "every": 600, "running": True, "last": None}))
     assert main(["sweep", "--run"]) == 0
     assert [seen.method for seen in desk.seen] == ["POST"]
+
+
+def test_table_clips_past_a_short_tail_and_never_widens_it() -> None:
+    columns = [("NAME", lambda row: row["name"]), ("NEXT", lambda row: render.Tail(row["next"]))]
+    out = render.table([{"name": "n" * 50, "next": "soon"}], columns, width=NARROW_TABLE)
+    assert all(len(line) <= NARROW_TABLE for line in out.splitlines())
+    assert "soon" in out and "…" in out

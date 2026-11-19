@@ -90,9 +90,9 @@ def money(value: float | None) -> str:
 def table(rows: Sequence[dict[str, Any]], columns: Sequence[Column], width: int | None = None) -> str:
     """Rows under their headers, each column as wide as its widest cell. When the table is wider than
     `width` (the terminal's, else 120), a Whole column word-wraps, never cut, in the room the others
-    leave (WRAP_MIN at least); then, if the row still overflows, a Tail column (else the widest other)
-    is clipped. Every cell but a Whole one
-    stays on its row's first line, so the columns line up."""
+    leave (WRAP_MIN at least); then, while the row still overflows, a Tail column and then the widest
+    others are clipped, none below CLIP_MIN and none widened. Every cell but a Whole one stays on its
+    row's first line, so the columns line up."""
     raw = [[get(row) for _, get in columns] for row in rows]
     whole, tail = (
         {i for i in range(len(columns)) if any(isinstance(line[i], kind) for line in raw)}
@@ -105,11 +105,13 @@ def table(rows: Sequence[dict[str, Any]], columns: Sequence[Column], width: int 
         free = room - sum(w for i, w in enumerate(widths) if i not in whole)
         for i in whole:
             widths[i] = min(widths[i], max(WRAP_MIN, free // len(whole)))
-    over = sum(widths) - room
-    others = [i for i in range(len(columns)) if i not in whole]
-    if over > 0 and others:
-        clipped = max(others, key=lambda i: (i in tail, widths[i]))
-        widths[clipped] = max(CLIP_MIN, widths[clipped] - over)
+    others = sorted(
+        (i for i in range(len(columns)) if i not in whole), key=lambda i: (i not in tail, -widths[i])
+    )
+    for i in others:
+        if (over := sum(widths) - room) <= 0:
+            break
+        widths[i] = max(min(CLIP_MIN, widths[i]), widths[i] - over)
     lines: list[str] = []
     for line in cells:
         parts = [
