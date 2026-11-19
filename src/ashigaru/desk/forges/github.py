@@ -50,6 +50,8 @@ RULES_TTL = 60.0
 PAGE = 100
 SEARCH_PAGES = 10
 """Search returns at most 1000 results: ten pages of PAGE."""
+SEARCHED = ("issue", "pr")
+"""The `is:` qualifiers a sweep searches by, one search each: GitHub refuses a search with neither."""
 SWEEP_TIMEOUT = 10
 LOG = logging.getLogger(__name__)
 
@@ -461,27 +463,37 @@ class GitHub:
         return _item(pull, repo, Kind.STORY, "pull_request", merged_in=pull)
 
     def updated(self, org: str, since: str, token: str) -> Search:
-        """Every issue and PR in `org` changed at or after `since`, oldest change first, by search;
-        not `complete` when the search's cap of SEARCH_PAGES full pages cut it short. A hit whose
-        repository is not owner/name is skipped. Read-only."""
+        """Every issue and PR in `org` changed at or after `since`, oldest change first, by search.
+        GitHub's search refuses (422) a query that does not say `is:issue` or `is:pull-request`, so
+        it runs once for each and merges the hits. Not `complete` when the cap of SEARCH_PAGES full
+        pages cut either short; `reached` is then the earliest change time a cut search read up to,
+        so the caller reads on from there and loses nothing from either. A hit whose repository is
+        not owner/name is skipped. Read-only."""
         if not (token and ACCOUNT.match(org)):
             raise ValueError("an org login and a token are needed")
         found: list[Found] = []
-        for page in range(1, SEARCH_PAGES + 1):
-            query = urllib.parse.urlencode(
-                {
-                    "q": f"org:{org} updated:>={since}",
-                    "sort": "updated",
-                    "order": "asc",
-                    "per_page": PAGE,
-                    "page": page,
-                }
-            )
-            hits = _items(_get(f"{API}/search/issues?{query}", token, SWEEP_TIMEOUT), "items")
-            found += [hit for thing in hits if (hit := _hit(thing)) is not None]
-            if len(hits) < PAGE:
-                return Search(found, complete=True)
-        return Search(found, complete=False)
+        cut: list[str] = []
+        for kind in SEARCHED:
+            read: list[Found] = []
+            for page in range(1, SEARCH_PAGES + 1):
+                query = urllib.parse.urlencode(
+                    {
+                        "q": f"org:{org} is:{kind} updated:>={since}",
+                        "sort": "updated",
+                        "order": "asc",
+                        "per_page": PAGE,
+                        "page": page,
+                    }
+                )
+                hits = _items(_get(f"{API}/search/issues?{query}", token, SWEEP_TIMEOUT), "items")
+                read += [hit for thing in hits if (hit := _hit(thing)) is not None]
+                if len(hits) < PAGE:
+                    break
+            else:
+                cut.append(read[-1].item.updated_at or since if read else since)
+            found += read
+        found.sort(key=lambda hit: hit.item.updated_at or "")
+        return Search(found, complete=not cut, reached=min(cut) if cut else None)
 
     def required(self, repo: str, sha: str, branch: str | None, token: str) -> tuple[str, dict[str, Verdict]]:
         """The branch and each required check's verdict on `sha`; one nobody has reported is pending.

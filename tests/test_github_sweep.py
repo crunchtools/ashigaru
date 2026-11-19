@@ -122,10 +122,13 @@ def test_updated_fields_and_query(monkeypatch: pytest.MonkeyPatch) -> None:
         hit(4, pull_request={"merged_at": None}, draft=True),
     ]
     asked = install(monkeypatch, lambda url: {"items": items})
-    found = github.FORGE.updated("crunchtools", SINCE, "token").hits
-    assert len(asked) == 1
+    found = github.FORGE.updated("crunchtools", SINCE, "token").hits[: len(items)]
+    assert len(asked) == len(github.SEARCHED)
+    assert [query(url)["q"][0] for url in asked] == [
+        f"org:crunchtools is:issue updated:>={SINCE}",
+        f"org:crunchtools is:pr updated:>={SINCE}",
+    ]
     sent = query(asked[0])
-    assert sent["q"] == [f"org:crunchtools updated:>={SINCE}"]
     assert sent["sort"] == ["updated"] and sent["order"] == ["asc"]
     assert sent["per_page"] == [str(PAGE)] and sent["page"] == ["1"]
     assert "%3E%3D" in asked[0] and " " not in asked[0]
@@ -147,14 +150,41 @@ def test_updated_paginates_until_short_page(monkeypatch: pytest.MonkeyPatch) -> 
 
     asked = install(monkeypatch, route)
     search = github.FORGE.updated("crunchtools", SINCE, "token")
-    assert [query(url)["page"][0] for url in asked] == [str(n) for n in range(1, LAST + 1)]
-    assert len(search.hits) == PAGE * (LAST - 1) + SHORT and search.complete
+    pages = [str(n) for n in range(1, LAST + 1)]
+    assert [query(url)["page"][0] for url in asked] == pages * len(github.SEARCHED)
+    assert len(search.hits) == (PAGE * (LAST - 1) + SHORT) * len(github.SEARCHED) and search.complete
+    assert search.reached is None
 
 
 def test_updated_stops_at_ten_pages(monkeypatch: pytest.MonkeyPatch) -> None:
     asked = install(monkeypatch, lambda url: {"items": [hit(n) for n in range(PAGE)]})
     search = github.FORGE.updated("crunchtools", SINCE, "token")
-    assert len(asked) == github.SEARCH_PAGES and not search.complete
+    assert len(asked) == github.SEARCH_PAGES * len(github.SEARCHED) and not search.complete
+
+
+def test_updated_merges_both_searches_and_reaches_the_lower_cut(monkeypatch: pytest.MonkeyPatch) -> None:
+    def route(url: str) -> Any:
+        sent = query(url)
+        if "is:issue" in sent["q"][0]:
+            return {"items": [hit(n, updated_at="2026-11-19T12:00:00Z") for n in range(PAGE)]}
+        if sent["page"] == ["1"]:
+            return {"items": [hit(5000 + n, updated_at="2026-11-19T11:00:00Z") for n in range(PAGE)]}
+        return {"items": [hit(6000, updated_at="2026-11-19T11:30:00Z")]}
+
+    install(monkeypatch, route)
+    search = github.FORGE.updated("crunchtools", SINCE, "token")
+    assert not search.complete and search.reached == "2026-11-19T12:00:00Z"
+    stamps = [found.item.updated_at or "" for found in search.hits]
+    assert stamps == sorted(stamps) and len(stamps) == PAGE * github.SEARCH_PAGES + PAGE + 1
+
+
+def test_updated_reaches_the_lower_of_two_cuts(monkeypatch: pytest.MonkeyPatch) -> None:
+    def route(url: str) -> Any:
+        stamp = "2026-11-19T12:00:00Z" if "is:issue" in query(url)["q"][0] else "2026-11-19T11:00:00Z"
+        return {"items": [hit(n, updated_at=stamp) for n in range(PAGE)]}
+
+    install(monkeypatch, route)
+    assert github.FORGE.updated("crunchtools", SINCE, "token").reached == "2026-11-19T11:00:00Z"
 
 
 def test_updated_skips_bad_repository_url(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -166,7 +196,7 @@ def test_updated_skips_bad_repository_url(monkeypatch: pytest.MonkeyPatch) -> No
     ]
     install(monkeypatch, lambda url: {"items": items})
     found = github.FORGE.updated("crunchtools", SINCE, "token").hits
-    assert [f.item.subject_key for f in found] == [f"{REPO}#4"]
+    assert [f.item.subject_key for f in found] == [f"{REPO}#4"] * len(github.SEARCHED)
 
 
 @pytest.mark.parametrize("org", ["", "-x", "a b", "a/b", "bot[bot]"])

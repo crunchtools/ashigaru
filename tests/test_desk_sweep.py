@@ -55,6 +55,7 @@ class FakeForge:
     searched: list[str] = dataclasses.field(default_factory=list)
     refuse: dict[int, Exception] = dataclasses.field(default_factory=dict)
     complete: bool = True
+    reached: str | None = None
     writers: frozenset[str] = frozenset({"fatherlinux"})
 
     def subject(self, repo: str, number: int, token: str) -> IntakeItem:
@@ -64,7 +65,7 @@ class FakeForge:
 
     def updated(self, org: str, since: str, token: str) -> Search:
         self.searched.append(since)
-        return Search(self.hits, self.complete)
+        return Search(self.hits, self.complete, self.reached)
 
     def may_write(self, repo: str, account: str, token: str) -> bool:
         return account in self.writers
@@ -377,6 +378,17 @@ def test_a_search_cut_at_the_cap_moves_the_mark_only_to_its_last_hit(
     run = sweeping(db, FakeForge(hits=hits, complete=False))
     assert run["error"].startswith("search: cut at the forge's cap")
     assert (store.get_mark(conn, sweep.MARK) or {})["value"] == "2026-11-19T07:00:00Z"
+
+
+def test_a_search_cut_at_the_cap_moves_the_mark_only_to_where_it_reached(
+    conn: sqlite3.Connection, db: Path
+) -> None:
+    hits = [
+        Found(subject(1, updated_at="2026-11-19T06:00:00Z"), "MEMBER", ""),
+        Found(subject(2, updated_at="2026-11-19T08:00:00Z"), "MEMBER", ""),
+    ]
+    sweeping(db, FakeForge(hits=hits, complete=False, reached="2026-11-19T06:00:00Z"))
+    assert (store.get_mark(conn, sweep.MARK) or {})["value"] == "2026-11-19T06:00:00Z"
 
 
 def test_a_member_who_cannot_write_to_the_repo_is_recorded_but_held(

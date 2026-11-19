@@ -62,6 +62,10 @@ All notable changes to this project are documented here. The format follows
   moves `v4` on every release, `container.yml` ran on it, and promote refused
   it with "tag 'v4' is not vX.Y.Z" (most recently run 44427128848). The push
   trigger is now `v*.*.*`, which the major tag does not match.
+- Every timed sweep failed with HTTP 422: GitHub's issue search refuses a query
+  without `is:issue` or `is:pull-request`. The sweep now searches `is:issue`
+  and `is:pr` separately, merges the hits, and when either is cut at the cap
+  moves the mark only to the lower point the two reached.
 
 ## [4.0.2] - 2026-11-19
 
