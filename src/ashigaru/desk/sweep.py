@@ -106,6 +106,8 @@ class Counts:
     closed: int = 0
     outsiders: list[dict[str, str | None]] = dataclasses.field(default_factory=list)
     errors: list[str] = dataclasses.field(default_factory=list)
+    writers: dict[tuple[str, str], bool] = dataclasses.field(default_factory=dict)
+    """The forge's answer for each (repo, author) asked this run."""
 
     def error(self) -> str | None:
         more = f" (and {len(self.errors) - 1} more)" if len(self.errors) > 1 else ""
@@ -158,12 +160,12 @@ def _found(conn: sqlite3.Connection, settings: Settings, hit: Found, counts: Cou
         return
     named = LINK.findall(f"{item.title}\n{hit.body}") if member and item.kind == Kind.STORY else []
     asks = member and (named or not known) and item.author not in settings.authors
-    writes = item.author in settings.authors or bool(
-        asks
-        and item.repo
-        and item.author
-        and settings.forge.may_write(item.repo, item.author, settings.token)
-    )
+    writes = item.author in settings.authors
+    if asks and item.repo and item.author:
+        asked = (item.repo, item.author)
+        if asked not in counts.writers:
+            counts.writers[asked] = settings.forge.may_write(*asked, settings.token)
+        writes = counts.writers[asked]
     with store.transaction(conn):
         if store.item_by_subject(conn, item.subject_key) is None:
             judged = dataclasses.replace(item, author_writes=writes, judged_at=0)
