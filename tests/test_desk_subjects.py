@@ -9,7 +9,7 @@ from conftest import Keys
 from fastapi.testclient import TestClient
 from test_desk_webhooks import deliver, hooked, payload
 
-from ashigaru.desk import store
+from ashigaru.desk import store, subjects
 
 __all__ = ["hooked"]
 
@@ -91,8 +91,10 @@ def test_a_seat_or_scott_keeps_the_item_and_only_hears_it_landed(
 def test_an_older_delivery_never_moves_a_subject_back_and_merged_stays_merged(
     hooked: TestClient, keys: Keys
 ) -> None:
-    merge(hooked)
+    merge(hooked, title="at merge")
     pull(hooked, "edited", "d-old", at="2026-11-19T09:00:00Z", state="open", title="older")
+    subject = hooked.get(f"/v1/subjects/{quote(PR, safe='')}", headers=keys[SEAT]).json()
+    assert (subject["state"], subject["title"]) == ("merged", "at merge")
     pull(hooked, "edited", "d-new", at="2026-11-19T12:00:00Z", state="closed", title="newer")
     subject = hooked.get(f"/v1/subjects/{quote(PR, safe='')}", headers=keys[SEAT]).json()
     assert (subject["state"], subject["title"]) == ("merged", "newer")
@@ -114,3 +116,62 @@ def test_a_read_settles_an_item_linked_after_the_merge(hooked: TestClient, keys:
     assert get(hooked, keys, story)["state"] == "queued"
     assert hooked.get("/v1/status", headers=keys[SEAT]).status_code == OK
     assert get(hooked, keys, story)["state"] == "done"
+
+
+def events(conn: sqlite3.Connection) -> int:
+    return int(conn.execute("SELECT count(*) FROM events").fetchone()[0])
+
+
+def test_a_story_whose_issue_is_open_and_whose_pr_merged_stays_done(
+    hooked: TestClient, keys: Keys, conn: sqlite3.Connection
+) -> None:
+    issue = payload("issues", state="open", updated_at="2026-11-19T10:00:00Z")
+    deliver(hooked, "issues", {**issue, "action": "opened"}, "d-issue")
+    story = str((store.item_by_subject(conn, f"crunchtools/ashigaru#{issue['issue']['number']}") or {})["id"])
+    hooked.patch(f"/v1/items/{story}", headers=keys[JOSUI], json={"pr": PR, "mode": "auto"})
+    merge(hooked)
+    assert get(hooked, keys, story)["state"] == "done"
+    settled = events(conn)
+    for _ in range(3):
+        hooked.get("/v1/status", headers=keys[SEAT])
+    assert get(hooked, keys, story)["state"] == "done" and events(conn) == settled
+
+
+def test_a_read_with_nothing_due_writes_nothing(
+    hooked: TestClient, keys: Keys, conn: sqlite3.Connection
+) -> None:
+    create(hooked, keys, subject_key="crunchtools/ashigaru#192", mode="manual")
+    create(hooked, keys, pr=PR)
+    pull(hooked, "closed", "d-192", number=192, state="closed")
+    pull(hooked, "closed", "d-191", state="closed")
+    quiet = events(conn)
+    hooked.get("/v1/work", headers=keys[SEAT])
+    hooked.get("/v1/status", headers=keys[SEAT])
+    assert events(conn) == quiet
+    assert conn.execute(subjects.DUE, {"key": None}).fetchone() is None, "hygiene would take the write lock"
+
+
+def test_only_settling_reopens_what_settling_closed(hooked: TestClient, keys: Keys) -> None:
+    closed = create(hooked, keys, subject_key=PR)
+    hooked.patch(f"/v1/items/{closed}", headers=keys[JOSUI], json={"state": "done", "verified_by": "desk"})
+    pull(hooked, "reopened", "d-open", state="open")
+    hooked.get("/v1/status", headers=keys[SEAT])
+    assert get(hooked, keys, closed)["state"] == "done"
+
+
+def test_an_issue_reopened_after_settling_closed_it_is_queued_again(hooked: TestClient, keys: Keys) -> None:
+    body = payload("issues", state="closed", updated_at="2026-11-19T10:00:00Z")
+    item = create(hooked, keys, subject_key=f"crunchtools/ashigaru#{body['issue']['number']}")
+    deliver(hooked, "issues", {**body, "action": "closed"}, "d-close")
+    assert get(hooked, keys, item)["state"] == "done"
+    reopened = payload("issues", state="open", updated_at="2026-11-19T11:00:00Z")
+    deliver(hooked, "issues", {**reopened, "action": "reopened"}, "d-reopen")
+    assert get(hooked, keys, item)["state"] == "queued"
+
+
+def test_a_review_delivery_is_recorded_on_the_subject(hooked: TestClient, keys: Keys) -> None:
+    body = payload("pull_request", head={"sha": HEAD}, updated_at="2026-11-19T10:00:00Z")
+    review = {"action": "submitted", "review": {"state": "APPROVED"}, "pull_request": body["pull_request"]}
+    deliver(hooked, "pull_request_review", {**body, **review}, "d-review")
+    subject = hooked.get(f"/v1/subjects/{quote(PR, safe='')}", headers=keys[SEAT]).json()
+    assert (subject["review"], subject["source"], subject["state"]) == ("approved", "webhook", "open")

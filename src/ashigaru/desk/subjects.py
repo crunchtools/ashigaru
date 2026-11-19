@@ -9,10 +9,11 @@ overwrites a newer one.
 Settling never touches what a person holds. A seat's item whose subject or PR
 merged is marked `landed_at` and waits for its wrap. A seatless auto item is
 closed: done when its subject merged (or, for an issue, closed), wontdo when its
-PR closed unmerged. One the Desk closed is queued again when its subject
-reopens. A manual item is Scott's and is only ever marked landed. A PR named in
-`pr` only lands or closes an item on merge; a PR closed unmerged says nothing
-about the story it carried.
+PR closed unmerged. One settling closed (by the event history, not by
+`verified_by`, which others may write) is queued again when its own subject
+reopens and nothing else it names is closed or merged. A manual item is
+Scott's and is only ever marked landed. A PR named in `pr` only lands or closes
+an item on merge; a PR closed unmerged says nothing about the story it carried.
 """
 
 import json
@@ -41,20 +42,34 @@ UPSERT = """
         seen_at = excluded.seen_at
 """
 
-DUE = """
-    SELECT i.id, s.subject_key AS subject, s.kind AS subject_kind, s.state AS subject_state,
-           s.head_sha AS subject_head
+OPEN = "coalesce(i.wrap, '') != 'cleared' AND i.state NOT IN ('done', 'wontdo', 'abandoned')"
+CLOSED_HERE = """(
+    SELECT e.actor || ' ' || e.source FROM events e
+    WHERE e.item_id = i.id AND json_type(e.patch, '$.state') IS NOT NULL
+    ORDER BY e.seq DESC LIMIT 1
+) = 'desk subject'"""
+"""The item's state was last set by settling, not by anyone who can also write `verified_by`."""
+DUE = f"""
+    SELECT i.*, s.subject_key AS due_subject, s.kind AS due_kind, s.state AS due_state,
+           s.head_sha AS due_head
     FROM subjects s JOIN items i ON s.subject_key IN (i.subject_key, i.pr)
     WHERE (:key IS NULL OR s.subject_key = :key)
       AND (
-          coalesce(i.wrap, '') != 'cleared' AND i.state NOT IN ('done', 'wontdo', 'abandoned')
-              AND s.state != 'open' AND (i.landed_at IS NULL OR i.seat IS NULL AND i.mode = 'auto')
-          OR i.state IN ('done', 'wontdo') AND i.verified_by = 'desk' AND s.state = 'open'
+          {OPEN} AND s.state = 'merged' AND (i.seat IS NOT NULL OR i.mode != 'auto') AND i.landed_at IS NULL
+          OR {OPEN} AND i.seat IS NULL AND i.mode = 'auto'
+              AND (s.state = 'merged' OR s.state = 'closed' AND s.subject_key = i.subject_key)
+          OR i.state IN ('done', 'wontdo') AND coalesce(i.wrap, '') != 'cleared'
+              AND s.state = 'open' AND s.subject_key = i.subject_key AND {CLOSED_HERE}
+              AND NOT EXISTS (
+                  SELECT 1 FROM subjects o WHERE o.subject_key IN (i.subject_key, i.pr) AND o.state != 'open'
+              )
       )
     ORDER BY i.id
 """
-"""Items a subject's state may move: open ones whose subject closed or merged (a seat's, until it is
-marked landed), and ones the Desk closed whose subject is open again."""
+"""Exactly the items a subject's state moves, so a read that finds none writes nothing: a seat's or
+Scott's open item whose subject or PR merged and is not yet marked landed; a seatless auto item whose
+subject or PR merged, or whose own subject closed; and one settling closed whose own subject is open
+again while nothing else it names is closed or merged."""
 
 
 def get(conn: sqlite3.Connection, key: str) -> dict[str, Any] | None:
@@ -100,36 +115,29 @@ def record(conn: sqlite3.Connection, item: IntakeItem, source: str) -> bool:
     return True
 
 
-def transition(item: dict[str, Any], due: dict[str, Any]) -> dict[str, Any]:
-    """The patch a subject's state makes to one item, or {}: see the module's rules."""
-    merged, via_pr = due["subject_state"] == SubjectState.MERGED, due["subject"] != item["subject_key"]
-    if item["state"] in (State.DONE, State.WONTDO):
-        return (
-            {} if via_pr else {"state": State.QUEUED, "result": None, "verified_by": None, "closed_at": None}
-        )
-    if item["seat"] is not None or item["mode"] != Mode.AUTO:
-        return {"landed_at": store.now()} if merged and not item["landed_at"] else {}
-    if via_pr and not merged:
-        return {}
-    if merged:
-        state, why = State.DONE, f"merged at {(due['subject_head'] or '')[:12]}".strip()
-    elif due["subject_kind"] == Kind.OUTCOME:
+def transition(due: dict[str, Any]) -> dict[str, Any]:
+    """The patch a DUE row makes to its item: see the module's rules."""
+    if due["state"] in (State.DONE, State.WONTDO):
+        return {"state": State.QUEUED, "result": None, "verified_by": None, "closed_at": None}
+    if due["seat"] is not None or due["mode"] != Mode.AUTO:
+        return {"landed_at": store.now()}
+    if due["due_state"] == SubjectState.MERGED:
+        state, why = State.DONE, f"merged at {(due['due_head'] or '')[:12]}".strip()
+    elif due["due_kind"] == Kind.OUTCOME:
         state, why = State.DONE, "closed at the source"
     else:
         state, why = State.WONTDO, "closed unmerged at the source"
-    return {"state": state, "result": item["result"] or why, "verified_by": ACTOR}
+    return {"state": state, "result": due["result"] or why, "verified_by": ACTOR}
 
 
 def settle(conn: sqlite3.Connection, key: str | None = None) -> list[str]:
-    """Apply each due transition, for one subject or all; the caller holds the transaction. Returns
-    the ids that changed."""
-    moved = []
-    for due in [dict(row) for row in conn.execute(DUE, {"key": key})]:
-        item = store.get_item(conn, due["id"])
-        patch = transition(item, due) if item else {}
-        if patch:
-            store.update_item(conn, due["id"], patch, ACTOR, SOURCE)
-            moved.append(due["id"])
+    """Apply each due transition, for one subject or all, once per item; the caller holds the
+    transaction. Returns the ids that changed."""
+    moved: list[str] = []
+    for row in conn.execute(DUE, {"key": key}).fetchall():
+        if row["id"] not in moved:
+            store.update_item(conn, row["id"], transition(store.decode(row)), ACTOR, SOURCE)
+            moved.append(row["id"])
     return moved
 
 

@@ -154,9 +154,12 @@ never overwrites, and merged is sticky. It then settles items whose
 <sha12>") when merged, `done` ("closed at the source") for a closed issue, or
 `wontdo` ("closed unmerged at the source") for a closed-unmerged PR, with
 `verified_by` desk. A seat-held or `manual` item is never closed, only given
-`landed_at` on merge. An item the Desk closed is queued again when its subject
-reopens. A `pr` link acts only on merge. `GET /work` and `GET /status` run the
-same pass as a fallback, as they do proposed expiry.
+`landed_at` on merge. An item settling closed (by its events, not by
+`verified_by`, which an admin can write) is queued again when its own subject
+reopens and nothing else it names is closed or merged. A `pr` link acts only on
+merge. `GET /work` and `GET /status` run the same pass as a fallback, as they do
+proposed expiry; the pass matches only items it will change, so a read with
+nothing due takes no write lock.
 
 **CI.** One result per (repo, commit): each check's name and verdict
 (`pending`, `success`, `failure`, `cancelled`, `skipped`, `neutral`), and a
