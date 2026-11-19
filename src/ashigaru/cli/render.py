@@ -212,7 +212,7 @@ its longest cell, never cut."""
 def _terminal() -> int:
     """The width of the terminal the Markdown is read in, which is not this process's: the chat's own
     pane. ASHIGARU_MD_COLUMNS, else the Claude Code tmux pane, else 136."""
-    if columns := os.environ.get("ASHIGARU_MD_COLUMNS"):
+    if (columns := os.environ.get("ASHIGARU_MD_COLUMNS", "")).isdigit():
         return int(columns)
     for server in (["-L", "claude-agent"], []):
         try:
@@ -339,7 +339,7 @@ def queue(lists: dict[str, Any]) -> str:
 
 def state(row: dict[str, Any]) -> str:
     """STATE: `review`, `manual · blocked`; auto, the default, shows bare; a wrap stage follows."""
-    shown = row["state"] + (f"/{row['wrap']}" if row.get("wrap") else "")
+    shown = (row.get("state") or "-") + (f"/{row['wrap']}" if row.get("wrap") else "")
     return shown
 
 
@@ -349,7 +349,11 @@ def seat_board(board: dict[str, Any]) -> str:
     columns = WIDE if WIDE_VIEW else WORK
     rows = [{**row, "state": row.get("state") or "working"} for row in board["busy"]]
     changed = (board.get("changes") or {}).get("items") or []
-    more = f"{len(changed) - CHANGED_SHOWN} more: ashigaru changes" if len(changed) > CHANGED_SHOWN else ""
+    more = (
+        f"{len(changed) - CHANGED_SHOWN} more, left unseen until you look: ashigaru changes"
+        if len(changed) > CHANGED_SHOWN
+        else ""
+    )
     seats = [f"{len(board['free'])} free" + (f": {seat_names(board['free'])}" if board["free"] else "")]
     if board["missing"]:
         seats.append(f"{len(board['missing'])} missing: {seat_names(board['missing'])}")
@@ -474,6 +478,7 @@ NEEDS: list[Column] = [
 CHANGES: list[Column] = [
     ("WORK", lambda r: r["id"]),
     ("WHEN", lambda r: seen(r["at"])),
+    ("MODE", lambda r: r.get("mode")),
     ("STATE", lambda r: state(r)),
     ("BY", lambda r: ", ".join(r["by"])),
     ("CHANGED", lambda r: "new" if r["new"] else ", ".join(r["fields"])),
@@ -511,7 +516,7 @@ WIDE: list[Column] = [
     WORK[6],
     ("CHECK", lambda r: r.get("check_after")),
 ]
-"""`work --wide`, and the round: every field, the id first."""
+"""`work --wide`: every field, time first."""
 QUEUED: list[Column] = [
     ("QUEUED", lambda i: i["id"]),
     ("LANE", lambda i: i.get("lane")),

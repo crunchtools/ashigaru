@@ -90,17 +90,23 @@ def work(desk: Desk, since: str | None = None, **flags: bool) -> dict[str, Any]:
 
 def _seat_board(desk: Desk) -> dict[str, Any]:
     """Bare `work`, what Scott reads, in one call: each busy seat's work, the free seats, NEEDS YOU and
-    what changed since he looked, after which his seen mark moves. The full round is `work --advance`,
-    `--all` or `--since`."""
+    what changed since he looked; seen() moves his mark once it is shown. The full round is
+    `work --advance`, `--all` or `--since`."""
     board: dict[str, Any] = desk.get("/v1/status")
     for row in board["busy"]:
         row["id"] = row["work"]
     for need in board["needs_you"]:
         need["id"] = need.get("work")
         need["step"] = need.get("text") or need.get("step") or need["why"]
-    if (board.get("changes") or {}).get("items"):
-        desk.request("POST", "/v1/changes", body={})
     return {**board, "board": True}
+
+
+def seen(desk: Desk, board: dict[str, Any], shown: int) -> None:
+    """After the board is printed, move the reader's seen mark to the end of the window it showed,
+    and only when it showed all of it: a list cut at `shown` stays unseen, so the next look has it."""
+    found = board.get("changes") or {}
+    if found.get("items") and len(found["items"]) <= shown and not found.get("truncated"):
+        desk.request("POST", "/v1/changes", body={"until": found["until"]})
 
 
 def queue(desk: Desk) -> dict[str, Any]:

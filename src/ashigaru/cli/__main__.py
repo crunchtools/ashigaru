@@ -87,7 +87,7 @@ VIEWS = (
         "work",
         "the check round: open items, seats, queue and GitHub catch-up",
         (
-            ("--wide", "every column: the id, time, PR, done-when and check time too"),
+            ("--wide", "every column: time, PR, done-when and check time too"),
             ("--all", "include closed and cleared items"),
             ("--since", "start the catch-up here, a time (default: the sweep mark)"),
             ("--advance", "admin: then move the sweep mark to the round's end"),
@@ -297,6 +297,8 @@ def execute(args: argparse.Namespace, desk: Desk) -> int:
         _show(args, "get", exc.item)
         raise
     _show(args, command, result)
+    if command == "work" and isinstance(result, dict) and result.get("board"):
+        commands.seen(desk, result, render.CHANGED_SHOWN)
     if args.command == "wait" and not succeeded(result):
         return 1
     return 0

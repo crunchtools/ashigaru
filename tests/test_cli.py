@@ -1413,7 +1413,7 @@ def test_changes_renders_each_item_and_the_window(desk: FakeDesk, capsys: pytest
     assert main(["changes", "--since", "2026-11-19T00:00:00Z"]) == 0
     assert desk.seen[0].query == {"since": ["2026-11-19T00:00:00Z"]}
     lines = capsys.readouterr().out.splitlines()
-    assert lines[0].split() == ["WORK", "WHEN", "STATE", "BY", "CHANGED", "TASK", "NEXT"]
+    assert lines[0].split() == ["WORK", "WHEN", "MODE", "STATE", "BY", "CHANGED", "TASK", "NEXT"]
     assert lines[1].split()[:1] == ["a685"] and "result, state" in lines[1] and "merged at abc123" in lines[1]
     assert lines[2].startswith("1 changed since you looked") and "events 4 to 9" in lines[2]
 
@@ -1511,3 +1511,41 @@ def test_work_wide_adds_the_id_time_pr_done_when_and_check(
     head = capsys.readouterr().out.splitlines()[1]
     for column in ("TIME", "PR", "WORK", "DONE WHEN", "CHECK"):
         assert column in head
+
+
+def test_the_board_acks_only_what_it_showed_and_after_printing(
+    desk: FakeDesk, capsys: pytest.CaptureFixture[str]
+) -> None:
+    desk.on("GET", "/v1/status", (200, board_()))
+    desk.on("POST", "/v1/changes", (200, {}))
+    assert main(["work"]) == 0
+    (posted,) = desk.calls("POST", "/v1/changes")
+    assert posted.body == {"until": 9}, "no further than the window shown"
+
+
+def test_a_cut_change_list_stays_unseen(desk: FakeDesk, capsys: pytest.CaptureFixture[str]) -> None:
+    board = board_()
+    many = [board["changes"]["items"][0] | {"id": f"a{n}"} for n in range(12)]
+    desk.on("GET", "/v1/status", (200, board | {"changes": board["changes"] | {"items": many}}))
+    assert main(["work"]) == 0
+    assert "2 more, left unseen" in capsys.readouterr().out
+    assert not desk.calls("POST", "/v1/changes")
+
+
+def test_a_needs_you_row_with_no_state_renders(desk: FakeDesk, capsys: pytest.CaptureFixture[str]) -> None:
+    stale = {
+        "why": "stale",
+        "work": None,
+        "seat": "Dolza 3 - Max",
+        "mode": "manual",
+        "state": None,
+        "text": "x",
+    }
+    desk.on("GET", "/v1/status", (200, board_(needs_you=[stale], changes=None)))
+    assert main(["work"]) == 0
+    assert main(["work", "--markdown"]) == 0
+
+
+def test_a_bad_markdown_width_falls_back(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("ASHIGARU_MD_COLUMNS", "abc")
+    assert render._terminal() > 0

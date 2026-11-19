@@ -772,6 +772,27 @@
         "title": "Changes",
         "type": "object"
       },
+      "ChangesAck": {
+        "additionalProperties": false,
+        "description": "POST /v1/changes: how far the caller read, so the ack never passes what it was shown.",
+        "properties": {
+          "until": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The `until` of the look the caller was shown.",
+            "title": "Until"
+          }
+        },
+        "title": "ChangesAck",
+        "type": "object"
+      },
       "Check": {
         "properties": {
           "name": {
@@ -4306,8 +4327,25 @@
         ]
       },
       "post": {
-        "description": "`ashigaru changes --ack`: the same look, then the caller's seen mark moves to its `until`, only\nforward, so the next look starts after it; `acked` is false when it was already there.",
+        "description": "`ashigaru changes --ack`: the same look, then the caller's seen mark moves to its `until`, only\nforward, so the next look starts after it; with `until`, no further than that event, the end of\nthe look the caller was shown. `acked` is false when it was already there.",
         "operationId": "ack_v1_changes_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/ChangesAck"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Body"
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "content": {
@@ -4328,6 +4366,16 @@
               }
             },
             "description": "Missing, unknown or revoked API key."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
           }
         },
         "security": [

@@ -460,6 +460,14 @@ WAITING_LENGTH = 2000
 """The longest `waiting_on` a seat may send; its stop hook trims well under it."""
 
 
+class ChangesAck(BaseModel):
+    """POST /v1/changes: how far the caller read, so the ack never passes what it was shown."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    until: int | None = Field(None, ge=0, description="The `until` of the look the caller was shown.")
+
+
 class SeatPatch(BaseModel):
     """A seat may send SEAT_ROW_FIELDS for its own row. The rest are Josui's: lane, status, the owner
     that is Scott's manual hold, and the item it holds. `since` is server-set."""

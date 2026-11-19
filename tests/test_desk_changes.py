@@ -109,3 +109,15 @@ def test_an_ack_never_moves_the_mark_back(client: TestClient, keys: Keys, conn: 
 def test_a_first_look_says_it_covers_the_last_day(client: TestClient, keys: Keys) -> None:
     found = look(client, keys, SEAT)
     assert found["since"] is None and found["seen_at"] is None
+
+
+def test_an_ack_with_until_never_passes_the_window_the_reader_was_shown(
+    client: TestClient, keys: Keys
+) -> None:
+    create(client, keys, task="shown")
+    shown = look(client, keys, SEAT)
+    late = create(client, keys, task="written after the look")
+    acked = client.post("/v1/changes", headers=keys[SEAT], json={"until": shown["until"]})
+    assert acked.status_code == OK, acked.text
+    (row,) = look(client, keys, SEAT)["items"]
+    assert row["id"] == late, "what landed between the look and the ack is still unseen"
