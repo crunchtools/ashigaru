@@ -175,3 +175,20 @@ def test_a_review_delivery_is_recorded_on_the_subject(hooked: TestClient, keys: 
     deliver(hooked, "pull_request_review", {**body, **review}, "d-review")
     subject = hooked.get(f"/v1/subjects/{quote(PR, safe='')}", headers=keys[SEAT]).json()
     assert (subject["review"], subject["source"], subject["state"]) == ("approved", "webhook", "open")
+
+
+def test_a_reopened_issue_does_not_requeue_a_story_whose_pr_merged(hooked: TestClient, keys: Keys) -> None:
+    closed = payload("issues", state="closed", updated_at="2026-11-19T10:00:00Z")
+    story = create(hooked, keys, subject_key=f"crunchtools/ashigaru#{closed['issue']['number']}", pr=PR)
+    deliver(hooked, "issues", {**closed, "action": "closed"}, "d-close")
+    merge(hooked)
+    reopened = payload("issues", state="open", updated_at="2026-11-19T11:00:00Z")
+    deliver(hooked, "issues", {**reopened, "action": "reopened"}, "d-reopen")
+    assert get(hooked, keys, story)["state"] == "done"
+
+
+def test_a_delivery_in_the_same_second_lands(hooked: TestClient, keys: Keys) -> None:
+    pull(hooked, "opened", "d-1", state="open", title="first")
+    pull(hooked, "edited", "d-2", state="open", title="same second")
+    subject = hooked.get(f"/v1/subjects/{quote(PR, safe='')}", headers=keys[SEAT]).json()
+    assert subject["title"] == "same second"
