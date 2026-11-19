@@ -162,7 +162,9 @@ goes `idle` with `turn_reconciled_at` set: its `stop` hook never arrived. A
 seat idle for a day with no hold of Scott's loses its `task`, as a `/clear`
 would. Both update the row without moving `updated_at`, so a dead seat still
 goes `missing`. It never closes an item: a hold of Scott's on a seat silent for
-a day shows under NEEDS YOU as `stale` (migration 10 adds the column).
+a day shows under NEEDS YOU as `stale` (migration 10 adds the column). A busy
+seat with no write for `ASHIGARU_SILENT_AFTER` (15 minutes) gets `silent_since`
+and shows as `silent`; any write clears it (migration 11).
 
 **Sweep.** With `ASHIGARU_FORGE_TOKEN_GITHUB` and `ASHIGARU_FORGE_ORG_GITHUB`
 set, `serve` runs a sweep at startup, every `ASHIGARU_SWEEP_EVERY` seconds and
@@ -309,6 +311,7 @@ Settings are flags on `ashigaru-desk serve`, else these environment variables:
 | `ASHIGARU_FORGE_ORG_GITHUB` | the GitHub org the sweep searches; the sweep runs only with this and the token | none: no sweep |
 | `ASHIGARU_SWEEP_EVERY` | seconds between sweeps | `600` |
 | `ASHIGARU_TURN_MAX` | seconds a seat turn may stay active, with no write to its row for 10 minutes, before seat reconcile ends it | `10800` |
+| `ASHIGARU_SILENT_AFTER` | seconds a busy seat may go without a write before seat reconcile flags it silent | `900` |
 | `ASHIGARU_WEBHOOK_SECRET` | GitHub's secret under the bare name the first deploy used; added to `_GITHUB` | none |
 | `ASHIGARU_WEBHOOK_SECRET_FILE` | the same, as a file | none |
 

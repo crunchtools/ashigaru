@@ -14,6 +14,10 @@ All notable changes to this project are documented here. The format follows
   `asyncRewake` hook, waits on it and wakes the idle seat with the brief by
   exiting 2. The `autodispatch` mark is the switch: nothing flows until an
   admin sets it to `on`.
+- The Desk flags a busy seat that has gone silent (migration 11, `silent_since`):
+  seat reconcile marks one with no write for `ASHIGARU_SILENT_AFTER` (15 minutes),
+  after the Desk has been up that long, and the board lists it under NEEDS YOU as
+  `silent`. Any write to the seat clears the flag.
 
 ## [4.1.0] - 2026-11-19
 

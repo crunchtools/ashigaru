@@ -230,6 +230,10 @@ MIGRATIONS: tuple[str, ...] = (
     """
     ALTER TABLE seats ADD COLUMN turn_reconciled_at TEXT;
     """,
+    # When seat reconcile first found a busy seat silent; any write to the seat clears it.
+    """
+    ALTER TABLE seats ADD COLUMN silent_since TEXT;
+    """,
 )
 
 ITEM_DEFAULTS: dict[str, Any] = {
@@ -298,11 +302,11 @@ UPSERT_SEAT = """
     INSERT INTO seats (
         name, lane, status, owner, turn, task, item, since, updated_at, model, billing, context_used,
         context_window, session_id, session_tokens, session_cost_usd, session_booked_usd, turn_started_at,
-        waiting_on, turn_reconciled_at
+        waiting_on, turn_reconciled_at, silent_since
     ) VALUES (
         :name, :lane, :status, :owner, :turn, :task, :item, :since, :updated_at, :model, :billing,
         :context_used, :context_window, :session_id, :session_tokens, :session_cost_usd, :session_booked_usd,
-        :turn_started_at, :waiting_on, :turn_reconciled_at
+        :turn_started_at, :waiting_on, :turn_reconciled_at, :silent_since
     )
     ON CONFLICT (name) DO UPDATE SET
         lane = excluded.lane, status = excluded.status, owner = excluded.owner, turn = excluded.turn,
@@ -311,14 +315,15 @@ UPSERT_SEAT = """
         context_window = excluded.context_window, session_id = excluded.session_id,
         session_tokens = excluded.session_tokens, session_cost_usd = excluded.session_cost_usd,
         session_booked_usd = excluded.session_booked_usd, turn_started_at = excluded.turn_started_at,
-        waiting_on = excluded.waiting_on, turn_reconciled_at = excluded.turn_reconciled_at
+        waiting_on = excluded.waiting_on, turn_reconciled_at = excluded.turn_reconciled_at,
+        silent_since = excluded.silent_since
 """
 
 SEAT_DEFAULTS: dict[str, Any] = {
     "lane": None, "status": "free", "owner": None, "turn": "idle", "task": None, "item": None,
     "model": None, "billing": None, "context_used": None, "context_window": None, "session_id": None,
     "session_tokens": None, "session_cost_usd": 0.0, "session_booked_usd": 0.0, "turn_started_at": None,
-    "waiting_on": None, "turn_reconciled_at": None,
+    "waiting_on": None, "turn_reconciled_at": None, "silent_since": None,
 }  # fmt: skip
 
 RELEASE_SEAT = """
@@ -636,6 +641,7 @@ def write_seat(conn: sqlite3.Connection, name: str, fields: dict[str, Any]) -> d
 
     `since` moves when `status` does, `turn_started_at` when the turn goes active; callers set neither.
     A new turn or a /clear (task back to null) drops `waiting_on`, unless the same write sets it.
+    Any write clears `silent_since`, unless the same write sets it: a write proves the seat alive.
     """
     at = now()
     current = get_seat(conn, name) or {**SEAT_DEFAULTS, "status": None, "since": at}
@@ -648,7 +654,7 @@ def write_seat(conn: sqlite3.Connection, name: str, fields: dict[str, Any]) -> d
     fresh = active or ("task" in fields and fields["task"] is None)
     seat = {
         **SEAT_DEFAULTS, **current, **({"waiting_on": None} if fresh else {}),
-        **({"turn_reconciled_at": None} if active else {}), **fields, **stamps,
+        **({"turn_reconciled_at": None} if active else {}), "silent_since": None, **fields, **stamps,
         "name": name, "updated_at": at,
     }  # fmt: skip
     seat["status"] = seat["status"] or SEAT_DEFAULTS["status"]

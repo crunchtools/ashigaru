@@ -510,10 +510,22 @@ def _held_seat(seat: dict[str, Any], state: str | None) -> dict[str, Any]:
     }
 
 
+def _silent_seat(seat: dict[str, Any], busy: dict[str, Any]) -> dict[str, Any]:
+    """A NEEDS YOU row for a busy seat that has gone silent: reconcile found no write for SILENT."""
+    return {
+        "why": "silent",
+        "work": seat["item"],
+        "seat": seat["name"],
+        "mode": busy["mode"],
+        "state": busy["state"],
+        "text": f"silent since {seat['silent_since']}: check the seat or wrap {seat['item']}",
+    }
+
+
 def status(conn: sqlite3.Connection) -> dict[str, Any]:
     """`ashigaru status`, the board a person reads: each busy seat with its work in full, the free and
     missing seats by name, the tally, and NEEDS YOU: each manual seat idle on what it last said, then
-    Scott's blocked work, then subjects held for his approval."""
+    each busy seat gone silent, then Scott's blocked work, then subjects held for his approval."""
     subjects.hygiene(conn)
     served.close_finished(conn)
     roster = seats(conn)
@@ -529,6 +541,12 @@ def status(conn: sqlite3.Connection) -> dict[str, Any]:
         _held_seat(row, held.get(row["item"]))
         for row in roster
         if row["owner"] and row["turn"] == Turn.IDLE and (row["waiting_on"] or row["missing"])
+    ]
+    listed = {row["seat"] for row in needs}
+    needs += [
+        _silent_seat(row, found)
+        for row, found in zip(working, busy, strict=True)
+        if row["silent_since"] and row["name"] not in listed
     ]
     needs += [_needs(store.decode(item)) for item in conn.execute(NEEDS_YOU, {"limit": QUEUE_LIMIT})]
     needs += [

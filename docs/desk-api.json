@@ -2258,7 +2258,7 @@
         "type": "string"
       },
       "NeedsYou": {
-        "description": "Something only Scott can move: his blocked work, a subject held for approval, a manual seat\nidle on a question, a hold of his on a seat silent for a day, or an outsider's subject the sweep\nfound and did not store.",
+        "description": "Something only Scott can move: his blocked work, a subject held for approval, a manual seat\nidle on a question, a hold of his on a seat silent for a day, a busy seat gone silent (`silent`),\nor an outsider's subject the sweep found and did not store.",
         "properties": {
           "mode": {
             "anyOf": [
@@ -2309,7 +2309,8 @@
               "held",
               "waiting",
               "outsider",
-              "stale"
+              "stale",
+              "silent"
             ],
             "title": "Why",
             "type": "string"
@@ -3064,6 +3065,18 @@
             ],
             "description": "Tokens used this session.",
             "title": "Session Tokens"
+          },
+          "silent_since": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When seat reconcile found a busy seat silent (no write for ASHIGARU_SILENT_AFTER); null once the seat writes again.",
+            "title": "Silent Since"
           },
           "since": {
             "anyOf": [

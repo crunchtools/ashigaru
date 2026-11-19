@@ -12,7 +12,10 @@ hook will ever end. Every EVERY seconds, and at startup, one run:
    Desk's own start, since no status line could reach a Desk that was down: a
    restart after an outage leaves live turns alone until they miss a heartbeat;
 2. drops the `task` of a seat with no hold of Scott's that has been idle for
-   STALE_SEAT, as a /clear would have.
+   STALE_SEAT, as a /clear would have;
+3. flags a busy seat whose row has not been written for SILENT: `silent_since` says
+   since when, and any write to the seat clears it. Like (1), it waits until the
+   Desk has been up for SILENT.
 
 It updates the rows directly, leaving `updated_at`, so a dead seat still goes
 `missing` on time. It never closes or wraps an item: a manual hold left behind
@@ -36,6 +39,8 @@ TURN_MAX = timedelta(hours=3)
 """How long a turn may stay active before a silent one is ended; ASHIGARU_TURN_MAX, in seconds."""
 HEARTBEAT = timedelta(minutes=10)
 """How long a seat with a live turn can go without a write: its statusline posts every 30 seconds."""
+SILENT = timedelta(minutes=15)
+"""How long a busy seat may go without a write before it is flagged; ASHIGARU_SILENT_AFTER, in seconds."""
 LOG = logging.getLogger(__name__)
 
 END_TURNS = """
@@ -47,21 +52,30 @@ DROP_TASKS = """
     UPDATE seats SET task = NULL, waiting_on = NULL
     WHERE turn = 'idle' AND owner IS NULL AND task IS NOT NULL AND updated_at < :stale
 """
+FLAG_SILENT = """
+    UPDATE seats SET silent_since = :now
+    WHERE status = 'busy' AND silent_since IS NULL AND updated_at < :quiet
+"""
+"""Leaves `updated_at` alone, like the others: the flag is the Desk's, not a write by the seat."""
 
 
 @dataclasses.dataclass(frozen=True)
 class Settings:
-    """How reconcile runs: every `every` seconds, ending a silent turn active past `turn_max`."""
+    """How reconcile runs: every `every` seconds, ending a silent turn active past `turn_max` and flagging
+    a busy seat with no write for `silent`."""
 
     every: float = EVERY
     turn_max: timedelta = TURN_MAX
+    silent: timedelta = SILENT
 
 
 def run(db_path: str, settings: Settings, started: datetime | None = None) -> dict[str, int]:
-    """One reconcile on its own connection: how many turns it ended and tasks it dropped. A turn's
-    silence is measured from the later of its row's last write and `started`, when the Desk came up."""
+    """One reconcile on its own connection: how many turns it ended, tasks it dropped and seats it flagged
+    silent. A turn's silence is measured from the later of its row's last write and `started`, when the
+    Desk came up."""
     now = datetime.now(UTC)
     heard = now - HEARTBEAT
+    quiet = now - settings.silent
     conn = store.connect(db_path)
     try:
         with store.transaction(conn):
@@ -74,11 +88,16 @@ def run(db_path: str, settings: Settings, started: datetime | None = None) -> di
                 else 0
             )
             dropped = conn.execute(DROP_TASKS, {"stale": _stamp(now - STALE_SEAT)}).rowcount
+            flagged = (
+                conn.execute(FLAG_SILENT, {"now": _stamp(now), "quiet": _stamp(quiet)}).rowcount
+                if started is None or started <= quiet
+                else 0
+            )
     finally:
         conn.close()
-    if ended or dropped:
-        LOG.info("seat reconcile: %d turns ended, %d tasks dropped", ended, dropped)
-    return {"turns": ended, "tasks": dropped}
+    if ended or dropped or flagged:
+        LOG.info("seat reconcile: %d turns ended, %d tasks dropped, %d seats silent", ended, dropped, flagged)
+    return {"turns": ended, "tasks": dropped, "silent": flagged}
 
 
 def _stamp(when: datetime) -> str:
