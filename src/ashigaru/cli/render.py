@@ -25,11 +25,11 @@ CLIP_MIN = 12
 
 
 MARKDOWN = False
+"""Tables as Markdown (`--markdown`), for a chat that renders them."""
 WIDE_VIEW = False
 """`work --wide`: every column."""
 CHANGED_SHOWN = 10
 """How many changed items the board shows."""
-"""Tables as Markdown (`--markdown`), for a chat that renders them and wraps a cell itself."""
 
 GITHUB_KEY = re.compile(r"^([\w.-]+)/([\w.-]+)#(\d+)$")
 RT_KEY = re.compile(r"^RT#(\d+)$")
@@ -180,10 +180,14 @@ Claude Code's table drops it and sizes each table to its own text; the braille b
 WIDE_CHAR = 0x2600
 """Above this, a character (an emoji) takes two terminal columns."""
 LINK = re.compile(r"\[([^\]]*)\]\([^)]*\)")
+MD_SPECIAL = re.compile(r"([\\`*_\[\]<>|#~])")
+"""What Markdown would read as markup in a cell; seat and forge text is escaped, never rendered."""
 
 
 def _md_cell(value: Any, header: str) -> str:
-    text = " ".join(("" if value is None else str(value)).split()).replace("|", "\\|")
+    text = " ".join(("" if value is None else str(value)).split())
+    if not LINK.fullmatch(text):
+        text = MD_SPECIAL.sub(r"\\\1", text)
     if header == "STATE" and text:
         text = f"{STATE_MARK.get(text.split('/')[0], '⚪')} {text}"
     width = MD_CLIP.get(header) if header in FLEX else CAP.get(header)
@@ -197,7 +201,7 @@ def _md_cell(value: Any, header: str) -> str:
 
 def _shown(text: str) -> int:
     """How wide a cell renders: a link shows only its label, an emoji takes two columns."""
-    plain = LINK.sub(r"\1", text)
+    plain = re.sub(r"\\(.)", r"\1", LINK.sub(r"\1", text))
     return len(plain) + sum(1 for ch in plain if ord(ch) > WIDE_CHAR)
 
 
@@ -485,37 +489,35 @@ CHANGES: list[Column] = [
     ("TASK", lambda r: Whole(r["task"])),
     ("NEXT", lambda r: Tail(r.get("step") or "")),
 ]
-WORK: list[Column] = [
-    ("SEAT", lambda r: r.get("seat")),
-    ("MODE", lambda r: r.get("mode")),
-    ("STATE", lambda r: state(r)),
-    ("OUTCOME", outcome),
-    ("WORK", lambda r: r.get("id")),
-    ("TASK", lambda r: Whole(r.get("task") or "")),
-    (
-        "NEXT",
-        lambda r: Tail(
-            " ".join(str(r.get("step") or r.get("next") or r.get("result_or_blocker") or "").split())
-        ),
+BOARD_COLUMN: dict[str, Callable[[dict[str, Any]], Any]] = {
+    "WORK": lambda r: r.get("id"),
+    "TIME": lambda r: age(r.get("since") or r.get("updated_at")),
+    "SEAT": lambda r: r.get("seat"),
+    "MODE": lambda r: r.get("mode"),
+    "STATE": lambda r: state(r),
+    "OUTCOME": outcome,
+    "PR": pr,
+    "TASK": lambda r: Whole(r.get("task") or ""),
+    "DONE WHEN": lambda r: r.get("done_when"),
+    "NEXT": lambda r: Tail(
+        " ".join(str(r.get("step") or r.get("next") or r.get("result_or_blocker") or "").split())
     ),
-]
+    "CHECK": lambda r: r.get("check_after"),
+}
+"""Every column the board and the round draw from, by header, so each view names its own order."""
+
+
+def _columns(*headers: str) -> list[Column]:
+    return [(header, BOARD_COLUMN[header]) for header in headers]
+
+
+WORK = _columns("SEAT", "MODE", "STATE", "OUTCOME", "WORK", "TASK", "NEXT")
 """Scott's `work` columns; NEXT is the one next step."""
-ROW: list[Column] = [
-    ("WORK", lambda r: r["id"]),
-    ("TIME", lambda r: age(r.get("since") or r.get("updated_at"))),
-    *WORK[:4],
-    *WORK[5:],
-]
-"""One item an action returned, its id first."""
-WIDE: list[Column] = [
-    ("TIME", lambda r: age(r.get("since") or r.get("updated_at"))),
-    *WORK[:4],
-    ("PR", pr),
-    *WORK[4:6],
-    ("DONE WHEN", lambda r: r.get("done_when")),
-    WORK[6],
-    ("CHECK", lambda r: r.get("check_after")),
-]
+ROW = _columns("WORK", "TIME", "SEAT", "MODE", "STATE", "OUTCOME", "TASK", "NEXT")
+"""One item an action returned, and the round's rows: the id first."""
+WIDE = _columns(
+    "TIME", "SEAT", "MODE", "STATE", "OUTCOME", "PR", "WORK", "TASK", "DONE WHEN", "NEXT", "CHECK"
+)
 """`work --wide`: every field, time first."""
 QUEUED: list[Column] = [
     ("QUEUED", lambda i: i["id"]),

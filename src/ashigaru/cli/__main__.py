@@ -85,7 +85,7 @@ VIEWS = (
     ),
     (
         "work",
-        "the check round: open items, seats, queue and GitHub catch-up",
+        "the seat board: busy seats, NEEDS YOU, what changed; --all, --since or --advance: the round",
         (
             ("--wide", "every column: time, PR, done-when and check time too"),
             ("--all", "include closed and cleared items"),

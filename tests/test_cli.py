@@ -1549,3 +1549,34 @@ def test_a_needs_you_row_with_no_state_renders(desk: FakeDesk, capsys: pytest.Ca
 def test_a_bad_markdown_width_falls_back(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("ASHIGARU_MD_COLUMNS", "abc")
     assert render._terminal() > 0
+
+
+def test_a_board_with_nothing_changed_acks_nothing(
+    desk: FakeDesk, capsys: pytest.CaptureFixture[str]
+) -> None:
+    board = board_()
+    desk.on("GET", "/v1/status", (200, board | {"changes": board["changes"] | {"items": []}}))
+    assert main(["work"]) == 0
+    assert not desk.calls("POST", "/v1/changes")
+
+
+@pytest.mark.parametrize(
+    ("value", "header", "cell"),
+    [
+        ("Fix *bold* and `code` | pipes", "TASK", r"Fix \*bold\* and \`code\` \| pipes"),
+        ("[python-sdlc#66](https://github.com/x/python-sdlc/issues/66)", "OUTCOME",
+         "[python-sdlc#66](https://github.com/x/python-sdlc/issues/66)"),
+        ("[a-very-long-repository-name#1](https://x/1)", "OUTCOME", "[a-very-long-reposit…](https://x/1)"),
+        ("Exedore 12 - Max-Overflow-Seat", "SEAT", "Exedore 12 - Max-…"),
+        ("working", "STATE", "🟢 working"),
+        (None, "TASK", ""),
+    ],
+)  # fmt: skip
+def test_a_markdown_cell_escapes_clips_and_marks(value: Any, header: str, cell: str) -> None:
+    assert render._md_cell(value, header) == cell
+
+
+def test_shown_width_counts_a_link_by_its_label_an_escape_once_and_an_emoji_twice() -> None:
+    assert render._shown("[RT#1](https://x)") == len("RT#1")
+    assert render._shown(r"a\*b") == len("a*b")
+    assert render._shown("🟢 x") == len("🟢 x") + 1
