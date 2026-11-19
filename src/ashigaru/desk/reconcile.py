@@ -40,8 +40,9 @@ LOG = logging.getLogger(__name__)
 
 END_TURNS = """
     UPDATE seats SET turn = 'idle', turn_reconciled_at = :now
-    WHERE turn = 'active' AND turn_started_at < :began AND updated_at < :heard
+    WHERE turn = 'active' AND coalesce(turn_started_at, updated_at) < :began AND updated_at < :heard
 """
+"""A turn with no start (active before turn_started_at existed) began no later than its last write."""
 DROP_TASKS = """
     UPDATE seats SET task = NULL, waiting_on = NULL
     WHERE turn = 'idle' AND owner IS NULL AND task IS NOT NULL AND updated_at < :stale

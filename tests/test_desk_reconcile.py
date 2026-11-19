@@ -63,6 +63,14 @@ def test_a_turn_still_heard_from_or_within_the_limit_is_left(
     assert row(conn, "alive")["turn"] == "active"
 
 
+def test_a_turn_with_no_start_is_aged_by_its_last_write(conn: sqlite3.Connection, db: Path) -> None:
+    seat(conn, "legacy", ago(hours=4), turn="active")
+    seat(conn, "recent", ago(minutes=30), turn="active")
+    conn.execute("UPDATE seats SET turn_started_at = NULL")
+    assert reconciling(db)["turns"] == 1
+    assert (row(conn, "legacy")["turn"], row(conn, "recent")["turn"]) == ("idle", "active")
+
+
 def test_a_new_turn_clears_the_reconciled_mark(conn: sqlite3.Connection, db: Path) -> None:
     seat(conn, "back", ago(minutes=30), turn="active")
     conn.execute("UPDATE seats SET turn_started_at = ? WHERE name = 'back'", (ago(hours=4),))
