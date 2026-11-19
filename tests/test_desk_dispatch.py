@@ -244,6 +244,28 @@ def test_a_claim_made_as_the_client_leaves_is_handed_back(
     assert freed is not None and (freed["status"], freed["item"]) == ("free", None)
 
 
+def test_unclaim_leaves_work_that_moved_on_alone(
+    client: TestClient, keys: Keys, conn: sqlite3.Connection
+) -> None:
+    seat(client, keys, MINE)
+    seat(client, keys, OTHER)
+    switch(client, keys, "on")
+    started = item(client, keys, lane="exedore-max")
+    assert dispatch.next_item(conn, MINE) is not None
+    client.patch(f"/v1/items/{started}", headers=keys[JOSUI], json={"state": "working"})
+    dispatch.unclaim(conn, started, MINE)
+    kept, held = store.get_item(conn, started), store.get_seat(conn, MINE)
+    assert kept is not None and (kept["seat"], kept["state"]) == (MINE, "working")
+    assert held is not None and (held["status"], held["item"]) == ("busy", started)
+
+    elsewhere = item(client, keys, lane="exedore-max")
+    assert dispatch.next_item(conn, OTHER) is not None
+    dispatch.unclaim(conn, elsewhere, MINE)
+    theirs, mine = store.get_item(conn, elsewhere), store.get_seat(conn, MINE)
+    assert theirs is not None and (theirs["seat"], theirs["state"]) == (OTHER, "assigned")
+    assert mine is not None and mine["item"] == started
+
+
 def test_next_waits_out_its_window_when_nothing_comes(
     client: TestClient, keys: Keys, monkeypatch: pytest.MonkeyPatch
 ) -> None:
