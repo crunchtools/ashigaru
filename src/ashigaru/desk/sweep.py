@@ -51,6 +51,8 @@ FIRST = timedelta(days=1)
 """How far back the very first search reaches."""
 OVERLAP = timedelta(minutes=10)
 """How far each search reaches back past the mark: the search index lags the forge."""
+OUTSIDERS_SHOWN = 50
+"""The most outsiders NEEDS YOU lists; a run keeps at most this many too."""
 FETCHERS = 8
 """Subjects read from the forge at once."""
 KEPT = timedelta(days=30)
@@ -121,13 +123,14 @@ OUTSIDERS = """
     WHERE s.finished_at >= :since AND json_extract(o.value, '$.subject_key') NOT IN (
         SELECT subject_key FROM items WHERE subject_key IS NOT NULL
     )
+    LIMIT :limit
 """
 """The outsiders the runs of the last day listed that still have no item: Scott's to look at."""
 
 
 def outsiders(conn: sqlite3.Connection) -> list[dict[str, Any]]:
     since = _stamp(datetime.now(UTC) - FIRST)
-    return [dict(row) for row in conn.execute(OUTSIDERS, {"since": since})]
+    return [dict(row) for row in conn.execute(OUTSIDERS, {"since": since, "limit": OUTSIDERS_SHOWN})]
 
 
 def last(conn: sqlite3.Connection) -> dict[str, Any] | None:
@@ -156,16 +159,12 @@ def _found(conn: sqlite3.Connection, settings: Settings, hit: Found, counts: Cou
     known = store.item_by_subject(conn, item.subject_key) is not None
     if not member and not known:
         outsider = {"subject_key": item.subject_key, "ref": item.ref, "author": item.author}
-        counts.outsiders += [outsider] if outsider not in counts.outsiders else []
+        if outsider not in counts.outsiders and len(counts.outsiders) < OUTSIDERS_SHOWN:
+            counts.outsiders.append(outsider)
         return
     named = LINK.findall(f"{item.title}\n{hit.body}") if member and item.kind == Kind.STORY else []
-    asks = member and (named or not known) and item.author not in settings.authors
-    writes = item.author in settings.authors
-    if asks and item.repo and item.author:
-        asked = (item.repo, item.author)
-        if asked not in counts.writers:
-            counts.writers[asked] = settings.forge.may_write(*asked, settings.token)
-        writes = counts.writers[asked]
+    asked = (item.repo or "", item.author or "")
+    writes = item.author in settings.authors or (member and counts.writers.get(asked, False))
     with store.transaction(conn):
         if store.item_by_subject(conn, item.subject_key) is None:
             judged = dataclasses.replace(item, author_writes=writes, judged_at=0)
@@ -222,6 +221,23 @@ def _read(conn: sqlite3.Connection, settings: Settings, keys: set[str], counts: 
                 counts.subjects += 1
 
 
+def _ask(settings: Settings, hits: list[Found], counts: Counts) -> None:
+    """Ask the forge, FETCHERS at a time, whether each member who authored a hit may write to its
+    repo, once per (repo, author), so `_found` reads the answers from `counts.writers`. A failed
+    check is a no, as the forge's own permission check makes it."""
+    pairs = {
+        (hit.item.repo, hit.item.author)
+        for hit in hits
+        if hit.association in WRITERS
+        and hit.item.repo
+        and hit.item.author
+        and hit.item.author not in settings.authors
+    }
+    with ThreadPoolExecutor(FETCHERS) as pool:
+        answers = {pair: pool.submit(settings.forge.may_write, *pair, settings.token) for pair in pairs}
+    counts.writers.update({pair: answer.result() for pair, answer in answers.items()})
+
+
 def _search(
     conn: sqlite3.Connection, settings: Settings, keys: set[str], started: datetime, counts: Counts
 ) -> None:
@@ -231,6 +247,7 @@ def _search(
         counts.errors.insert(0, f"search: {_why(failed)}")
         LOG.warning("sweep search stopped: %s", counts.errors[0], exc_info=failed)
         return
+    _ask(settings, [hit for hit in search.hits if hit.item.subject_key not in keys], counts)
     for hit in search.hits:
         try:
             if hit.item.subject_key not in keys:

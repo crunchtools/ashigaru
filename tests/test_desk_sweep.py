@@ -5,6 +5,7 @@ import http.client
 import sqlite3
 import time
 import urllib.error
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 from email.message import Message
 from http.client import CONFLICT, CREATED, FORBIDDEN, OK
@@ -15,6 +16,7 @@ import pytest
 from conftest import Keys
 from fastapi.testclient import TestClient
 
+from ashigaru.desk import __main__ as desk_main
 from ashigaru.desk import dispatch, store, sweep
 from ashigaru.desk.api import create_app
 from ashigaru.desk.forges import Found, IntakeItem, Search
@@ -24,6 +26,7 @@ JOSUI, SEAT = "Josui Prime", "Exedore 1 - Max"
 ORG = "crunchtools"
 HOUR = 3600.0
 LONG_AGO = "2020-01-01T00:00:00Z"
+TWO_MINUTES = 120.0
 WRITERS = 2
 """Of the four authors the search found, two are queued: the member and the app's bot."""
 
@@ -266,3 +269,30 @@ def test_the_timer_runs_again_after_its_interval(db: Path, conn: sqlite3.Connect
                 break
             time.sleep(0.05)
     assert runs[0] == "startup" and "timer" in runs
+
+
+def test_two_runs_racing_for_the_lock_make_one_run(db: Path, conn: sqlite3.Connection) -> None:
+    class Slow(FakeForge):
+        def updated(self, org: str, since: str, token: str) -> Search:
+            time.sleep(0.3)
+            return Search([], True)
+
+    settings = sweep.Settings(Slow(), "token", ORG, every=HOUR)
+    with ThreadPoolExecutor(2) as pool:
+        runs = list(pool.map(lambda trigger: sweep.run(str(db), settings, trigger), ["timer", "request"]))
+    assert sorted(run is None for run in runs) == [False, True]
+    assert conn.execute("SELECT count(*) FROM sweeps").fetchone()[0] == 1
+
+
+def test_serve_sweeps_only_with_a_token_and_an_org(monkeypatch: pytest.MonkeyPatch, db: Path) -> None:
+    monkeypatch.setenv("ASHIGARU_FORGE_TOKEN_GITHUB", "token")
+    assert desk_main.sweeper(str(db)) is None
+    monkeypatch.setenv("ASHIGARU_FORGE_ORG_GITHUB", " crunchtools ")
+    monkeypatch.setenv("ASHIGARU_SWEEP_EVERY", "120")
+    monkeypatch.setenv("ASHIGARU_FORGE_AUTHORS_GITHUB", "ashigaru-crunchtools[bot]")
+    made = desk_main.sweeper(str(db))
+    assert made is not None
+    assert (made.settings.org, made.settings.every, made.settings.token) == (ORG, TWO_MINUTES, "token")
+    assert made.settings.authors == frozenset({"ashigaru-crunchtools[bot]"})
+    monkeypatch.delenv("ASHIGARU_FORGE_TOKEN_GITHUB")
+    assert desk_main.sweeper(str(db)) is None
