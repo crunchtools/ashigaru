@@ -5,8 +5,10 @@ writes only items whose `seat` is its own name, only SEAT_FIELDS, and only to
 SEAT_STATES; Josui verifies and closes. A ci identity reads.
 """
 
+import asyncio
+import contextlib
 import sqlite3
-from collections.abc import Iterator, Mapping, Sequence
+from collections.abc import AsyncIterator, Iterator, Mapping, Sequence
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -15,7 +17,7 @@ from fastapi import Path as PathParam
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 
-from . import auth, dispatch, store, subjects
+from . import auth, dispatch, store, subjects, sweep
 from .model import (
     CLOSED,
     MARK_NAME,
@@ -50,6 +52,8 @@ from .model import (
     SeatPatch,
     State,
     Subject,
+    Sweep,
+    SweepRun,
     Usage,
     UsageReport,
     Verb,
@@ -326,6 +330,46 @@ def subject(conn: Conn, who: Who, key: str) -> Subject:
     return Subject.model_validate(_found(subjects.get(conn, model_subject_key(key) or key), "subject"))
 
 
+def sweep_view(sweeper: sweep.Sweeper | None, conn: sqlite3.Connection, requested: bool = False) -> Sweep:
+    """The sweep as `ashigaru sweep` shows it, for the REST route and the MCP tool alike."""
+    return Sweep(
+        configured=sweeper is not None,
+        every=sweeper.settings.every if sweeper else None,
+        running=bool(sweeper and sweeper.running),
+        requested=requested,
+        last=SweepRun.model_validate(found) if (found := sweep.last(conn)) else None,
+    )
+
+
+def sweep_start(sweeper: sweep.Sweeper | None, conn: sqlite3.Connection) -> Sweep:
+    """Wake the timer; call it on the event loop. 409 when no timer runs."""
+    if sweeper is None:
+        raise HTTPException(status.HTTP_409_CONFLICT, "no sweep runs here: set the forge's token and org")
+    sweeper.request()
+    return sweep_view(sweeper, conn, requested=True)
+
+
+@router.get("/v1/sweep", tags=["views"], responses=errors(401))
+def sweep_state(request: Request, conn: Conn, who: Who) -> Sweep:
+    """`ashigaru sweep`: whether the timer that reads the forge back runs here, how often, whether a
+    run is under way, and the last run's counts and error."""
+    return sweep_view(request.app.state.sweeper, conn)
+
+
+@router.post(
+    "/v1/sweep",
+    tags=["views"],
+    responses={
+        **errors(401, 403),
+        409: {"model": Problem, "description": "No sweep runs here: the forge's token or org is not set."},
+    },
+)
+async def sweep_now(request: Request, conn: Conn, who: Admin) -> Sweep:
+    """`ashigaru sweep --run`, admin: wake the timer for a run now, and return at once; the run's
+    counts land in `last` when it finishes. 409 when no timer runs (no forge token or org)."""
+    return sweep_start(request.app.state.sweeper, conn)
+
+
 @router.get("/v1/queue", tags=["views"], responses=errors(401))
 def queue(conn: Conn, who: Who) -> Queue:
     """`ashigaru queue`: queued items with the state of each item they wait on, then proposed children
@@ -522,6 +566,8 @@ def create_app(
     `forge_tokens` maps it to an API token for permission checks and required checks; with none, all
     intake is held and no commit's CI is success.
     `forge_authors` maps it to accounts whose own subjects are trusted as a writer's: the app's bot.
+    A `sweep.Sweeper` set as `app.state.sweeper` before startup runs while the app does (serve sets
+    one when the forge has a token and an org); with none, nothing is swept.
     """
     from . import (
         ci,
@@ -535,12 +581,30 @@ def create_app(
     store.migrate(conn)
     conn.close()
     mcp_lifespan, mcp_route = mcp.install(db_path)
+
+    @contextlib.asynccontextmanager
+    async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+        sweeper: sweep.Sweeper | None = app.state.sweeper
+        timer = asyncio.create_task(sweeper.loop()) if sweeper else None
+        try:
+            if mcp_lifespan is None:
+                yield
+            else:
+                async with mcp_lifespan(app):
+                    yield
+        finally:
+            if timer:
+                timer.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await timer
+
     app = FastAPI(
         title="Ashigaru Desk",
         version=VERSION,
         description="One queue for every source of change, one owner per item (docs/design/ashigaru-3.md).",
-        lifespan=mcp_lifespan,
+        lifespan=lifespan,
     )
+    app.state.sweeper = None
     app.state.db_path = str(db_path)
     app.state.webhook_secrets = webhooks.secrets(webhook_secrets or {})
     app.state.forge_tokens = dict(forge_tokens or {})

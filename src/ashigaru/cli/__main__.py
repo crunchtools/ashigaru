@@ -62,6 +62,40 @@ def _fields(command: argparse.ArgumentParser, options: tuple[tuple[str, str | No
         command.add_argument(flag, help=text, choices=CHOICES.get(flag))
 
 
+VIEWS = (
+    ("usage", "context, tokens, turn and spend per seat", ()),
+    ("agents", "each seat: free or busy, its work, how long", ()),
+    ("status", "the board: busy seats and their work, free seats, NEEDS YOU", ()),
+    (
+        "work",
+        "the check round: open items, seats, queue and GitHub catch-up",
+        (
+            ("--all", "include closed and cleared items"),
+            ("--since", "start the catch-up here, a time (default: the sweep mark)"),
+            ("--advance", "admin: then move the sweep mark to the round's end"),
+        ),
+    ),
+    ("queue", "queued items, what they wait on, proposed children", ()),
+    (
+        "sweep",
+        "the timer that reads GitHub back: its last run; --run starts one",
+        (("--run", "admin: start a run now and return at once"),),
+    ),
+    ("outcomes", "each outcome's stories: done, blocked, open", ()),
+)
+"""What the Desk shows, in the order the skill's headings follow, with each one's flags. Every flag is
+a switch but --since, which takes a time."""
+
+
+def _views(
+    sub: "argparse._SubParsersAction[argparse.ArgumentParser]", common: argparse.ArgumentParser
+) -> None:
+    for name, text, flags in VIEWS:
+        view = sub.add_parser(name, parents=[common], help=text)
+        for flag, about in flags:
+            view.add_argument(flag, help=about, action="store" if flag == "--since" else "store_true")
+
+
 def _item_commands(
     sub: "argparse._SubParsersAction[argparse.ArgumentParser]", common: argparse.ArgumentParser
 ) -> None:
@@ -157,21 +191,7 @@ def parser() -> argparse.ArgumentParser:
     )
     top.add_argument("--version", action="version", version=__version__)
     sub = top.add_subparsers(dest="command", required=True, metavar="command")
-    sub.add_parser("usage", parents=[common], help="context, tokens, turn and spend per seat")
-    sub.add_parser("agents", parents=[common], help="each seat: free or busy, its work, how long")
-    sub.add_parser(
-        "status", parents=[common], help="the board: busy seats and their work, free seats, NEEDS YOU"
-    )
-    work = sub.add_parser(
-        "work", parents=[common], help="the check round: open items, seats, queue and GitHub catch-up"
-    )
-    work.add_argument("--all", action="store_true", help="include closed and cleared items")
-    work.add_argument("--since", help="start the catch-up here, a time (default: the sweep mark)")
-    work.add_argument(
-        "--advance", action="store_true", help="admin: then move the sweep mark to the round's end"
-    )
-    sub.add_parser("queue", parents=[common], help="queued items, what they wait on, proposed children")
-    sub.add_parser("outcomes", parents=[common], help="each outcome's stories: done, blocked, open")
+    _views(sub, common)
 
     _item_commands(sub, common)
 

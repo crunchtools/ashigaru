@@ -15,7 +15,8 @@ Approval, retry and withdrawal change lane and mode only while the item is
 queued and seatless and nobody but intake has set them: a hold Josui chose
 wins. Otherwise later deliveries never touch what Josui owns (task, lane, mode,
 state, seat): they refresh the ref, and the source's title, labels and open or
-closed state under `extra`. A subject first seen closed is not queued, nor is one of the record issues
+closed state under `extra`. A subject first seen closed is not queued, nor is a bot's that is not one of
+the trusted authors (dependabot's PRs are its own to land), nor is one of the record issues
 the sweep keeps (RECORDS): the inbox and the red issue carry strangers' text, and their author, the
 app's bot, would make them trusted and claimable. One queued before that is held on its next delivery,
 for good: nothing it carries can trust it again.
@@ -147,12 +148,17 @@ def _unless_moved(conn: sqlite3.Connection, existing: dict[str, Any], item: Inta
     return dataclasses.replace(item, author_writes=False, approved=False, pushed_by_writer=False)
 
 
+def _untrusted_bot(item: IntakeItem) -> bool:
+    """A bot's subject whose author is not trusted: the app's own bot is, by ASHIGARU_FORGE_AUTHORS."""
+    return bool(item.author and item.author.endswith("[bot]")) and not item.author_writes
+
+
 def upsert(conn: sqlite3.Connection, item: IntakeItem) -> str | None:
     """The id of the item the subject maps to, or None when it was closed or a record on first sight.
     The caller holds the transaction; an item is written only when something changed."""
     existing = store.item_by_subject(conn, item.subject_key)
     if existing is None:
-        if item.closed or RECORDS & set(item.labels):
+        if item.closed or RECORDS & set(item.labels) or _untrusted_bot(item):
             return None
         return store.insert_item(
             conn,

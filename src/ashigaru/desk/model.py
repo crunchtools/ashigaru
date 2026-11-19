@@ -492,15 +492,53 @@ class BoardRow(BaseModel):
 
 
 class NeedsYou(BaseModel):
-    """Something only Scott can move: his blocked work, a subject held for approval, or a manual seat
-    idle on a question."""
+    """Something only Scott can move: his blocked work, a subject held for approval, a manual seat
+    idle on a question, or an outsider's subject the sweep found and did not store."""
 
-    why: Literal["blocked", "held", "waiting"]
+    why: Literal["blocked", "held", "waiting", "outsider"]
     work: str | None
     seat: str | None = None
-    mode: Mode
+    mode: Mode | None
     state: State | None
     text: str | None = Field(description="The blocker, the approval asked for, or the seat's last word.")
+
+
+class Outsider(BaseModel):
+    """A subject the sweep found by someone who is not a member or a trusted author: never stored as
+    an item, only listed for Scott."""
+
+    subject_key: str
+    ref: str | None = None
+    author: str | None = None
+
+
+class SweepRun(BaseModel):
+    """One run of the sweep: what started it, when, what it read, queued and closed, and why it
+    stopped short, if it did."""
+
+    id: int
+    trigger: Literal["startup", "timer", "request"]
+    started_at: str
+    finished_at: str | None = Field(description="null while it runs.")
+    subjects: int = Field(description="Subjects read from the forge.")
+    new: int = Field(description="Subjects queued (or held) that had no item.")
+    closed: int = Field(description="Items it settled: closed, requeued or marked landed.")
+    error: str | None = Field(description="The first thing it could not read, e.g. `search: HTTP 403`.")
+    outsiders: list[Outsider] = Field(default_factory=list, description="New subjects by outsiders: listed.")
+    skipped: str | None = Field(
+        default=None,
+        description="Why it did not run: another run's live lease, e.g. `run 41 holds the lease`.",
+    )
+
+
+class Sweep(BaseModel):
+    """`ashigaru sweep`: whether the timer runs here, how often, if a run is under way, and the last."""
+
+    configured: bool = Field(description="False without the forge's token and org: no timer runs.")
+    every: float | None = Field(description="Seconds between runs.")
+    running: bool
+    requested: bool = Field(False, description="True when this call asked for a run now.")
+    last: SweepRun | None
 
 
 class Board(BaseModel):
@@ -511,6 +549,7 @@ class Board(BaseModel):
     missing: list[str] = Field(description="Free seats that never checked in or went quiet for a day.")
     summary: SeatSummary
     needs_you: list[NeedsYou]
+    sweep: SweepRun | None = Field(None, description="The last sweep, so a person sees the fallback alive.")
 
 
 class Usage(BaseModel):

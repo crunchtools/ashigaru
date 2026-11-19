@@ -16,7 +16,7 @@ import sys
 import urllib.request
 from http import HTTPStatus
 
-from . import auth, importer, store
+from . import auth, importer, store, sweep
 from .forges import DEFAULT, FORGES
 from .model import Role
 
@@ -24,6 +24,7 @@ SETTINGS = {
     "ASHIGARU_DESK_DB": "the SQLite file (serve, health); the image sets /data/desk.db",
     "ASHIGARU_BIND": "the address serve listens on; 127.0.0.1 by default, 0.0.0.0 in the image",
     "ASHIGARU_PORT": "the port serve listens on; 8080 by default",
+    "ASHIGARU_SWEEP_EVERY": "seconds between sweeps of the forge (serve); 600 by default",
     "ASHIGARU_TRUSTED_PROXIES": (
         "comma-separated proxy addresses or CIDRs whose X-Forwarded-For and X-Forwarded-Proto are"
         " believed; none by default, so a direct client cannot forge its address or scheme"
@@ -39,6 +40,9 @@ for _forge in FORGES:
     SETTINGS[f"ASHIGARU_FORGE_AUTHORS_{_forge.upper()}"] = (
         f"comma-separated {_forge} accounts, such as the app's bot, whose own issues and PRs are "
         "trusted as a writer's, so auto-claimable: a lane label on one sets its lane and mode auto (serve)"
+    )
+    SETTINGS[f"ASHIGARU_FORGE_ORG_{_forge.upper()}"] = (
+        f"the {_forge} org the sweep searches (serve); with the token, the Desk reads it back on a timer"
     )
     SETTINGS[f"ASHIGARU_WEBHOOK_SECRET_{_forge.upper()}"] = f"the {_forge} webhook secret (serve)"
     SETTINGS[f"ASHIGARU_WEBHOOK_SECRET_{_forge.upper()}_FILE"] = (
@@ -93,6 +97,17 @@ def forge_authors() -> dict[str, list[str]]:
     return {forge: proxies(setting(f"ASHIGARU_FORGE_AUTHORS_{forge.upper()}")) for forge in FORGES}
 
 
+def sweeper(db: str) -> sweep.Sweeper | None:
+    """The default forge's sweep, every ASHIGARU_SWEEP_EVERY seconds, when it has both a token and an
+    org (ASHIGARU_FORGE_ORG_<FORGE>); else None, and nothing is swept."""
+    token, org = forge_tokens()[DEFAULT], setting(f"ASHIGARU_FORGE_ORG_{DEFAULT.upper()}").strip()
+    if not (token and org):
+        return None
+    every = float(setting("ASHIGARU_SWEEP_EVERY", str(sweep.EVERY)))
+    authors = frozenset(forge_authors()[DEFAULT])
+    return sweep.Sweeper(db, sweep.Settings(FORGES[DEFAULT], token, org, authors, every))
+
+
 def _open(path: str) -> sqlite3.Connection:
     conn = store.connect(path)
     store.migrate(conn)
@@ -111,6 +126,7 @@ def serve(args: argparse.Namespace) -> int:
         forge_tokens=forge_tokens(),
         forge_authors=forge_authors(),
     )
+    app.state.sweeper = sweeper(args.db)
     # The app applies the proxy headers itself, and only from trusted_proxies; uvicorn's own
     # handling would trust 127.0.0.1 by default.
     uvicorn.run(app, host=args.host, port=args.port, proxy_headers=False, server_header=False)

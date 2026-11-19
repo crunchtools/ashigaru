@@ -80,9 +80,9 @@ def test_initialize_and_list_tools(client: TestClient, urls: dict[str, str]) -> 
     )
     names = {tool["name"] for tool in listed.json()["result"]["tools"]}
     assert names == {
-        "desk_usage", "desk_agents", "desk_status", "desk_work", "desk_queue", "desk_outcomes", "desk_list",
-        "desk_get", "desk_create", "desk_update", "desk_mark", "desk_report", "desk_assign", "desk_auto",
-        "desk_manual", "desk_wait", "desk_wrap", "desk_claim", "desk_file",
+        "desk_usage", "desk_agents", "desk_status", "desk_work", "desk_queue", "desk_sweep", "desk_outcomes",
+        "desk_list", "desk_get", "desk_create", "desk_update", "desk_mark", "desk_report", "desk_assign",
+        "desk_auto", "desk_manual", "desk_wait", "desk_wrap", "desk_claim", "desk_file",
     }  # fmt: skip
     for tool in listed.json()["result"]["tools"]:
         assert not {"who", "identity", "caller"} & set(tool["inputSchema"].get("properties", {}))
@@ -441,3 +441,12 @@ def test_desk_wait_refuses_half_a_commit(
     client: TestClient, urls: dict[str, str], half: dict[str, str]
 ) -> None:
     assert mcp_status(call(client, urls[SEAT], "desk_wait", {**half, "timeout": 0})) == UNPROCESSABLE_ENTITY
+
+
+def test_desk_sweep_reads_for_anyone_and_starts_only_for_an_admin(
+    client: TestClient, urls: dict[str, str]
+) -> None:
+    read = call(client, urls[SEAT], "desk_sweep")
+    assert not read["isError"] and read["structuredContent"]["configured"] is False
+    assert mcp_status(call(client, urls[SEAT], "desk_sweep", {"run": True})) == FORBIDDEN
+    assert mcp_status(call(client, urls[JOSUI], "desk_sweep", {"run": True})) == CONFLICT

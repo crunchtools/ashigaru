@@ -1196,3 +1196,41 @@ def test_status_renders_the_board(desk: FakeDesk, capsys: pytest.CaptureFixture[
         and "Dolza 2 - Vertex: Keep slide 4?" in lines[6]
     )
     assert lines[7].split()[:3] == ["a191", "manual", "blocked"]
+
+
+@pytest.mark.parametrize(
+    ("state", "said"),
+    [
+        ({"configured": False, "every": None, "running": False, "last": None}, "no sweep runs here"),
+        ({"configured": True, "every": 600, "running": False, "last": None}, "every 10m; no sweep yet"),
+        (
+            {
+                "configured": True, "every": 600, "running": True, "requested": True,
+                "last": {"started_at": "2026-11-19T10:00:00Z", "finished_at": None},
+            },
+            "run requested; running now; every 10m; sweep running for",
+        ),
+        (
+            {
+                "configured": True, "every": 600, "running": False,
+                "last": {
+                    "started_at": "2026-11-19T10:00:00Z", "finished_at": "2026-11-19T10:00:05Z",
+                    "subjects": 31, "new": 2, "closed": 2, "error": "search: HTTP 403",
+                },
+            },
+            "ago: search: HTTP 403 (31 subjects, 2 new, 2 closed)",
+        ),
+    ],
+)  # fmt: skip
+def test_sweep_says_whether_it_runs_and_how_the_last_run_went(
+    desk: FakeDesk, capsys: pytest.CaptureFixture[str], state: dict[str, Any], said: str
+) -> None:
+    desk.on("GET", "/v1/sweep", (200, state))
+    assert main(["sweep"]) == 0
+    assert said in capsys.readouterr().out
+
+
+def test_sweep_run_posts(desk: FakeDesk) -> None:
+    desk.on("POST", "/v1/sweep", (200, {"configured": True, "every": 600, "running": True, "last": None}))
+    assert main(["sweep", "--run"]) == 0
+    assert [seen.method for seen in desk.seen] == ["POST"]

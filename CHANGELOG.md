@@ -8,6 +8,18 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- Server-side sweep: with `ASHIGARU_FORGE_TOKEN_GITHUB` and
+  `ASHIGARU_FORGE_ORG_GITHUB`, `serve` re-reads every open item's subject and
+  PR, searches the org for updated subjects (queuing only members' and trusted
+  authors', listing others' as outsiders for Scott), links a writer's PR that
+  names `(a676)`, and settles items, at startup, every `ASHIGARU_SWEEP_EVERY`
+  seconds (600) and on request. It never writes to GitHub; the token now also
+  needs issues and pull requests read access and the search API. Runs are
+  recorded in `sweeps` (migration 9). One runs at a time under a renewed
+  60-second lease, so a run killed by a restart frees it within a minute; a run
+  that finds a live lease is recorded as skipped, and the timer retries.
+- `GET /v1/sweep`, `POST /v1/sweep` (admin), `ashigaru sweep [--run]`, MCP
+  `desk_sweep`, and a sweep line on the `ashigaru status` board.
 - Subjects (migration 8, `GET /v1/subjects/{key}`): the forge's own state of
   each issue and PR, from the webhook, now also `pull_request_review`.
 - Items carry `pr` (`--pr`, `--clear pr`; a seat may set it) and server-set
@@ -26,6 +38,8 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- Intake (webhook and sweep) no longer queues a subject authored by a bot
+  that is not a trusted author (dependabot, say); it used to be held.
 - Promote signs the image with the fleet cosign key (`sign: true`), because
   bootc hosts are moving to trust only signed `quay.io/crunchtools` images
   (crunchtools/rhel10-bootc-server#47).

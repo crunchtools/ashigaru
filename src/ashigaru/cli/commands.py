@@ -79,6 +79,14 @@ def queue(desk: Desk) -> dict[str, Any]:
     return result
 
 
+def sweep(desk: Desk, run: bool = False) -> dict[str, Any]:
+    """Whether the Desk's sweep runs, how often, if a run is under way, and the last run's counts and
+    error; with `run` (admin), start one now. It returns at once either way. The MCP tool is
+    desk_sweep."""
+    result: dict[str, Any] = desk.request("POST", "/v1/sweep", body={}) if run else desk.get("/v1/sweep")
+    return result
+
+
 def outcomes(desk: Desk) -> list[dict[str, Any]]:
     """Each outcome with its stories' total, done, blocked and open counts."""
     result: list[dict[str, Any]] = desk.get("/v1/outcomes")
@@ -328,7 +336,7 @@ def mcp_revoke(desk: Desk, code_id: str, identity: str | None = None) -> dict[st
 COMMANDS: dict[str, Callable[..., Any]] = {
     command.__name__: command
     for command in (
-        *(usage, agents, status, work, queue, outcomes, get, mark),
+        *(usage, agents, status, work, queue, sweep, outcomes, get, mark),
         *(create, update, report, assign, auto, manual, wait, wrap, claim, file),
         *(mcp_mint, mcp_list, mcp_revoke),
     )

@@ -10,7 +10,7 @@ import sqlite3
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from . import store, subjects
+from . import store, subjects, sweep
 from .model import CLOSED, SEAT_ROW_FIELDS, STALE_SEAT, Billing, Lane, Role, SeatStatus, State, Turn, Wrap
 
 PICK_SEAT = """
@@ -462,12 +462,23 @@ def status(conn: sqlite3.Connection) -> dict[str, Any]:
         if row["owner"] and row["turn"] == Turn.IDLE and row["waiting_on"]
     ]
     needs += [_needs(store.decode(item)) for item in conn.execute(NEEDS_YOU, {"limit": QUEUE_LIMIT})]
+    needs += [
+        {
+            "why": "outsider",
+            "work": None,
+            "mode": None,
+            "state": None,
+            "text": f"{found['ref'] or found['subject_key']} by {found['author']}: not queued",
+        }
+        for found in sweep.outsiders(conn)
+    ]
     return {
         "busy": busy,
         "free": [row["name"] for row in idle if not row["missing"]],
         "missing": [row["name"] for row in idle if row["missing"]],
         "summary": summary(conn, roster),
         "needs_you": needs,
+        "sweep": sweep.last(conn),
     }
 
 
