@@ -94,8 +94,9 @@ command line in the skill with the CLI's parser.
 `<cross-session-message>` or `<task-notification>`) that is the session's first
 becomes the seat's task; `stop` (also for StopFailure and the `idle_prompt`
 Notification) ends the turn and records the final assistant message as the seat's `waiting_on` (a new turn drops it); `/clear` drops the task; compact changes nothing.
-Each run is bounded at 2 seconds, prints nothing on stdout, and exits 0 on
-every failure, so a hook never blocks Claude.
+Each run but `next` is bounded at 2 seconds, prints nothing on stdout, and
+exits 0 on every failure, so a hook never blocks Claude. `next` runs in the
+background for up to 29 minutes, as below.
 
 `ashigaru hook next` is how the Desk hands out work without Josui's round. It
 runs on SessionStart (startup and `/clear`, the points where a seat's context is

@@ -76,12 +76,17 @@ late but committed early is read again rather than skipped."""
 SWEEP = "sweep"
 AUTODISPATCH = "autodispatch"
 """The mark that is the dispatch switch: `on` lets free seats claim queued auto work; off by default."""
-NEXT_CANDIDATES = f"""
+NEXT_READY = f"""
     SELECT * FROM items
     WHERE {store.OPEN} AND state = 'queued' AND seat IS NULL AND mode = 'auto' AND lane = :lane
+      AND NOT EXISTS (
+          SELECT 1 FROM json_each(items.after)
+          WHERE value NOT IN (SELECT id FROM items WHERE state = 'done')
+      )
     ORDER BY created_at, id
+    LIMIT 1
 """
-"""Oldest first: what a free seat in the lane would claim, before checking each one's `after`."""
+"""What a free seat in the lane claims: the oldest queued auto item whose `after` items are done."""
 CATCH_UP_DEFAULT = timedelta(days=1)
 
 NEEDS_YOU = f"""
@@ -217,15 +222,13 @@ def next_item(conn: sqlite3.Connection, seat: str) -> dict[str, Any] | None:
             raise store.Conflict(f"seat {seat!r} has no lane; Josui sets it before it can claim")
         if not autodispatch(conn):
             return None
-        for candidate in conn.execute(NEXT_CANDIDATES, {"lane": row["lane"]}).fetchall():
-            item = store.decode(candidate)
-            try:
-                _ready(conn, item)
-            except store.Conflict:
-                continue
-            _take(conn, item, row, seat)
-            return store.get_item(conn, item["id"])
-    return None
+        found = conn.execute(NEXT_READY, {"lane": row["lane"]}).fetchone()
+        if found is None:
+            return None
+        item = store.decode(found)
+        _ready(conn, item)
+        _take(conn, item, row, seat)
+        return store.get_item(conn, item["id"])
 
 
 def brief(item: dict[str, Any]) -> str:
