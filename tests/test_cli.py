@@ -1302,3 +1302,44 @@ def test_sweep_run_posts(desk: FakeDesk) -> None:
     desk.on("POST", "/v1/sweep", (200, {"configured": True, "every": 600, "running": True, "last": None}))
     assert main(["sweep", "--run"]) == 0
     assert [seen.method for seen in desk.seen] == ["POST"]
+
+
+def changed(**extra: Any) -> dict[str, Any]:
+    row = {
+        "id": "a685", "kind": "story", "task": "Merge the sweep fix", "state": "done", "mode": "auto",
+        "seat": None, "new": False, "fields": ["result", "state"], "by": ["desk"], "writes": 2,
+        "at": "2026-11-19T11:02:00Z", "step": "merged at abc123",
+    }  # fmt: skip
+    return {"since": None, "seen_at": "2026-11-19T10:00:00Z", "after": 4, "until": 9,
+            "items": [row | extra], "truncated": False, "acked": False}  # fmt: skip
+
+
+def test_changes_renders_each_item_and_the_window(desk: FakeDesk, capsys: pytest.CaptureFixture[str]) -> None:
+    desk.on("GET", "/v1/changes", (200, changed()))
+    assert main(["changes", "--since", "2026-11-19T00:00:00Z"]) == 0
+    assert desk.seen[0].query == {"since": ["2026-11-19T00:00:00Z"]}
+    lines = capsys.readouterr().out.splitlines()
+    assert lines[0].split() == ["WORK", "WHEN", "STATE", "BY", "CHANGED", "TASK", "NEXT"]
+    assert lines[1].split()[:1] == ["a685"] and "result, state" in lines[1] and "merged at abc123" in lines[1]
+    assert lines[2].startswith("1 changed since you looked") and "events 4 to 9" in lines[2]
+
+
+def test_changes_ack_posts_and_refuses_since(desk: FakeDesk, capsys: pytest.CaptureFixture[str]) -> None:
+    desk.on("POST", "/v1/changes", (200, changed(new=True) | {"acked": True}))
+    assert main(["changes", "--ack"]) == 0
+    assert [s.method for s in desk.seen] == ["POST"]
+    out = capsys.readouterr().out
+    assert "seen mark moved" in out and " new " in out
+    assert main(["changes", "--ack", "--since", "2026-11-19T00:00:00Z"]) == 1
+    assert "--since cannot go with --ack" in capsys.readouterr().err
+
+
+def test_status_lists_what_changed_since_you_looked(
+    desk: FakeDesk, capsys: pytest.CaptureFixture[str]
+) -> None:
+    board = {"busy": [], "free": [], "missing": [], "summary": {"up": 0, "seats": 0, "open": 0},
+             "needs_you": [], "changes": changed()}  # fmt: skip
+    desk.on("GET", "/v1/status", (200, board))
+    assert main(["status"]) == 0
+    out = capsys.readouterr().out
+    assert "CHANGED SINCE YOU LOOKED" in out and "a685" in out

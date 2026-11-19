@@ -141,6 +141,17 @@
             "title": "Busy",
             "type": "array"
           },
+          "changes": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Changes"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "CHANGED SINCE YOU LOOKED, without moving the mark."
+          },
           "free": {
             "description": "Free seats that are up, by name.",
             "items": {
@@ -540,6 +551,177 @@
           "held"
         ],
         "title": "CatchUpRow",
+        "type": "object"
+      },
+      "ChangeRow": {
+        "description": "An item someone else changed since the reader looked: what moved, who moved it, its NEXT now.",
+        "properties": {
+          "at": {
+            "description": "When it last changed.",
+            "title": "At",
+            "type": "string"
+          },
+          "by": {
+            "description": "Who wrote them, first writer first.",
+            "items": {
+              "type": "string"
+            },
+            "title": "By",
+            "type": "array"
+          },
+          "fields": {
+            "description": "The fields its writes in the window set.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Fields",
+            "type": "array"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/Kind"
+          },
+          "mode": {
+            "$ref": "#/components/schemas/Mode"
+          },
+          "new": {
+            "description": "Created in the window.",
+            "title": "New",
+            "type": "boolean"
+          },
+          "outcome_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The outcome the work serves.",
+            "title": "Outcome Label"
+          },
+          "seat": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Seat"
+          },
+          "state": {
+            "$ref": "#/components/schemas/State"
+          },
+          "step": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "NEXT: its blocker, a landed or overdue flag, else its next or result.",
+            "title": "Step"
+          },
+          "task": {
+            "title": "Task",
+            "type": "string"
+          },
+          "writes": {
+            "description": "How many writes in the window.",
+            "title": "Writes",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "task",
+          "state",
+          "mode",
+          "seat",
+          "new",
+          "fields",
+          "by",
+          "writes",
+          "at"
+        ],
+        "title": "ChangeRow",
+        "type": "object"
+      },
+      "Changes": {
+        "description": "`ashigaru changes`: what others changed after the reader's own seen mark, each item once.",
+        "properties": {
+          "acked": {
+            "default": false,
+            "description": "True when this look moved the reader's seen mark to `until`.",
+            "title": "Acked",
+            "type": "boolean"
+          },
+          "after": {
+            "description": "The event seq it starts after: the seen mark, or the one before `since`.",
+            "title": "After",
+            "type": "integer"
+          },
+          "items": {
+            "description": "Items changed in the window, last changed first.",
+            "items": {
+              "$ref": "#/components/schemas/ChangeRow"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "seen_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When the reader last acked: the mark this window starts at.",
+            "title": "Seen At"
+          },
+          "since": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The time the window was read from, when `since` was given.",
+            "title": "Since"
+          },
+          "truncated": {
+            "default": false,
+            "description": "True when the window stopped at 1000 events.",
+            "title": "Truncated",
+            "type": "boolean"
+          },
+          "until": {
+            "description": "The last event it covers; an ack stores it as the seen mark.",
+            "title": "Until",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "since",
+          "seen_at",
+          "after",
+          "until",
+          "items"
+        ],
+        "title": "Changes",
         "type": "object"
       },
       "Check": {
@@ -3889,6 +4071,108 @@
           }
         ],
         "summary": "Set Limits",
+        "tags": [
+          "views"
+        ]
+      }
+    },
+    "/v1/changes": {
+      "get": {
+        "description": "`ashigaru changes`: each item someone else changed after the caller's own seen mark (else the\nlast day, or from `since`), once, last changed first, with the fields that moved, who moved them\nand its NEXT now. It leaves the mark alone.",
+        "operationId": "changed_v1_changes_get",
+        "parameters": [
+          {
+            "description": "Start the catch-up at this time instead of the sweep mark.",
+            "in": "query",
+            "name": "since",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Start the catch-up at this time instead of the sweep mark.",
+              "title": "Since"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Changes"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Missing, unknown or revoked API key."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A query or body the Desk cannot read, such as a time that is not one."
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Changed",
+        "tags": [
+          "views"
+        ]
+      },
+      "post": {
+        "description": "`ashigaru changes --ack`: the same look, then the caller's seen mark moves to its `until`, only\nforward, so the next look starts after it; `acked` is false when it was already there.",
+        "operationId": "ack_v1_changes_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Changes"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Missing, unknown or revoked API key."
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Ack",
         "tags": [
           "views"
         ]

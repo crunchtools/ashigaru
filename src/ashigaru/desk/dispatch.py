@@ -362,17 +362,31 @@ def _caught(item: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def cursor(conn: sqlite3.Connection, since: str | None) -> tuple[int, str | None]:
-    """Where a catch-up starts: just before the first event at `since`; else the sweep mark, an event
-    seq that `advance` wrote or a time someone set; else a day back. Returns the seq and the
-    time it was read from, if any. Raises ValueError for a time that is not one."""
+def cursor(conn: sqlite3.Connection, since: str | None, name: str = SWEEP) -> tuple[int, str | None]:
+    """Where a look at the events starts: just before the first event at `since`; else the mark
+    `name` (the sweep mark unless a reader's own), an event seq an advance wrote or a time someone
+    set; else a day back. Returns the seq and the time it was read from, if any. Raises ValueError
+    for a time that is not one."""
     if since is None:
-        mark = store.get_mark(conn, SWEEP)
+        mark = store.get_mark(conn, name)
         if mark and mark["value"].isdigit():
             return int(mark["value"]), None
         since = mark["value"] if mark else stamp(datetime.now(UTC) - CATCH_UP_DEFAULT)
     since = instant(since)
     return int(conn.execute(FROM_TIME, {"since": since}).fetchone()[0]), since
+
+
+def window(
+    conn: sqlite3.Connection, query: str, after: int, **params: Any
+) -> tuple[list[sqlite3.Row], bool, int]:
+    """`query`'s rows for the events after `after`, at most QUEUE_LIMIT, each with its `event_seq`;
+    whether the limit cut them; and `until`, the last event read when it did, else the last committed
+    when the read began, so an event that commits mid-read is the next look's."""
+    last = int(conn.execute("SELECT coalesce(max(seq), 0) FROM events").fetchone()[0])
+    rows = conn.execute(query, {"after": after, "until": last, "limit": QUEUE_LIMIT + 1, **params}).fetchall()
+    if len(rows) > QUEUE_LIMIT:
+        return rows[:QUEUE_LIMIT], True, rows[QUEUE_LIMIT - 1]["event_seq"]
+    return rows, False, max(last, after)
 
 
 def catch_up(conn: sqlite3.Connection, since: str | None = None) -> dict[str, Any]:
@@ -384,10 +398,7 @@ def catch_up(conn: sqlite3.Connection, since: str | None = None) -> dict[str, An
     round short (`truncated`), else the last committed when the round began, so a delivery that
     commits mid-round is the next round's."""
     after, read_from = cursor(conn, since)
-    last = int(conn.execute("SELECT coalesce(max(seq), 0) FROM events").fetchone()[0])
-    rows = conn.execute(CAUGHT, {"after": after, "until": last, "limit": QUEUE_LIMIT + 1}).fetchall()
-    truncated = len(rows) > QUEUE_LIMIT
-    rows = rows[:QUEUE_LIMIT]
+    rows, truncated, until = window(conn, CAUGHT, after)
     found: dict[str, dict[str, dict[str, Any]]] = {"new": {}, "reopened": {}}
     for row in rows:
         item = {key: value for key, value in store.decode(row).items() if key not in CAUGHT_ONLY}
@@ -395,7 +406,6 @@ def catch_up(conn: sqlite3.Connection, since: str | None = None) -> dict[str, An
             found["new"].setdefault(item["id"], _caught(item))
         elif item["id"] not in found["new"]:
             found["reopened"].setdefault(item["id"], _caught(item))
-    until = rows[-1]["event_seq"] if truncated else max(last, after)
     return {
         "since": read_from,
         "after": after,

@@ -17,7 +17,7 @@ from fastapi import Path as PathParam
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 
-from . import auth, dispatch, store, subjects, sweep
+from . import auth, changes, dispatch, store, subjects, sweep
 from . import outcomes as served
 from .model import (
     CLOSED,
@@ -30,6 +30,7 @@ from .model import (
     Billing,
     BillingLimits,
     Board,
+    Changes,
     CheckRow,
     Event,
     FileChild,
@@ -340,7 +341,25 @@ def board(conn: Conn, who: Who) -> Board:
         for need in found["needs_you"]
         if need["why"] != "waiting" or who.admin or need["seat"] == who.name
     ]
-    return Board.model_validate({**found, "needs_you": needs})
+    return Board.model_validate({**found, "needs_you": needs, "changes": changes.read(conn, who.name)})
+
+
+@router.get("/v1/changes", tags=["views"], responses=errors(401, 422))
+def changed(conn: Conn, who: Who, since: Since = None) -> Changes:
+    """`ashigaru changes`: each item someone else changed after the caller's own seen mark (else the
+    last day, or from `since`), once, last changed first, with the fields that moved, who moved them
+    and its NEXT now. It leaves the mark alone."""
+    try:
+        return Changes.model_validate(changes.read(conn, who.name, since))
+    except ValueError as error:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, f"since is not a time: {error}") from error
+
+
+@router.post("/v1/changes", tags=["views"], responses=errors(401))
+def ack(conn: Conn, who: Who) -> Changes:
+    """`ashigaru changes --ack`: the same look, then the caller's seen mark moves to its `until`, only
+    forward, so the next look starts after it; `acked` is false when it was already there."""
+    return Changes.model_validate(changes.ack(conn, who.name))
 
 
 @router.get("/v1/subjects/{key:path}", tags=["views"], responses=errors(401, 404))

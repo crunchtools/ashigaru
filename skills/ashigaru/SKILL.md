@@ -1,7 +1,7 @@
 ---
 name: ashigaru
-description: Run the worker fleet from Josui Prime through the Ashigaru Desk, with exactly the `ashigaru` CLI's commands (usage, agents, status, work, queue, sweep, outcomes, list, get, create, update, mark, report, assign, auto, manual, wait, wrap, claim, file, mcp, hook). List the twelve seats, assign work with a proper brief, check on it, hand items between auto (Prime) and manual (Scott), and wrap finished seats with /cc seat then /clear. Use when Scott says "/ashigaru", "list the agents", "who's up", "give this to a Vertex/Max seat", "assign", "farm this out", "check on the agents", "show the board", "what needs me", or "what are the agents doing".
-argument-hint: "[usage | agents | status | work [--all] [--since T] [--advance] | queue | sweep [--run] | outcomes | list [--state S]... | get <item> | create --task T ... | update <item> ... | mark <name> [--set V] | report <item> <verb> | assign [item] [--seat S | --lane L] [--task T ...] | auto <item> | manual <item> | wait <item> [--timeout S] | wrap <item> [--stage S] [--state S] [--force] | claim <item> | file <item> --task T | mcp <mint|list|revoke> ... | hook <event>]"
+description: Run the worker fleet from Josui Prime through the Ashigaru Desk, with exactly the `ashigaru` CLI's commands (usage, agents, status, changes, work, queue, sweep, outcomes, list, get, create, update, mark, report, assign, auto, manual, wait, wrap, claim, file, mcp, hook). List the twelve seats, assign work with a proper brief, check on it, hand items between auto (Prime) and manual (Scott), and wrap finished seats with /cc seat then /clear. Use when Scott says "/ashigaru", "list the agents", "who's up", "give this to a Vertex/Max seat", "assign", "farm this out", "check on the agents", "show the board", "what needs me", "what changed", or "what are the agents doing".
+argument-hint: "[usage | agents | status | changes [--since T] [--ack] | work [--all] [--since T] [--advance] | queue | sweep [--run] | outcomes | list [--state S]... | get <item> | create --task T ... | update <item> ... | mark <name> [--set V] | report <item> <verb> | assign [item] [--seat S | --lane L] [--task T ...] | auto <item> | manual <item> | wait <item> [--timeout S] | wrap <item> [--stage S] [--state S] [--force] | claim <item> | file <item> --task T | mcp <mint|list|revoke> ... | hook <event>]"
 ---
 
 # /ashigaru
@@ -128,6 +128,17 @@ Desk never closes them; tell Scott), and subjects intake holds for approval. A
 seat whose `stop` hook never arrived is ended by the Desk itself after three
 hours of silence (`turn_reconciled_at`). Show it
 for "show the board" or "what needs me"; `work` is the round that acts.
+
+## `changes`
+
+`ashigaru changes --ack`: what others changed since you last acked, each item
+once, last changed first (WORK, WHEN, STATE, BY, CHANGED: `new` or the fields
+that moved, whole TASK, NEXT), then the event window. Your own writes are not
+listed. `--ack` moves your own `seen:<identity>` mark to the window's end, so
+the next look starts after it; without it the mark stays. `--since T` looks from
+a time instead and cannot go with `--ack`. A first look covers the last day. Use
+it between rounds instead of re-reading the whole `work` table; `status` shows
+the same list under CHANGED SINCE YOU LOOKED without moving the mark.
 
 ## `work`
 

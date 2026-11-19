@@ -76,6 +76,14 @@ VIEWS = (
     ("agents", "each seat: free or busy, its work, how long", ()),
     ("status", "the board: busy seats and their work, free seats, NEEDS YOU", ()),
     (
+        "changes",
+        "what others changed since you last acked: each item once, with its NEXT",
+        (
+            ("--since", "look from here, a time (default: your seen mark)"),
+            ("--ack", "then move your seen mark to this look's end"),
+        ),
+    ),
+    (
         "work",
         "the check round: open items, seats, queue and GitHub catch-up",
         (

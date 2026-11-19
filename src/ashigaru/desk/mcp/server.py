@@ -35,6 +35,7 @@ from ..model import (
     MAX_WAIT,
     Assign,
     Board,
+    Changes,
     CIResult,
     CIWait,
     FileChild,
@@ -136,6 +137,22 @@ def desk_work(
         if advance:
             return api.advance(conn, api.admin(who), all, since)
         return api.work(conn, who, all, since)
+
+
+@mcp.tool
+def desk_changes(
+    since: Annotated[str | None, Field(description="Look from this time instead of your seen mark.")] = None,
+    ack: Annotated[bool, Field(description="Then move your seen mark to this look's end.")] = False,
+) -> Changes:
+    """`ashigaru changes`: each item someone else changed since you last acked (else the last day),
+    with the fields that moved, who moved them and its NEXT now. With `ack`, your seen mark then
+    moves to the look's `until`; `since` cannot go with it."""
+    with desk() as (conn, who):
+        if ack:
+            if since is not None:
+                raise ToolError("422: since cannot go with ack")
+            return api.ack(conn, who)
+        return api.changed(conn, who, since)
 
 
 @mcp.tool
