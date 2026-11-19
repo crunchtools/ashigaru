@@ -318,6 +318,31 @@ def test_a_lost_lease_stops_the_run_cleanly(conn: sqlite3.Connection, db: Path) 
     assert (store.get_mark(conn, sweep.LOCK) or {})["value"].endswith(" 99"), "the new holder's lease stays"
 
 
+def test_a_renewal_the_database_refuses_stops_the_run_cleanly(
+    conn: sqlite3.Connection, db: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    class Refusing:
+        """The renewer's connection: every statement fails as a locked or broken database would."""
+
+        def execute(self, *args: Any) -> None:
+            raise sqlite3.OperationalError("disk I/O error")
+
+        def close(self) -> None:
+            pass
+
+    opened = [store.connect(str(db))]
+    monkeypatch.setattr(sweep.store, "connect", lambda path: opened.pop() if opened else Refusing())
+
+    class Slow(FakeForge):
+        def updated(self, org: str, since: str, token: str) -> Search:
+            time.sleep(0.2)
+            return Search([Found(subject(1), "MEMBER", "")], True)
+
+    run = sweep.run(str(db), sweep.Settings(Slow(), "token", ORG, every=HOUR, lease=0.1), "timer")
+    assert run["error"].startswith("stopped: lost the lease")
+    assert store.list_items(conn) == [] and store.get_mark(conn, sweep.MARK) is None
+
+
 def test_a_body_cut_short_is_one_subjects_error_and_the_run_still_finishes(
     client: TestClient, keys: Keys, conn: sqlite3.Connection, db: Path
 ) -> None:
