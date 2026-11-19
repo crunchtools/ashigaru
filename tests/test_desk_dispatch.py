@@ -221,6 +221,29 @@ def test_next_claims_nothing_for_a_client_that_has_gone(
     assert left is not None and left["seat"] is None
 
 
+def test_a_claim_made_as_the_client_leaves_is_handed_back(
+    client: TestClient, keys: Keys, conn: sqlite3.Connection
+) -> None:
+    class Leaving:
+        """Listening at the first look, gone by the time the claim is made."""
+
+        looks = 0
+
+        async def is_disconnected(self) -> bool:
+            self.looks += 1
+            return self.looks > 1
+
+    seat(client, keys, MINE)
+    switch(client, keys, "on")
+    work = item(client, keys, lane="exedore-max")
+    caller = auth.Caller(name=MINE, role=Role.SEAT, key_id="k")
+    answer = asyncio.run(api.next_item(cast(Request, Leaving()), conn, caller, MINE, NextWait(wait=0)))
+    assert getattr(answer, "status_code", None) == NO_CONTENT
+    left, freed = store.get_item(conn, work), store.get_seat(conn, MINE)
+    assert left is not None and (left["seat"], left["state"]) == (None, "queued")
+    assert freed is not None and (freed["status"], freed["item"]) == ("free", None)
+
+
 def test_next_waits_out_its_window_when_nothing_comes(
     client: TestClient, keys: Keys, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -242,6 +242,19 @@ def next_item(conn: sqlite3.Connection, seat: str) -> dict[str, Any] | None:
         return store.get_item(conn, item["id"])
 
 
+def unclaim(conn: sqlite3.Connection, item_id: str, seat: str) -> None:
+    """Undo a `next` claim whose client went away before the answer: the item goes back to the queue
+    and the seat to free, if neither has moved since."""
+    with store.transaction(conn):
+        item = store.get_item(conn, item_id)
+        row = store.get_seat(conn, seat)
+        if item is None or row is None or item["seat"] != seat or item["state"] != State.ASSIGNED:
+            return
+        store.update_item(conn, item_id, {"seat": None, "state": State.QUEUED}, seat)
+        if row["item"] == item_id:
+            store.write_seat(conn, seat, {"status": "free", "item": None})
+
+
 def brief(item: dict[str, Any]) -> str:
     """What a woken seat reads: the item, its task, and how to report on it."""
     return (

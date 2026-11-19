@@ -461,7 +461,8 @@ async def next_item(
     """The seat's `next` hook: claim the oldest queued auto item in the seat's lane whose `after` items
     are done, waiting up to `wait` seconds for one while the seat is idle. 204 when none came, the
     `autodispatch` mark is not `on`, or the client went away (nothing is claimed for a seat no longer
-    listening); 409 when the seat cannot take work (busy, held, unseen or laneless), so the hook stops."""
+    listening, and a claim made as it left is handed back); 409 when the seat cannot take work (busy,
+    held, unseen or laneless), so the hook stops."""
     own_seat(who, name)
     loop = asyncio.get_running_loop()
     until = loop.time() + query.wait
@@ -472,6 +473,9 @@ async def next_item(
             item = await run_in_threadpool(dispatch.next_item, conn, name)
         except store.Conflict as error:
             raise _conflict(error) from error
+        if item is not None and await request.is_disconnected():
+            await run_in_threadpool(dispatch.unclaim, conn, item["id"], name)
+            return Response(status_code=status.HTTP_204_NO_CONTENT)
         if item is not None:
             return NextItem(item=Item.model_validate(item), brief=dispatch.brief(item))
         if loop.time() + NEXT_TICK > until:
