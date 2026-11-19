@@ -340,13 +340,15 @@ def test_desk_work_is_the_round(
 ) -> None:
     store.insert_item(conn, {"id": "a1", "task": "w", "seat": SEAT, "state": "working"}, JOSUI)
     store.insert_item(conn, {"id": "a2", "task": "q", "state": "queued"}, JOSUI)
+    # A fixed `since`: the default reads from a day before now, which can tick between the two calls.
+    since: dict[str, Any] = {"since": "2026-11-01T00:00:00Z"}
     for name in IDENTITIES:
-        content = call(client, urls[name], "desk_work")["structuredContent"]
+        content = call(client, urls[name], "desk_work", since)["structuredContent"]
         assert {"items", "seats", "summary", "queue", "catch_up"} <= set(content)
-        assert content == client.get("/v1/work", headers=keys[name]).json()
+        assert content == client.get("/v1/work", headers=keys[name], params=since).json()
     assert [row["id"] for row in content["queue"]["queued"]] == ["a2"]
-    shown = call(client, urls[SEAT], "desk_work", {"all": True})["structuredContent"]
-    assert shown == client.get("/v1/work", headers=keys[SEAT], params={"all": True}).json()
+    shown = call(client, urls[SEAT], "desk_work", {"all": True} | since)["structuredContent"]
+    assert shown == client.get("/v1/work", headers=keys[SEAT], params={"all": True} | since).json()
 
 
 def test_desk_work_advance_is_admin_only_and_moves_the_sweep_mark(
