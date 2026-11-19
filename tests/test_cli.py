@@ -1548,7 +1548,7 @@ def test_a_needs_you_row_with_no_state_renders(desk: FakeDesk, capsys: pytest.Ca
 
 def test_a_bad_markdown_width_falls_back(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("ASHIGARU_MD_COLUMNS", "abc")
-    assert render._terminal() > 0
+    assert config.markdown_columns() > 0
 
 
 def test_a_board_with_nothing_changed_acks_nothing(

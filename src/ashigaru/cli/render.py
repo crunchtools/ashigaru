@@ -1,12 +1,12 @@
 """Human tables for the views and actions. `--json` bypasses all of this."""
 
-import os
 import re
 import shutil
-import subprocess
 from collections.abc import Callable, Sequence
 from datetime import UTC, datetime
 from typing import Any
+
+from ashigaru.cli import config
 
 Column = tuple[str, Callable[[dict[str, Any]], Any]]
 TEXT_WIDTH = 60
@@ -213,23 +213,6 @@ FLEX = ("TASK", "NEXT", "DONE WHEN")
 its longest cell, never cut."""
 
 
-def _terminal() -> int:
-    """The width of the terminal the Markdown is read in, which is not this process's: the chat's own
-    pane. ASHIGARU_MD_COLUMNS, else the Claude Code tmux pane, else 136."""
-    if (columns := os.environ.get("ASHIGARU_MD_COLUMNS", "")).isdigit():
-        return int(columns)
-    for server in (["-L", "claude-agent"], []):
-        try:
-            shown = subprocess.run(
-                ["tmux", *server, "display", "-p", "#{pane_width}"], capture_output=True, text=True, timeout=2
-            ).stdout.strip()
-        except (OSError, subprocess.SubprocessError):
-            continue
-        if shown.isdigit():
-            return int(shown)
-    return 136
-
-
 def _fit(rows: list[dict[str, Any]], columns: Sequence[Column]) -> None:
     """Size the board for the reader's terminal: each fixed column as wide as its longest cell, the
     FLEX columns an even share of the rest with their text clipped to it, so the table is never wider
@@ -239,8 +222,14 @@ def _fit(rows: list[dict[str, Any]], columns: Sequence[Column]) -> None:
     MD_CLIP.clear()
     natural = {h: max([len(h), *(_shown(_md_cell(get(r), h)) for r in rows)]) for h, get in columns}
     flex = [h for h, _ in columns if h in FLEX]
-    room = _terminal() - 4 - 3 * len(columns) - 1 - sum(w for h, w in natural.items() if h not in FLEX)
-    share = max(12, room // max(1, len(flex)))
+    room = (
+        config.markdown_columns()
+        - 4
+        - 3 * len(columns)
+        - 1
+        - sum(w for h, w in natural.items() if h not in FLEX)
+    )
+    share = max(CLIP_MIN, room // max(1, len(flex)))
     MD_CLIP.update({h: share for h in flex})
     MD_WIDTH.update({h: min(w, share) if h in FLEX else w for h, w in natural.items()})
 
