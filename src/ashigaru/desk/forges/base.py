@@ -64,6 +64,8 @@ class IntakeItem:
     """The review this event submits or dismisses: approved, changes_requested or dismissed."""
     updated_at: str | None = None
     """When the forge last changed the subject (UTC), so an older delivery never overwrites a newer."""
+    opened_at: str | None = None
+    """When the subject was opened (UTC), where the forge says."""
     author_writes: bool = False
     """Set by the Desk, never by an adapter's parse: the author may write to the repo."""
     approved: bool = False

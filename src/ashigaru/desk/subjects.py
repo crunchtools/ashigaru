@@ -7,13 +7,14 @@ open or closed, and an older delivery (by the forge's `updated_at`) never
 overwrites a newer one.
 
 Settling never touches what a person holds. A seat's item whose subject or PR
-merged is marked `landed_at` and waits for its wrap. A seatless auto item is
-closed: done when its subject merged (or, for an issue, closed), wontdo when its
-PR closed unmerged. One settling closed (by the event history, not by
-`verified_by`, which others may write) is queued again when its own subject
-reopens and nothing else it names is closed or merged. A manual item is
-Scott's and is only ever marked landed. A PR named in `pr` only lands or closes
-an item on merge; a PR closed unmerged says nothing about the story it carried.
+merged is marked `landed_at` and waits for its wrap. A seatless item nobody has
+started (auto, or manual still queued or proposed) is closed: done when its
+subject merged (or, for an issue, closed), wontdo when its PR closed unmerged.
+One settling closed (by the event history, not by `verified_by`, which others
+may write) is queued again when its own subject reopens and nothing else it
+names is closed or merged. A manual item Scott has started is his and is only
+ever marked landed. A PR named in `pr` only lands or closes an item on merge; a
+PR closed unmerged says nothing about the story it carried.
 """
 
 import json
@@ -43,6 +44,10 @@ UPSERT = """
 """
 
 OPEN = "coalesce(i.wrap, '') != 'cleared' AND i.state NOT IN ('done', 'wontdo', 'abandoned')"
+PARKED = "i.seat IS NULL AND (i.mode = 'auto' OR i.state IN ('proposed', 'queued'))"
+"""Nobody holds the item: settling closes it, as nobody would. A manual one waiting for Scott counts;
+one he has started (assigned, working, blocked, review) is his, and is only marked landed."""
+UNHELD = (State.PROPOSED, State.QUEUED)
 CLOSED_HERE = """(
     SELECT e.actor || ' ' || e.source FROM events e
     WHERE e.item_id = i.id AND json_type(e.patch, '$.state') IS NOT NULL
@@ -55,8 +60,8 @@ DUE = f"""
     FROM subjects s JOIN items i ON s.subject_key IN (i.subject_key, i.pr)
     WHERE (:key IS NULL OR s.subject_key = :key)
       AND (
-          {OPEN} AND s.state = 'merged' AND (i.seat IS NOT NULL OR i.mode != 'auto') AND i.landed_at IS NULL
-          OR {OPEN} AND i.seat IS NULL AND i.mode = 'auto'
+          {OPEN} AND s.state = 'merged' AND NOT ({PARKED}) AND i.landed_at IS NULL
+          OR {OPEN} AND {PARKED}
               AND (s.state = 'merged' OR s.state = 'closed' AND s.subject_key = i.subject_key)
           OR i.state IN ('done', 'wontdo') AND coalesce(i.wrap, '') != 'cleared'
               AND s.state = 'open' AND s.subject_key = i.subject_key AND {CLOSED_HERE}
@@ -67,7 +72,7 @@ DUE = f"""
     ORDER BY i.id, s.state = 'merged' DESC, s.subject_key
 """
 """Exactly the items a subject's state moves, so a read that finds none writes nothing: a seat's or
-Scott's open item whose subject or PR merged and is not yet marked landed; a seatless auto item whose
+Scott's open item whose subject or PR merged and is not yet marked landed; a PARKED item whose
 subject or PR merged, or whose own subject closed; and one settling closed whose own subject is open
 again while nothing else it names is closed or merged. An item with two subjects due comes once per
 subject, its merged one first, and settles by that one."""
@@ -120,7 +125,7 @@ def transition(due: dict[str, Any]) -> dict[str, Any]:
     """The patch a DUE row makes to its item: see the module's rules."""
     if due["state"] in (State.DONE, State.WONTDO):
         return {"state": State.QUEUED, "result": None, "verified_by": None, "closed_at": None}
-    if due["seat"] is not None or due["mode"] != Mode.AUTO:
+    if due["seat"] is not None or due["mode"] != Mode.AUTO and due["state"] not in UNHELD:
         return {"landed_at": store.now()}
     if due["due_state"] == SubjectState.MERGED:
         state, why = State.DONE, f"merged at {(due['due_head'] or '')[:12]}".strip()

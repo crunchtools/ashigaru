@@ -91,7 +91,9 @@ command line in the skill with the CLI's parser.
 
 `hook`, like `mcp`, has no MCP tool. `ashigaru hook session-start | prompt-submit | stop` replace the
 `seat-state.json` hooks, with their rules: a typed prompt (not a
-`<cross-session-message>` or `<task-notification>`) that is the session's first
+`<cross-session-message>`, a `<task-notification>`, or a scheduled task's
+prompt, which Claude Code submits bare and marks only with a
+`scheduled_task_fire` entry in the transcript) that is the session's first
 becomes the seat's task; `stop` (also for StopFailure and the `idle_prompt`
 Notification) ends the turn and records the final assistant message as the seat's `waiting_on` (a new turn drops it); `/clear` drops the task; compact changes nothing.
 Each run but `next` is bounded at 2 seconds, prints nothing on stdout, and

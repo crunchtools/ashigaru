@@ -10,7 +10,11 @@ startup, and as soon as an admin asks (POST /v1/sweep), one run:
    OVERLAP for the search index's lag. A subject with no item is queued, as a
    writer's, only when the search's author_association says OWNER or MEMBER or
    its author is trusted (ASHIGARU_FORGE_AUTHORS, the app's bot). Anyone
-   else's is never stored: it is listed for Scott in the run's `outsiders`. A
+   else's is never stored: it is listed for Scott in the run's `outsiders`,
+   except Dependabot's PR, which is no one's to look at by default: its subject
+   is recorded, read back every run while it is open, and once it has been open
+   `dependabot_after` it is queued, auto on exedore-max, to land or close (a
+   green one the repo's own automation merges first). A
    writer's PR whose title or body names an open item in its repo, `(a676)`,
    becomes that item's `pr`. The mark moves to this run's start once the search
    was read whole, or to the last hit's time when the forge's cap cut it short,
@@ -48,7 +52,7 @@ from starlette.concurrency import run_in_threadpool
 
 from . import intake, store, subjects
 from .forges import Found, IntakeItem, Search
-from .model import CLOSED, Kind, Wrap
+from .model import CLOSED, Kind, Lane, Mode, Wrap
 
 EVERY = 600.0
 """Seconds between runs; ASHIGARU_SWEEP_EVERY."""
@@ -74,6 +78,9 @@ lease, so one killed mid-run (podman stops with SIGKILL after 10 s) frees it wit
 LEASE = 60.0
 """Seconds a lease lasts unrenewed."""
 WRITERS = frozenset({"OWNER", "MEMBER"})
+DEPENDABOT = "dependabot[bot]"
+DEPENDABOT_AFTER = timedelta(days=1)
+"""How long a Dependabot PR may stay open before it is queued; ASHIGARU_DEPENDABOT_AFTER."""
 LINK = re.compile(r"\((a\d+)\)")
 ACTOR = "desk"
 SOURCE = "sweep"
@@ -83,6 +90,24 @@ OPEN_SUBJECTS = f"""
     SELECT subject_key FROM items WHERE {store.OPEN} AND subject_key IS NOT NULL
     UNION SELECT pr FROM items WHERE {store.OPEN} AND pr IS NOT NULL
 """
+PENDING = """
+    SELECT subject_key FROM subjects
+    WHERE author = :bot AND kind = 'story' AND state = 'open' AND subject_key NOT IN (
+        SELECT subject_key FROM items WHERE subject_key IS NOT NULL
+    )
+"""
+"""Dependabot's open PRs with no item, read back every run until one is queued or closes."""
+LISTED = """
+    SELECT DISTINCT json_extract(o.value, '$.subject_key') FROM sweeps s, json_each(s.outsiders) o
+    WHERE json_extract(o.value, '$.author') = :bot
+      AND json_extract(o.value, '$.subject_key') NOT IN (SELECT subject_key FROM subjects)
+      AND json_extract(o.value, '$.subject_key') NOT IN (
+          SELECT subject_key FROM items WHERE subject_key IS NOT NULL
+      )
+"""
+"""Dependabot's PRs that runs before PENDING listed as outsiders, read back once to record them."""
+BACKFILLED = "sweep-dependabot-backfill"
+"""Set once a run has read LISTED back without an error, so no later run scans old runs again."""
 START = "INSERT INTO sweeps (trigger, started_at) VALUES (?, ?)"
 SKIP = "INSERT INTO sweeps (trigger, started_at, finished_at, skipped) VALUES (?, ?, ?, ?)"
 RENEW = "UPDATE marks SET value = ?, updated_at = ? WHERE name = ? AND value LIKE ?"
@@ -119,6 +144,7 @@ class Settings:
     authors: frozenset[str] = frozenset()
     every: float = EVERY
     lease: float = LEASE
+    dependabot_after: timedelta = DEPENDABOT_AFTER
 
 
 @dataclasses.dataclass
@@ -144,17 +170,20 @@ OUTSIDERS = """
     SELECT DISTINCT json_extract(o.value, '$.subject_key') AS subject_key,
            json_extract(o.value, '$.ref') AS ref, json_extract(o.value, '$.author') AS author
     FROM sweeps s, json_each(s.outsiders) o
-    WHERE s.finished_at >= :since AND json_extract(o.value, '$.subject_key') NOT IN (
+    WHERE s.finished_at >= :since AND coalesce(json_extract(o.value, '$.author'), '') != :bot
+      AND json_extract(o.value, '$.subject_key') NOT IN (
         SELECT subject_key FROM items WHERE subject_key IS NOT NULL
     )
     LIMIT :limit
 """
-"""The outsiders the runs of the last day listed that still have no item: Scott's to look at."""
+"""The outsiders the runs of the last day listed that still have no item: Scott's to look at. Dependabot
+is never one: the sweep queues its stuck PRs itself."""
 
 
 def outsiders(conn: sqlite3.Connection) -> list[dict[str, Any]]:
     since = _stamp(datetime.now(UTC) - FIRST)
-    return [dict(row) for row in conn.execute(OUTSIDERS, {"since": since, "limit": OUTSIDERS_SHOWN})]
+    found = conn.execute(OUTSIDERS, {"since": since, "limit": OUTSIDERS_SHOWN, "bot": DEPENDABOT})
+    return [dict(row) for row in found]
 
 
 def _decoded(row: sqlite3.Row) -> dict[str, Any]:
@@ -196,18 +225,66 @@ def _why(error: Exception) -> str:
             return type(error).__name__
 
 
-def _found(conn: sqlite3.Connection, settings: Settings, hit: Found, counts: Counts) -> None:
+def _stuck(
+    conn: sqlite3.Connection, settings: Settings, item: IntakeItem, started: datetime, counts: Counts
+) -> None:
+    """Queue a Dependabot PR still open `dependabot_after` after it was opened and with no item, auto
+    on exedore-max, to land or close; the caller holds the transaction. Its task names the subject and
+    never quotes it, as intake's do."""
+    if item.author != DEPENDABOT or item.kind != Kind.STORY or item.closed or not item.opened_at:
+        return
+    if item.opened_at > _stamp(started - settings.dependabot_after):
+        return
+    if store.item_by_subject(conn, item.subject_key) is not None:
+        return
+    fields = {
+        "kind": Kind.STORY,
+        "subject_key": item.subject_key,
+        "task": f"Land or close Dependabot {item.subject_key}: make CI green or close it with a reason",
+        "done_when": "PR merged-ready green or closed",
+        "ref": item.ref,
+        "repo": item.repo,
+        "lane": Lane.EXEDORE_MAX,
+        "mode": Mode.AUTO,
+        "extra": {
+            "source": item.source,
+            "title": item.title,
+            "author": item.author,
+            "opened_at": item.opened_at,
+        },
+    }
+    store.insert_item(conn, fields, ACTOR, SOURCE)
+    counts.new += 1
+
+
+def _outsider(
+    conn: sqlite3.Connection, settings: Settings, item: IntakeItem, counts: Counts, started: datetime
+) -> None:
+    """A new subject by someone neither a member nor trusted: listed for Scott, never stored. Dependabot's
+    is recorded instead, and queued once it is stuck (`_stuck`)."""
+    if item.author != DEPENDABOT:
+        outsider = {"subject_key": item.subject_key, "ref": item.ref, "author": item.author}
+        if outsider not in counts.outsiders and len(counts.outsiders) < OUTSIDERS_SHOWN:
+            counts.outsiders.append(outsider)
+        return
+    with store.transaction(conn):
+        subjects.record(conn, item, SOURCE)
+        _stuck(conn, settings, item, started, counts)
+        counts.subjects += 1
+
+
+def _found(
+    conn: sqlite3.Connection, settings: Settings, hit: Found, counts: Counts, started: datetime
+) -> None:
     """A search hit. A member's or trusted author's new subject is queued: claimable only when the
     forge says its author may write to the repo (org membership is not write access), else held;
-    anyone else's is listed, never stored. A writer's PR becomes the `pr` of each open item its title
+    anyone else's is an `_outsider`. A writer's PR becomes the `pr` of each open item its title
     or body names that has none. A subject with an item is recorded and settled."""
     item = hit.item
     member = hit.association in WRITERS or item.author in settings.authors
     known = store.item_by_subject(conn, item.subject_key) is not None
     if not member and not known:
-        outsider = {"subject_key": item.subject_key, "ref": item.ref, "author": item.author}
-        if outsider not in counts.outsiders and len(counts.outsiders) < OUTSIDERS_SHOWN:
-            counts.outsiders.append(outsider)
+        _outsider(conn, settings, item, counts, started)
         return
     named = LINK.findall(f"{item.title}\n{hit.body}") if member and item.kind == Kind.STORY else []
     asked = (item.repo or "", item.author or "")
@@ -295,10 +372,12 @@ def _renewing(db_path: str, settings: Settings, run_id: int, lost: threading.Eve
         renewer.join()
 
 
-def _read(conn: sqlite3.Connection, settings: Settings, keys: set[str], counts: Counts) -> None:
-    """Each open item's subject, read back FETCHERS at a time in batches of READ_BATCH, so the futures
-    queued stay bounded however many items are open, then recorded and settled in key order; one it
-    cannot read is an error."""
+def _read(
+    conn: sqlite3.Connection, settings: Settings, keys: set[str], counts: Counts, started: datetime
+) -> None:
+    """Each open item's subject, and each PENDING one, read back FETCHERS at a time in batches of
+    READ_BATCH, so the futures queued stay bounded however many items are open, then recorded and
+    settled in key order, a stuck Dependabot PR queued; one it cannot read is an error."""
     wanted = [(key, found) for key in sorted(keys) if (found := _number(key))]
     with ThreadPoolExecutor(FETCHERS) as pool:
         for batch in itertools.batched(wanted, READ_BATCH):
@@ -315,6 +394,7 @@ def _read(conn: sqlite3.Connection, settings: Settings, keys: set[str], counts: 
                 with store.transaction(conn):
                     if subjects.record(conn, item, SOURCE):
                         counts.closed += len(subjects.settle(conn, item.subject_key))
+                    _stuck(conn, settings, item, started, counts)
                     counts.subjects += 1
 
 
@@ -362,7 +442,7 @@ def _search(
             raise LeaseLostError
         try:
             if hit.item.subject_key not in keys:
-                _found(conn, settings, hit, counts)
+                _found(conn, settings, hit, counts, started)
         except UNREADABLE as failed:
             counts.errors.append(f"{hit.item.subject_key}: {_why(failed)}")
             deferred.append(hit.item.updated_at or "")
@@ -393,7 +473,13 @@ def run(db_path: str, settings: Settings, trigger: str) -> dict[str, Any]:
         try:
             with _renewing(db_path, settings, run_id, counts.lost):
                 keys = {row[0] for row in conn.execute(OPEN_SUBJECTS)}
-                _read(conn, settings, keys, counts)
+                keys |= {row[0] for row in conn.execute(PENDING, {"bot": DEPENDABOT}) if row[0]}
+                backfill = store.get_mark(conn, BACKFILLED) is None
+                if backfill:
+                    keys |= {row[0] for row in conn.execute(LISTED, {"bot": DEPENDABOT}) if row[0]}
+                _read(conn, settings, keys, counts, started)
+                if backfill and not counts.errors:
+                    store.set_mark(conn, BACKFILLED, _stamp(started), ACTOR)
                 _search(conn, settings, keys, started, counts)
                 counts.closed += len(subjects.hygiene(conn))
         except LeaseLostError:  # the next run reads it all again; the mark has not moved

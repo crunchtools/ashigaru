@@ -2,6 +2,7 @@
 
 import dataclasses
 import http.client
+import json
 import sqlite3
 import time
 import urllib.error
@@ -27,6 +28,7 @@ ORG = "crunchtools"
 HOUR = 3600.0
 LONG_AGO = "2020-01-01T00:00:00Z"
 TWO_MINUTES = 120.0
+HOURS_AGO = timedelta(hours=2)
 LAPSED_AT = 10
 """The tick at which the test lets the stale lease lapse."""
 WRITERS = 2
@@ -135,13 +137,12 @@ def test_the_search_queues_writers_and_only_lists_everyone_else(conn: sqlite3.Co
     assert set(rows) == {"crunchtools/x#1", "crunchtools/x#4"}
     member = rows["crunchtools/x#1"]
     assert (member["mode"], member["lane"], member["extra"]["trusted"]) == ("auto", "vertex", True)
-    assert [found["author"] for found in run["outsiders"]] == ["outsider", "dependabot[bot]"]
+    assert [found["author"] for found in run["outsiders"]] == ["outsider"]
     stored = {row[0] for row in conn.execute("SELECT subject_key FROM subjects")}
-    assert stored == {"crunchtools/x#1", "crunchtools/x#4"}
+    assert stored == {"crunchtools/x#1", "crunchtools/x#3", "crunchtools/x#4"}
     listed = [need["text"] for need in dispatch.status(conn)["needs_you"] if need["why"] == "outsider"]
     assert listed == [
         "https://github.com/crunchtools/x/pull/2 by outsider: not queued",
-        "https://github.com/crunchtools/x/pull/3 by dependabot[bot]: not queued",
     ]
 
 
@@ -453,3 +454,116 @@ def test_serve_sweeps_only_with_a_token_and_an_org(monkeypatch: pytest.MonkeyPat
     assert made.settings.authors == frozenset({"ashigaru-crunchtools[bot]"})
     monkeypatch.delenv("ASHIGARU_FORGE_TOKEN_GITHUB")
     assert desk_main.sweeper(str(db)) is None
+
+
+BOT = "dependabot[bot]"
+
+
+def ago(delta: timedelta) -> str:
+    return (datetime.now(UTC) - delta).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def bump(number: int, age: timedelta, **fields: Any) -> IntakeItem:
+    return subject(number, author=BOT, opened_at=ago(age), **fields)
+
+
+def test_a_young_dependabot_pr_is_recorded_and_an_old_one_is_queued(
+    conn: sqlite3.Connection, db: Path
+) -> None:
+    hits = [
+        Found(bump(1, timedelta(hours=1)), "NONE", ""),
+        Found(bump(2, timedelta(days=2)), "NONE", ""),
+    ]
+    run = sweeping(db, FakeForge(hits=hits))
+    assert run["outsiders"] == [] and run["new"] == 1
+    assert {row[0] for row in conn.execute("SELECT subject_key FROM subjects")} == {
+        "crunchtools/x#1",
+        "crunchtools/x#2",
+    }
+    rows = {row["subject_key"]: row for row in store.list_items(conn)}
+    assert set(rows) == {"crunchtools/x#2"}
+    queued = rows["crunchtools/x#2"]
+    assert (queued["kind"], queued["lane"], queued["mode"], queued["state"]) == (
+        "story",
+        "exedore-max",
+        "auto",
+        "queued",
+    )
+    assert (
+        queued["task"] == "Land or close Dependabot crunchtools/x#2: make CI green or close it with a reason"
+    )
+    assert queued["done_when"] == "PR merged-ready green or closed"
+    assert (queued["ref"], queued["repo"]) == ("https://github.com/crunchtools/x/pull/2", "crunchtools/x")
+
+
+def test_a_recorded_dependabot_pr_is_queued_once_old_enough_and_not_if_closed(
+    conn: sqlite3.Connection, db: Path
+) -> None:
+    hits = [Found(bump(n, timedelta(hours=1)), "NONE", "") for n in (1, 2)]
+    sweeping(db, FakeForge(hits=hits))
+    assert store.list_items(conn) == []
+    old = timedelta(days=2)
+    forge = FakeForge(subjects={1: bump(1, old), 2: bump(2, old, closed=True)})
+    run = sweeping(db, forge)
+    assert run["new"] == 1 and run["error"] is None
+    assert [row["subject_key"] for row in store.list_items(conn)] == ["crunchtools/x#1"]
+    sweeping(db, forge)
+    assert len(store.list_items(conn)) == 1
+
+
+def test_old_sweeps_that_listed_dependabot_are_backfilled_and_no_longer_needs_you(
+    conn: sqlite3.Connection, db: Path
+) -> None:
+    listed = [
+        {"subject_key": "crunchtools/x#1", "ref": "r1", "author": BOT},
+        {"subject_key": "crunchtools/x#2", "ref": "r2", "author": "outsider"},
+    ]
+    conn.execute(
+        "INSERT INTO sweeps (trigger, started_at, finished_at, outsiders) VALUES (?, ?, ?, ?)",
+        ("timer", ago(HOURS_AGO), ago(HOURS_AGO), json.dumps(listed)),
+    )
+    conn.commit()
+    assert [found["subject_key"] for found in sweep.outsiders(conn)] == ["crunchtools/x#2"]
+    needs = [need["text"] for need in dispatch.status(conn)["needs_you"] if need["why"] == "outsider"]
+    assert needs == ["r2 by outsider: not queued"]
+    run = sweeping(db, FakeForge(subjects={1: bump(1, timedelta(days=2))}))
+    assert run["new"] == 1 and run["error"] is None
+    assert [row["subject_key"] for row in store.list_items(conn)] == ["crunchtools/x#1"]
+
+
+def test_a_queued_dependabot_item_settles_when_its_pr_closes(conn: sqlite3.Connection, db: Path) -> None:
+    sweeping(db, FakeForge(hits=[Found(bump(1, timedelta(days=2)), "NONE", "")]))
+    queued = store.list_items(conn)[0]["id"]
+    merged = bump(1, timedelta(days=2), closed=True, merged=True, head="ab" * 20)
+    sweeping(db, FakeForge(subjects={1: merged}))
+    assert item(conn, queued)["state"] == "done"
+
+
+@pytest.mark.parametrize(
+    "unfit",
+    [
+        {"kind": Kind.OUTCOME},
+        {"opened_at": None},
+        {"opened_at": ago(sweep.DEPENDABOT_AFTER - timedelta(minutes=5))},
+    ],
+)
+def test_a_dependabot_subject_that_is_not_a_pr_has_no_age_or_is_young_is_not_queued(
+    conn: sqlite3.Connection, db: Path, unfit: dict[str, Any]
+) -> None:
+    hit = dataclasses.replace(bump(1, timedelta(days=2)), **unfit)
+    run = sweeping(db, FakeForge(hits=[Found(hit, "NONE", "")]))
+    assert (run["new"], run["outsiders"], store.list_items(conn)) == (0, [], [])
+
+
+def test_the_backfill_reads_old_runs_once(conn: sqlite3.Connection, db: Path) -> None:
+    listed = [{"subject_key": "crunchtools/x#1", "ref": "r1", "author": BOT}]
+    conn.execute(
+        "INSERT INTO sweeps (trigger, started_at, finished_at, outsiders) VALUES (?, ?, ?, ?)",
+        ("timer", ago(HOURS_AGO), ago(HOURS_AGO), json.dumps(listed)),
+    )
+    conn.commit()
+    failing = FakeForge(refuse={1: OSError("down")})
+    sweeping(db, failing)
+    assert store.get_mark(conn, sweep.BACKFILLED) is None
+    sweeping(db, FakeForge(subjects={1: bump(1, timedelta(hours=1), closed=True)}))
+    assert store.get_mark(conn, sweep.BACKFILLED) is not None

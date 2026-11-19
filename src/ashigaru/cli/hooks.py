@@ -6,8 +6,8 @@ seat-state.json hooks and keep their rules.
                   changes nothing.
   prompt-submit   UserPromptSubmit. turn active. A prompt a person typed, the
                   session's first, becomes the task; turns Claude Code starts
-                  itself (a <cross-session-message>, a <task-notification>)
-                  leave the task alone.
+                  itself (a <cross-session-message>, a <task-notification>,
+                  a scheduled task firing) leave the task alone.
   stop            Stop, StopFailure and the idle_prompt Notification: turn
                   idle. idle_prompt leaves alone a turn that started too
                   recently to be the one it reports on. Stop also sends the
@@ -82,6 +82,10 @@ WAITING_TAIL = 256 << 10
 IDLE_NOTICE_AFTER = timedelta(seconds=60)
 # What Claude Code puts first in a prompt it submits on its own.
 HARNESS_MARKS = ("<cross-session-message", "<task-notification")
+# A scheduled task (CronCreate, /loop, a durable routine) submits its prompt bare. What marks it is
+# the system entry Claude Code appends to the transcript as it fires, carrying the prompt.
+SCHEDULED_FIRE = "scheduled_task_fire"
+SCHEDULED_PROMPT_LENGTH = 200
 STATUSLINE_EVERY = 30.0
 # The most of a transcript one status line run reads; the rest waits for the next.
 TRANSCRIPT_CHUNK = 4 << 20
@@ -122,6 +126,51 @@ def _start(event: dict[str, Any], desk: Desk, path: str) -> None:
     )
 
 
+def _tail(transcript: str) -> list[bytes]:
+    """The whole lines in the final WAITING_TAIL bytes of the transcript."""
+    with open(transcript, "rb") as handle:
+        size = handle.seek(0, os.SEEK_END)
+        handle.seek(max(0, size - WAITING_TAIL))
+        tail = handle.read()
+    lines = tail.splitlines()
+    return lines[1:] if size > WAITING_TAIL else lines
+
+
+def _fired(entry: Any, prompt: str) -> bool:
+    """True when the transcript entry is a scheduled task firing this prompt. Claude Code's copy has
+    its whitespace collapsed and is cut at SCHEDULED_PROMPT_LENGTH characters, so it is the prompt,
+    or one that long that starts it."""
+    if not isinstance(entry, dict) or entry.get("type") != "system" or entry.get("subtype") != SCHEDULED_FIRE:
+        return False
+    fired = entry.get("prompt")
+    if not isinstance(fired, str) or not (fired := " ".join(fired.split())):
+        return False
+    said = " ".join(prompt.split())
+    return said == fired or len(fired) >= SCHEDULED_PROMPT_LENGTH - 1 and said.startswith(fired)
+
+
+def _scheduled(event: dict[str, Any], prompt: str) -> bool:
+    """True when the transcript says a scheduled task just fired this prompt: the entry comes after
+    the last assistant entry, so one that fired an earlier turn never matches a prompt typed later."""
+    transcript = event.get("transcript_path")
+    if not isinstance(transcript, str):
+        return False
+    try:
+        lines = _tail(transcript)
+    except OSError:
+        return False
+    for line in reversed(lines):
+        try:
+            entry = json.loads(line)
+        except ValueError:
+            continue
+        if _fired(entry, prompt):
+            return True
+        if isinstance(entry, dict) and entry.get("type") == "assistant":
+            return False
+    return False
+
+
 def _prompt(event: dict[str, Any], desk: Desk, path: str) -> None:
     prompt = str(event.get("prompt", "")).strip()
     session = str(event.get("session_id", ""))
@@ -130,7 +179,7 @@ def _prompt(event: dict[str, Any], desk: Desk, path: str) -> None:
         kept = marker.read_text().strip() == session
     except OSError:
         kept = False
-    if prompt.startswith(HARNESS_MARKS) or kept or not prompt:
+    if prompt.startswith(HARNESS_MARKS) or kept or not prompt or _scheduled(event, prompt):
         desk.request("PATCH", path, body={"turn": "active"})
         return
     desk.request("PATCH", path, body={"turn": "active", "task": prompt[:TASK_LENGTH]})
@@ -157,12 +206,7 @@ def _entry_text(entry: Any) -> str | None:
 def _last_message(transcript: str) -> str | None:
     """The last assistant text in the final WAITING_TAIL bytes of the transcript. Claude Code writes
     a line per content block, so lines with only tool_use or thinking are passed over."""
-    with open(transcript, "rb") as handle:
-        size = handle.seek(0, os.SEEK_END)
-        handle.seek(max(0, size - WAITING_TAIL))
-        tail = handle.read()
-    lines = tail.splitlines()
-    for line in reversed(lines[1:] if size > WAITING_TAIL else lines):
+    for line in reversed(_tail(transcript)):
         try:
             text = _entry_text(json.loads(line))
         except ValueError:

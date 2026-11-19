@@ -106,7 +106,9 @@ back as a tool error carrying the same status and detail.
 The Desk infers it from a seat's own reports, so no seat can claim or drop one.
 A seat holding no item that reports `turn: active` with a `task` (its
 session's first typed prompt) becomes busy, `owner: Scott`, holding a new
-`manual` item in `working` with that task and the seat's lane. Turns without a
+`manual` item in `working` with that task and the seat's lane, unless an open
+`manual` item already names the seat (imported, or left `blocked`): it takes
+that one back in whatever state it is. Turns without a
 task (an assignment arriving, a background task's result) start nothing, and a
 seat on an assigned item stays on it. A `/clear` (`task: null`) clears the held
 item; a wrap or close of it does too; either frees the seat. The hold follows
@@ -152,8 +154,9 @@ labels on anyone else's subject approve nothing. The record issues the sweep
 keeps (labeled `ashigaru-inbox`, `ashigaru-releases`, `ashigaru-red` or
 `ashigaru-observe`) are
 never queued, and one queued before is held on its next delivery. A subject
-authored by a bot that is not in that list (dependabot, say) is not queued,
-by webhook or sweep; it used to be held.
+authored by a bot that is not in that list (dependabot, say) is not queued
+when first seen, by webhook or sweep; it used to be held. The sweep queues a
+Dependabot PR that is still open a day on (see Sweep).
 
 **Seat reconcile.** `serve` runs it at startup and every 5 minutes; it needs no
 forge. A seat turn active longer than `ASHIGARU_TURN_MAX` (3 hours) whose row
@@ -174,7 +177,10 @@ them as a delivery does; searches the org for subjects updated since the
 OWNER's, MEMBER's or trusted author's new subject (claimable when the forge says
 its author writes to that repo, else held: org membership is not write access;
 a PR links to an item only from such a writer) and listing anyone else's in
-the run's `outsiders` (shown under NEEDS YOU for a day) without storing it;
+the run's `outsiders` (shown under NEEDS YOU for a day) without storing it,
+except Dependabot's: its PRs are recorded as subjects, re-read every run while
+open, and one still open `ASHIGARU_DEPENDABOT_AFTER` seconds after it was
+opened is queued, auto on exedore-max, to land or close;
 links a writer's PR whose title or body names `(a676)` as that item's `pr` when
 the item is in the PR's repo; then settles everything. The mark moves to the
 run's start once the search was read whole, or to the last hit's time when the
@@ -192,11 +198,12 @@ forge cannot say, is one error and the run goes on, and its row always finishes.
 
 **Settling.** Each delivery records the subject; one older by `updated_at`
 never overwrites, and merged is sticky. It then settles items whose
-`subject_key` or `pr` names it. A seatless `auto` item goes `done` ("merged at
+`subject_key` or `pr` names it. A seatless item nobody has started (`auto`, or
+`manual` still `queued` or `proposed`) goes `done` ("merged at
 <sha12>") when merged, `done` ("closed at the source") for a closed issue, or
 `wontdo` ("closed unmerged at the source") for a closed-unmerged PR, with
-`verified_by` desk. A seat-held or `manual` item is never closed, only given
-`landed_at` on merge. An item settling closed (by its events, not by
+`verified_by` desk. A seat-held item, or a `manual` one Scott has started, is
+never closed, only given `landed_at` on merge. An item settling closed (by its events, not by
 `verified_by`, which an admin can write) is queued again when its own subject
 reopens and nothing else it names is closed or merged. A `pr` link acts only on
 merge. `GET /work` and `GET /status` run the same pass as a fallback, as they do
@@ -310,6 +317,7 @@ Settings are flags on `ashigaru-desk serve`, else these environment variables:
 | `ASHIGARU_FORGE_AUTHORS_GITHUB` | comma-separated accounts, such as the app's bot, whose own issues and PRs are trusted as a writer's, so a lane label on one makes it auto-claimable; each forge has its own `ASHIGARU_FORGE_AUTHORS_<FORGE>` | none; the image sets `ashigaru-crunchtools[bot]` |
 | `ASHIGARU_FORGE_ORG_GITHUB` | the GitHub org the sweep searches; the sweep runs only with this and the token | none: no sweep |
 | `ASHIGARU_SWEEP_EVERY` | seconds between sweeps | `600` |
+| `ASHIGARU_DEPENDABOT_AFTER` | seconds a Dependabot PR may stay open before the sweep queues it for an exedore-max seat to land or close | `86400` |
 | `ASHIGARU_TURN_MAX` | seconds a seat turn may stay active, with no write to its row for 10 minutes, before seat reconcile ends it | `10800` |
 | `ASHIGARU_SILENT_AFTER` | seconds a busy seat may go without a write before seat reconcile flags it silent | `900` |
 | `ASHIGARU_WEBHOOK_SECRET` | GitHub's secret under the bare name the first deploy used; added to `_GITHUB` | none |
