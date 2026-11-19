@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [4.1.0] - 2026-11-19
+
 ### Added
 - Seat reconcile (migration 10): at startup and every 5 minutes, `serve` ends a
   seat turn active past `ASHIGARU_TURN_MAX` (3 hours) with no write for 10
@@ -64,6 +66,10 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- The `/ashigaru` skill's round reads the Desk instead of panes and GitHub:
+  an overdue item is judged by its seat's TURN and SEEN, `landed: wrap it` is
+  wrapped, `changes --ack` gives the deltas between rounds, and `queue` no
+  longer re-reads issues the Desk already closed (only an RT ticket is checked).
 - Intake (webhook and sweep) no longer queues a subject authored by a bot
   that is not a trusted author (dependabot, say); it used to be held.
 - Promote signs the image with the fleet cosign key (`sign: true`), because

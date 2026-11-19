@@ -151,7 +151,8 @@ the round covered. A round cut at 1000 (`truncated`) reads on from there next
 time, so nothing is lost or repeated. Without `--advance` the mark stays put,
 so Scott can look without eating the window (any view of the queue still
 abandons expired proposed children); `--since` reads from a time instead, and never with `--advance`. Scott's untracked work is already
-there as a `manual` item.
+there as a `manual` item. Between rounds, `ashigaru changes --ack` gives just
+what moved since you last looked instead of the whole table.
 
 The catch-up is the Desk's own record of the org webhook, so no `gh` sweep
 runs (the Desk's own `sweep` searches the org too). **New** lists every issue and PR first seen in the window: the Desk has
@@ -174,12 +175,12 @@ only marks it landed. A seat records its PR with
      review rule: for non-trivial code, `assign` a *different* free seat to
      review it, as its own auto item. Once the work is verified and any review
      is finished, `wrap` it.
-   - Past `check_after` with no word: look before asking. Peek at the pane
-     (`ssh dolza podman exec <container> tmux capture-pane -p -t =dev:0 | tail -20`,
-     or the claude-agent form above; Exedore seats through `ssh exedore`). If
-     it's busy and progressing, move it out:
-     `ashigaru update a7 --check-after 2026-11-18T15:00Z`. If it's idle without
-     a report, SendMessage `"[a7] status? Reply DONE/BLOCKED/WORKING with one line."`
+   - NEXT says `overdue since HH:MM` (past `check_after` with no word): read
+     the seat's TURN and SEEN in the round's seats table, not its pane. An
+     `active` turn seen in the last few minutes is progressing: move it out
+     with `ashigaru update a7 --check-after 2026-11-18T15:00Z`. An `idle` turn
+     without a report gets SendMessage `"[a7] status? Reply DONE/BLOCKED/WORKING with one line."`
+   - NEXT says `landed: wrap it`: its PR merged while the seat held it; `wrap` it.
    - Stuck in a loop or waiting on a prompt nobody will answer: tell Scott.
 3. Drain the queue (`queue` step 1) from the round's queue and seats.
 4. Report the check table as the Desk orders it, in Scott's columns: WORK,
@@ -199,9 +200,9 @@ sweep that used to run here is `work`'s catch-up.
 1. **Drain**, for each free seat: pick the oldest auto queued item in its lane
    whose `waits_on` items are all `done`. A Dolza Max seat falls back to
    `exedore-max` items. An item waiting on a `blocked` or `abandoned` one is
-   stuck: report it, don't wait on it. Then read the issue. If it is closed,
-   already has a PR linked or open (Ashigaru works the same issues), or the RT
-   ticket is resolved, close the item unbriefed with
+   stuck: report it, don't wait on it. The Desk has already closed any whose
+   GitHub subject merged or closed, so don't re-read issues. The Desk does not
+   read RT: if an `RT#N` item's ticket is resolved, close it unbriefed with
    `ashigaru update a7 --state done --result "done elsewhere"` and pick again.
    Otherwise `ashigaru assign a7 --seat "Exedore 1 - Max"`, then `assign`
    steps 4-5.
