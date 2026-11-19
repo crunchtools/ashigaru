@@ -23,9 +23,12 @@ from .model import CLOSED, Kind, Mode, State, Verdict, subject_key
 LABEL = 40
 """The longest one-off outcome name drawn from its instruction."""
 
-OUTCOMES = "SELECT id, subject_key, task FROM items WHERE kind = 'outcome'"
+OUTCOMES = """
+    SELECT id, subject_key, task FROM items
+    WHERE kind = 'outcome' AND id IN (SELECT value FROM json_each(:ids))
+"""
 OUTCOME_BY_KEY = """
-    SELECT id FROM items
+    SELECT id, state FROM items
     WHERE kind = 'outcome' AND (subject_key = :key OR (subject_key IS NULL AND ref = :key))
     ORDER BY state IN ('done', 'wontdo', 'abandoned'), updated_at DESC LIMIT 1
 """
@@ -44,7 +47,10 @@ FINISHED = """
 """
 """Open auto outcomes no seat holds whose stories, of which there is one at least, are all closed."""
 ACTOR = "desk"
-STORIES = "SELECT pr, parent FROM items WHERE pr IS NOT NULL AND parent IS NOT NULL ORDER BY updated_at"
+STORIES = """
+    SELECT pr, parent FROM items
+    WHERE parent IS NOT NULL AND pr IN (SELECT value FROM json_each(:keys)) ORDER BY updated_at
+"""
 FILED = "SELECT id, parent FROM items WHERE parent IS NOT NULL AND id IN (SELECT value FROM json_each(:ids))"
 RED = f"""
     SELECT s.subject_key FROM subjects s
@@ -77,6 +83,13 @@ def _is_pr(conn: sqlite3.Connection, name: str, key: str) -> bool:
     )
 
 
+def _reopened(conn: sqlite3.Connection, outcome: str, state: str, actor: str) -> str:
+    """The outcome's id, reopened first if it was done: new work serves it again."""
+    if state == State.DONE:
+        store.update_item(conn, outcome, {"state": State.WORKING, "result": None}, actor, "outcome")
+    return outcome
+
+
 def resolve(conn: sqlite3.Connection, name: str | None, text: str | None, actor: str) -> str:
     """The id of the outcome `name` means, recording it if new; the caller holds the transaction.
     `name` is an outcome's id, or a ref (RT#N, an issue's URL or owner/repo#N) for the outcome item
@@ -89,8 +102,8 @@ def resolve(conn: sqlite3.Connection, name: str | None, text: str | None, actor:
         raise Unknown("an outcome's instruction text cannot be blank")
     key = subject_key(name)
     match store.get_item(conn, name) if name else None, key:
-        case {"kind": Kind.OUTCOME, "id": found}, _:
-            return str(found)
+        case {"kind": Kind.OUTCOME, "id": str() as found, "state": str() as state}, _:
+            return _reopened(conn, found, state, actor)
         case _, str() if _is_pr(conn, name, key):
             raise Unknown(f"{key} is a PR: set it as the story's pr, and name the issue or ticket it serves")
         case _, str():
@@ -107,7 +120,7 @@ def resolve(conn: sqlite3.Connection, name: str | None, text: str | None, actor:
         case _:
             raise Unknown(f"no outcome {name!r}: name an outcome's id or ref, or give its instruction text")
     if known is not None:
-        return str(known["id"])
+        return _reopened(conn, known["id"], known["state"], actor)
     return store.insert_item(
         conn, {**minted, "mode": Mode.AUTO, "state": State.WORKING}, actor, source="outcome"
     )
@@ -128,15 +141,20 @@ def close_finished(conn: sqlite3.Connection) -> list[str]:
 
 def attach(conn: sqlite3.Connection, rows: list[dict[str, Any]]) -> None:
     """Give each row its `outcome` and `outcome_label`: its parent, else the outcome of the story whose
-    PR it is, else that of the story it was filed under."""
-    names = {row["id"]: label(dict(row)) for row in conn.execute(OUTCOMES)}
-    by_pr = {row["pr"]: row["parent"] for row in conn.execute(STORIES)}
-    under = sorted({row["filed_under"] for row in rows if row.get("filed_under")})
-    filed = {row["id"]: row["parent"] for row in conn.execute(FILED, {"ids": json.dumps(under)})}
+    PR it is, else that of the story it was filed under. Three queries, each over only what the rows
+    name: the stories whose pr is a row's subject, the stories rows were filed under, their outcomes."""
+    keys = json.dumps(sorted({row["subject_key"] for row in rows if row.get("subject_key")}))
+    by_pr = {row["pr"]: row["parent"] for row in conn.execute(STORIES, {"keys": keys})}
+    under = json.dumps(sorted({row["filed_under"] for row in rows if row.get("filed_under")}))
+    filed = {row["id"]: row["parent"] for row in conn.execute(FILED, {"ids": under})}
     for row in rows:
-        found = row.get("parent") or by_pr.get(row.get("subject_key")) or filed.get(row.get("filed_under"))
-        row["outcome"] = found
-        row["outcome_label"] = names.get(found) if found else None
+        row["outcome"] = (
+            row.get("parent") or by_pr.get(row.get("subject_key")) or filed.get(row.get("filed_under"))
+        )
+    wanted = json.dumps(sorted({row["outcome"] for row in rows if row["outcome"]}))
+    names = {row["id"]: label(dict(row)) for row in conn.execute(OUTCOMES, {"ids": wanted})}
+    for row in rows:
+        row["outcome_label"] = names.get(row["outcome"])
 
 
 def _clock(stamp: str) -> str:

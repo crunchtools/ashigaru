@@ -153,7 +153,10 @@ def _patch_item(conn: sqlite3.Connection, item_id: str, fields: dict[str, Any], 
         writable_item(conn, item_id, who)
         seat_may(who, fields)
         try:
-            store.update_item(conn, item_id, with_outcome(conn, fields, who.name), who.name)
+            fields = with_outcome(conn, fields, who.name)
+            if fields.get("parent") == item_id:
+                raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "an item cannot serve itself")
+            store.update_item(conn, item_id, fields, who.name)
         except store.Conflict as error:
             raise _conflict(error) from error
     return Item.model_validate(store.get_item(conn, item_id))

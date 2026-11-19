@@ -31,9 +31,13 @@ class Whole(str):
     """A cell table() never clips: a task is read in full."""
 
 
+class Tail(str):
+    """A cell table() keeps on one line and clips only when its row overflows: NEXT."""
+
+
 def clip(value: Any, width: int = TEXT_WIDTH) -> str:
     text = "" if value is None else " ".join(str(value).split())
-    return text if isinstance(value, Whole) or len(text) <= width else text[: width - 1] + "…"
+    return text if isinstance(value, Whole | Tail) or len(text) <= width else text[: width - 1] + "…"
 
 
 def age(stamp: str | None, now: datetime | None = None) -> str:
@@ -85,24 +89,27 @@ def money(value: float | None) -> str:
 
 def table(rows: Sequence[dict[str, Any]], columns: Sequence[Column], width: int | None = None) -> str:
     """Rows under their headers, each column as wide as its widest cell. When the table is wider than
-    `width` (the terminal's, else 120), a Whole column word-wraps inside its own width, never cut, and
-    then, if it must, the widest other column is clipped; every other cell stays on its row's first
-    line, so the columns line up."""
+    `width` (the terminal's, else 120), a Whole column word-wraps, never cut, in the room the others
+    leave (WRAP_MIN at least); then, if the row still overflows, a Tail column (else the widest other)
+    is clipped. Every cell but a Whole one
+    stays on its row's first line, so the columns line up."""
     raw = [[get(row) for _, get in columns] for row in rows]
-    whole = {i for i in range(len(columns)) if any(isinstance(line[i], Whole) for line in raw)}
+    whole, tail = (
+        {i for i in range(len(columns)) if any(isinstance(line[i], kind) for line in raw)}
+        for kind in (Whole, Tail)
+    )
     cells = [[h for h, _ in columns]] + [[clip(value) for value in line] for line in raw]
     widths = [max(len(line[i]) for line in cells) for i in range(len(columns))]
     room = (width or shutil.get_terminal_size(NO_TERMINAL).columns) - 2 * (len(columns) - 1)
     if whole and sum(widths) > room:
-        rest = sum(w for i, w in enumerate(widths) if i not in whole)
+        free = room - sum(w for i, w in enumerate(widths) if i not in whole)
         for i in whole:
-            widths[i] = min(widths[i], max(WRAP_MIN, (room - rest) // len(whole)))
-        over = sum(widths) - room
-        widest = max(
-            (i for i in range(len(columns)) if i not in whole), key=lambda i: widths[i], default=None
-        )
-        if over > 0 and widest is not None:
-            widths[widest] = max(CLIP_MIN, widths[widest] - over)
+            widths[i] = min(widths[i], max(WRAP_MIN, free // len(whole)))
+    over = sum(widths) - room
+    others = [i for i in range(len(columns)) if i not in whole]
+    if over > 0 and others:
+        clipped = max(others, key=lambda i: (i in tail, widths[i]))
+        widths[clipped] = max(CLIP_MIN, widths[clipped] - over)
     lines: list[str] = []
     for line in cells:
         parts = [
@@ -288,7 +295,12 @@ WORK: list[Column] = [
     ("STATE", lambda r: state(r)),
     ("OUTCOME", lambda r: r.get("outcome_label") or "-"),
     ("TASK", lambda r: Whole(r["task"])),
-    ("NEXT", lambda r: clip(r.get("step") or r.get("next") or r.get("result_or_blocker"), NARROW)),
+    (
+        "NEXT",
+        lambda r: Tail(
+            " ".join(str(r.get("step") or r.get("next") or r.get("result_or_blocker") or "").split())
+        ),
+    ),
 ]
 """Scott's `work` columns: the mode shows inside STATE, and NEXT is the one next step."""
 QUEUED: list[Column] = [

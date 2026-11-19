@@ -287,7 +287,8 @@ STATE_SINCE = """(
 CHECK_ACTIVE = f"SELECT *, {STATE_SINCE} FROM items WHERE kind != 'outcome' AND {OPEN} {CHECK_ORDER}"
 CHECK_ALL = f"SELECT *, {STATE_SINCE} FROM items WHERE kind != 'outcome' {CHECK_ORDER}"
 """The check table: work, so never an outcome, which `outcomes` shows."""
-COUNT_OPEN = f"SELECT count(*) FROM items WHERE {OPEN}"
+COUNT_OPEN = f"SELECT count(*) FROM items WHERE kind != 'outcome' AND {OPEN}"
+"""Open work: an outcome is what work serves, not work."""
 
 UPSERT_SEAT = """
     INSERT INTO seats (

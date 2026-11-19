@@ -13,6 +13,7 @@ from ashigaru.desk.forges import IntakeItem
 from ashigaru.desk.model import Kind
 
 JOSUI = "Josui Prime"
+TWO = 2
 INSTRUCTION = "Make the status board say what each seat's work is for, so Scott sees it at a glance"
 
 
@@ -222,3 +223,43 @@ def test_since_is_the_latest_state_change(client: TestClient, keys: Keys, conn: 
     client.patch(f"/v1/items/{story['id']}", headers=keys[JOSUI], json={"note": "not a state change"})
     found = {row["id"]: row for row in store.check(conn)}
     assert found[story["id"]]["since"] == "2026-11-19T11:00:00Z"
+
+
+def test_attach_reads_only_what_the_rows_name(
+    client: TestClient, keys: Keys, conn: sqlite3.Connection
+) -> None:
+    for number in range(5):
+        create(client, keys, outcome=f"RT#{100 + number}", pr=f"crunchtools/x#{number}")
+    shown = [create(client, keys, outcome="RT#1")]
+    found = [dict(store.get_item(conn, shown[0]["id"]) or {})]
+    queries: list[str] = []
+    conn.set_trace_callback(queries.append)
+    try:
+        outcomes.attach(conn, found)
+    finally:
+        conn.set_trace_callback(None)
+    assert found[0]["outcome_label"] == "RT#1"
+    assert all("json_each" in query for query in queries if "FROM items" in query), "every lookup is scoped"
+
+
+def test_the_open_tally_counts_work_not_outcomes(client: TestClient, keys: Keys) -> None:
+    create(client, keys, outcome="RT#1")
+    create(client, keys, outcome="RT#1")
+    assert client.get("/v1/work", headers=keys[JOSUI]).json()["summary"]["open"] == TWO
+
+
+def test_an_outcome_cannot_serve_itself(client: TestClient, keys: Keys) -> None:
+    outcome = create(client, keys, outcome="RT#1")["parent"]
+    patched = client.patch(f"/v1/items/{outcome}", headers=keys[JOSUI], json={"outcome": outcome})
+    assert patched.status_code == UNPROCESSABLE_ENTITY and "cannot serve itself" in patched.text
+
+
+def test_new_work_reopens_a_done_outcome(client: TestClient, keys: Keys, conn: sqlite3.Connection) -> None:
+    story = create(client, keys, outcome="RT#1")
+    client.patch(f"/v1/items/{story['id']}", headers=keys[JOSUI], json={"state": "done"})
+    rows(client, keys)
+    assert (store.get_item(conn, story["parent"]) or {})["state"] == "done"
+    for named in ("RT#1", story["parent"]):
+        assert create(client, keys, outcome=named)["parent"] == story["parent"]
+        assert (store.get_item(conn, story["parent"]) or {})["state"] == "working"
+        conn.execute("UPDATE items SET state = 'done' WHERE id = ?", (story["parent"],))

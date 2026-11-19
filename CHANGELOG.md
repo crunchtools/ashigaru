@@ -19,7 +19,8 @@ All notable changes to this project are documented here. The format follows
   one next step, folding in the blocker, `landed: wrap it`, `overdue since
   HH:MM` and a PR's red CI. `ashigaru status` leads with OUTCOME, then MODE.
 - A task, never cut, now word-wraps inside its own column to fit the terminal
-  (120 columns when there is none); the other cells stay on the row's first line.
+  (120 columns when there is none); the other cells stay on the row's first
+  line. NEXT takes the width left and is clipped only when the row overflows.
 
 - Server-side sweep: with `ASHIGARU_FORGE_TOKEN_GITHUB` and
   `ASHIGARU_FORGE_ORG_GITHUB`, `serve` re-reads every open item's subject and
