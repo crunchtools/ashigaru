@@ -6,6 +6,23 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+- The constitution's workflows are called at `@v1`, the major tag each release
+  moves (XV rule 5, constitution 1.45.0), and `Inherits:` is v1.51.0: that tag
+  alone is the version this repo is judged by, so the repo stops sitting
+  releases behind. `container-release.yml` was pinned at v1.41.0 and the other
+  three at v1.46.0. The container job also grants `issues: write`, so a failed
+  weekly rebuild opens an issue (constitution 1.51.0) instead of only warning.
+  A `v*` promote now also refuses an image whose `version` label names a
+  different release of this repo (constitution 1.50.0); this image sets no
+  `version` label, so the check is inert here.
+
+### Fixed
+- Publishing a release no longer leaves a red Container run. `major-tag.yml`
+  moves `v4` on every release, `container.yml` ran on it, and promote refused
+  it with "tag 'v4' is not vX.Y.Z" (most recently run 44427128848). The push
+  trigger is now `v*.*.*`, which the major tag does not match.
+
 ## [4.0.2] - 2026-11-19
 
 ### Fixed
