@@ -16,6 +16,7 @@ commit; `GitHub.required` joins them by exact name and App, a required check nob
 pending. Errors propagate: the caller turns them into "could not read".
 """
 
+import dataclasses
 import hashlib
 import hmac
 import json
@@ -309,13 +310,12 @@ def _intake(
     thing = payload.get(subject)
     if not isinstance(thing, Mapping):
         raise ValueError(f"no {subject}")
+    found = _item(
+        thing, _repo(payload), kind, subject, merged_in=thing if subject == "pull_request" else None
+    )
     return (
-        _item(
-            thing,
-            _repo(payload),
-            kind,
-            subject,
-            merged_in=thing if subject == "pull_request" else None,
+        dataclasses.replace(
+            found,
             sender=sender if isinstance(sender := payload_get(payload, "sender", "login"), str) else None,
             approves_lane=_lane_label(payload, "labeled"),
             revokes_lane=_lane_label(payload, "unlabeled"),
@@ -327,13 +327,11 @@ def _intake(
     )
 
 
-def _item(
-    thing: Mapping[str, Any], repo: str, kind: Kind, what: str, *, merged_in: Any, **event: Any
-) -> IntakeItem:
+def _item(thing: Mapping[str, Any], repo: str, kind: Kind, what: str, *, merged_in: Any) -> IntakeItem:
     """The IntakeItem for an issue or PR mapping, whichever way it reached us (a webhook, a fetch, a
     search). `merged_in` is the mapping that says whether a PR merged (None for an issue): `merged` is
-    true there, or (some payloads omit it) `merged_at` is a non-empty string. `event` carries what only
-    a delivery knows (sender, lane changes, review, head_before)."""
+    true there, or (some payloads omit it) `merged_at` is a non-empty string. What only a delivery
+    knows (sender, lane changes, review, head_before) the delivery's caller adds."""
     labels = tuple(
         label["name"]
         for label in thing.get("labels") or ()
@@ -359,7 +357,6 @@ def _item(
         draft=_draft(thing) if kind is Kind.STORY else None,
         updated_at=updated if isinstance(updated := thing.get("updated_at"), str) else None,
         head=head.lower() if isinstance(head := payload_get(thing, "head", "sha"), str) else None,
-        **event,
     )
 
 

@@ -441,3 +441,12 @@ def test_desk_wait_refuses_half_a_commit(
     client: TestClient, urls: dict[str, str], half: dict[str, str]
 ) -> None:
     assert mcp_status(call(client, urls[SEAT], "desk_wait", {**half, "timeout": 0})) == UNPROCESSABLE_ENTITY
+
+
+def test_desk_sweep_reads_for_anyone_and_starts_only_for_an_admin(
+    client: TestClient, urls: dict[str, str]
+) -> None:
+    read = call(client, urls[SEAT], "desk_sweep")
+    assert not read["isError"] and read["structuredContent"]["configured"] is False
+    assert mcp_status(call(client, urls[SEAT], "desk_sweep", {"run": True})) == FORBIDDEN
+    assert mcp_status(call(client, urls[JOSUI], "desk_sweep", {"run": True})) == CONFLICT

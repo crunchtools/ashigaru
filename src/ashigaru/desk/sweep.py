@@ -201,10 +201,10 @@ def _locked(conn: sqlite3.Connection, settings: Settings, started: datetime) -> 
     return False
 
 
-def _read(conn: sqlite3.Connection, settings: Settings, keys: list[str], counts: Counts) -> None:
+def _read(conn: sqlite3.Connection, settings: Settings, keys: set[str], counts: Counts) -> None:
     """Each open item's subject, read back FETCHERS at a time, then recorded and settled in key order;
     one it cannot read is an error."""
-    wanted = {key: found for key in keys if (found := _number(key))}
+    wanted = {key: found for key in sorted(keys) if (found := _number(key))}
     with ThreadPoolExecutor(FETCHERS) as pool:
         reads = {
             key: pool.submit(settings.forge.subject, *found, settings.token) for key, found in wanted.items()
@@ -223,7 +223,7 @@ def _read(conn: sqlite3.Connection, settings: Settings, keys: list[str], counts:
 
 
 def _search(
-    conn: sqlite3.Connection, settings: Settings, keys: list[str], started: datetime, counts: Counts
+    conn: sqlite3.Connection, settings: Settings, keys: set[str], started: datetime, counts: Counts
 ) -> None:
     try:
         search = settings.forge.updated(settings.org, _since(conn, started), settings.token)
@@ -254,7 +254,7 @@ def run(db_path: str, settings: Settings, trigger: str) -> dict[str, Any] | None
         run_id = conn.execute(START, (trigger, _stamp(started))).lastrowid
         counts = Counts()
         try:
-            keys = [row[0] for row in conn.execute(OPEN_SUBJECTS)]
+            keys = {row[0] for row in conn.execute(OPEN_SUBJECTS)}
             _read(conn, settings, keys, counts)
             _search(conn, settings, keys, started, counts)
             counts.closed += len(subjects.hygiene(conn))

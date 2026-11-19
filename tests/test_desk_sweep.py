@@ -254,3 +254,15 @@ def test_old_runs_are_pruned(conn: sqlite3.Connection, db: Path) -> None:
     sweeping(db, FakeForge())
     assert [row[0] for row in conn.execute("SELECT started_at FROM sweeps")] != [LONG_AGO]
     assert conn.execute("SELECT count(*) FROM sweeps WHERE started_at = ?", (LONG_AGO,)).fetchone()[0] == 0
+
+
+def test_the_timer_runs_again_after_its_interval(db: Path, conn: sqlite3.Connection) -> None:
+    app = create_app(db)
+    app.state.sweeper = sweep.Sweeper(str(db), sweep.Settings(FakeForge(), "token", ORG, every=0.05))
+    with TestClient(app):
+        for _ in range(100):
+            runs = [row[0] for row in conn.execute("SELECT trigger FROM sweeps ORDER BY id")]
+            if "timer" in runs:
+                break
+            time.sleep(0.05)
+    assert runs[0] == "startup" and "timer" in runs
