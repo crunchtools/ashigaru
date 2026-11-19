@@ -11,9 +11,10 @@ startup, and as soon as an admin asks (POST /v1/sweep), one run:
    writer's, only when the search's author_association says OWNER or MEMBER or
    its author is trusted (ASHIGARU_FORGE_AUTHORS, the app's bot). Anyone
    else's is never stored: it is listed for Scott in the run's `outsiders`. A
-   writer's PR whose title or body names an open item, `(a676)`, becomes that
-   item's `pr`. The mark moves to this run's start once the search was read
-   whole, or to the last hit's time when the forge's cap cut it short;
+   writer's PR whose title or body names an open item in its repo, `(a676)`,
+   becomes that item's `pr`. The mark moves to this run's start once the search
+   was read whole, or to the last hit's time when the forge's cap cut it short,
+   but never past a hit it could not judge, which the next run reads again;
 3. settles every item against the subjects (subjects.hygiene).
 
 It never writes to the forge, and never re-judges an item it already has:
@@ -172,8 +173,19 @@ def _number(key: str) -> tuple[str, int] | None:
     return (repo, int(number)) if "/" in repo and number.isdigit() else None
 
 
+class Unanswered(ValueError):
+    """The forge could not say whether a hit's author may write: the hit waits for the next run."""
+
+
 def _why(error: Exception) -> str:
-    return f"HTTP {error.code}" if isinstance(error, urllib.error.HTTPError) else type(error).__name__
+    """What stopped a read, in a few words: the HTTP status, the unanswered question, or the error's type."""
+    match error:
+        case urllib.error.HTTPError():
+            return f"HTTP {error.code}"
+        case Unanswered():
+            return str(error)
+        case _:
+            return type(error).__name__
 
 
 def _found(conn: sqlite3.Connection, settings: Settings, hit: Found, counts: Counts) -> None:
@@ -192,8 +204,7 @@ def _found(conn: sqlite3.Connection, settings: Settings, hit: Found, counts: Cou
     named = LINK.findall(f"{item.title}\n{hit.body}") if member and item.kind == Kind.STORY else []
     asked = (item.repo or "", item.author or "")
     if asked in counts.unasked:
-        counts.errors.append(f"{item.subject_key}: may {item.author} write? {counts.unasked[asked]}")
-        return
+        raise Unanswered(f"may {item.author} write? {counts.unasked[asked]}")
     writes = item.author in settings.authors or (member and counts.writers.get(asked, False))
     with store.transaction(conn):
         if store.item_by_subject(conn, item.subject_key) is None:
@@ -201,7 +212,13 @@ def _found(conn: sqlite3.Connection, settings: Settings, hit: Found, counts: Cou
             counts.new += intake.upsert(conn, judged) is not None
         for work in named if writes else []:
             found = store.get_item(conn, work)
-            if found and not found["pr"] and found["state"] not in CLOSED and found["wrap"] != Wrap.CLEARED:
+            if (
+                found
+                and (found["repo"] or "").lower() == (item.repo or "").lower()
+                and not found["pr"]
+                and found["state"] not in CLOSED
+                and found["wrap"] != Wrap.CLEARED
+            ):
                 store.update_item(conn, work, {"pr": item.subject_key}, ACTOR, SOURCE)
         if store.item_by_subject(conn, item.subject_key) is not None or (named and writes):
             subjects.record(conn, item, SOURCE)
@@ -320,16 +337,20 @@ def _search(
         LOG.warning("sweep search stopped: %s", counts.errors[0], exc_info=failed)
         return
     _ask(conn, settings, [hit for hit in search.hits if hit.item.subject_key not in keys], counts)
+    deferred: list[str] = []
     for hit in search.hits:
         try:
             if hit.item.subject_key not in keys:
                 _found(conn, settings, hit, counts)
         except UNREADABLE as failed:
             counts.errors.append(f"{hit.item.subject_key}: {_why(failed)}")
+            deferred.append(hit.item.updated_at or "")
     reached = _stamp(started) if search.complete or not search.hits else search.hits[-1].item.updated_at
     if not search.complete:
         counts.errors.insert(0, "search: cut at the forge's cap; the next run reads on")
-    store.set_mark(conn, MARK, reached or _stamp(started), ACTOR)
+    held = min([reached or _stamp(started), *deferred])
+    if held:  # a hit with no time cannot be read from again: the mark stays
+        store.set_mark(conn, MARK, held, ACTOR)
 
 
 def run(db_path: str, settings: Settings, trigger: str) -> dict[str, Any]:

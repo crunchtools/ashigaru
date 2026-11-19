@@ -109,7 +109,8 @@ def _rows(rows: Sequence[dict[str, Any]], columns: Sequence[Column]) -> str:
 
 
 def swept(run: dict[str, Any] | None) -> str:
-    """The last sweep in a line: `swept 4m ago (31 subjects, 2 new, 2 closed)`, or its error."""
+    """The last sweep in a line: `swept 4m ago (31 subjects, 2 new, 2 closed)`, or its error, or
+    `sweep skipped 1m ago: run 41 holds the lease, …` when another run's lease kept it from running."""
     if not run:
         return "no sweep yet"
     if run.get("skipped"):

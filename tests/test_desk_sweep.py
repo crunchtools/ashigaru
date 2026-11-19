@@ -147,15 +147,17 @@ def test_the_search_queues_writers_and_only_lists_everyone_else(conn: sqlite3.Co
 def test_a_writers_pr_naming_an_item_becomes_its_pr(
     client: TestClient, keys: Keys, conn: sqlite3.Connection, db: Path
 ) -> None:
-    story = create(client, keys)
-    other = create(client, keys)
+    story = create(client, keys, repo="crunchtools/x")
+    other = create(client, keys, repo="crunchtools/x")
+    elsewhere = create(client, keys, repo="crunchtools/y")
     hits = [
-        Found(subject(9, closed=True, merged=True), "MEMBER", f"Does the thing ({story})"),
+        Found(subject(9, closed=True, merged=True), "MEMBER", f"Does the thing ({story}) ({elsewhere})"),
         Found(subject(10), "CONTRIBUTOR", f"Hijack ({other})"),
     ]
     sweeping(db, FakeForge(hits=hits))
     assert item(conn, story)["pr"] == "crunchtools/x#9" and item(conn, story)["state"] == "done"
     assert item(conn, other)["pr"] is None
+    assert item(conn, elsewhere)["pr"] is None, "a PR links only to work in its own repo"
 
 
 def test_a_subject_it_cannot_read_is_reported_and_the_rest_still_settle(
@@ -272,13 +274,20 @@ def test_a_permission_check_cut_short_is_that_subjects_error_and_the_search_goes
             return super().may_write(repo, account, token)
 
     hits = [
-        Found(subject(1, author="reader"), "MEMBER", ""),
+        Found(subject(1, author="reader", updated_at="2026-11-19T09:00:00Z"), "MEMBER", ""),
         Found(subject(2, author="fatherlinux"), "MEMBER", ""),
     ]
     run = sweeping(db, Cut(hits=hits))
     assert run["error"] == "crunchtools/x#1: may reader write? IncompleteRead"
     keys = {row["subject_key"] for row in store.list_items(conn)}
     assert keys == {"crunchtools/x#2"}, "the unjudged subject waits for the next run"
+    assert (store.get_mark(conn, sweep.MARK) or {})["value"] == "2026-11-19T09:00:00Z", (
+        "held at the deferred hit"
+    )
+    answered = FakeForge({2: hits[1].item}, hits, writers=frozenset({"fatherlinux", "reader"}))
+    sweeping(db, answered)
+    assert answered.searched[-1] == "2026-11-19T08:50:00Z", "the next run reads the deferred hit again"
+    assert {row["subject_key"] for row in store.list_items(conn)} == {"crunchtools/x#1", "crunchtools/x#2"}
 
 
 def test_a_body_cut_short_is_one_subjects_error_and_the_run_still_finishes(
