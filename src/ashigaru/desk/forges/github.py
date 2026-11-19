@@ -29,7 +29,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from ..model import Kind, Verdict, subject_key
-from .base import CIUpdate, Delivery, Found, IntakeItem, payload_get
+from .base import CIUpdate, Delivery, Found, IntakeItem, Search, payload_get
 
 SIGNATURE = "x-hub-signature-256"
 EVENT = "x-github-event"
@@ -463,9 +463,10 @@ class GitHub:
             raise ValueError("the pull request is not an object")
         return _item(pull, repo, Kind.STORY, "pull_request", merged_in=pull)
 
-    def updated(self, org: str, since: str, token: str) -> list[Found]:
-        """Every issue and PR in `org` changed at or after `since`, oldest change first, by search
-        (at most 1000). A hit whose repository is not owner/name is skipped. Read-only."""
+    def updated(self, org: str, since: str, token: str) -> Search:
+        """Every issue and PR in `org` changed at or after `since`, oldest change first, by search;
+        not `complete` when the search's cap of SEARCH_PAGES full pages cut it short. A hit whose
+        repository is not owner/name is skipped. Read-only."""
         if not (token and ACCOUNT.match(org)):
             raise ValueError("an org login and a token are needed")
         found: list[Found] = []
@@ -482,8 +483,8 @@ class GitHub:
             hits = _items(_get(f"{API}/search/issues?{query}", token, SWEEP_TIMEOUT), "items")
             found += [hit for thing in hits if (hit := _hit(thing)) is not None]
             if len(hits) < PAGE:
-                break
-        return found
+                return Search(found, complete=True)
+        return Search(found, complete=False)
 
     def required(self, repo: str, sha: str, branch: str | None, token: str) -> tuple[str, dict[str, Verdict]]:
         """The branch and each required check's verdict on `sha`; one nobody has reported is pending.

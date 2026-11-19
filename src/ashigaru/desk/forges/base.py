@@ -90,6 +90,15 @@ class Found:
 
 
 @dataclass(frozen=True)
+class Search:
+    """A sweep search's hits, oldest change first, and whether it read them all: False when the
+    forge's cap cut it short, so the caller reads on from the last hit."""
+
+    hits: list[Found]
+    complete: bool
+
+
+@dataclass(frozen=True)
 class Delivery:
     """A verified delivery, mapped. An event the adapter does not handle maps to neither."""
 
@@ -127,7 +136,7 @@ class Forge(Protocol):
         ValueError when the forge cannot say."""
         ...
 
-    def updated(self, org: str, since: str, token: str) -> list[Found]:
+    def updated(self, org: str, since: str, token: str) -> Search:
         """Every subject in `org` changed at or after `since` (a UTC time as ISO 8601 with a Z),
         oldest change first. Raises OSError or ValueError when the forge cannot say."""
         ...

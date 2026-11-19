@@ -156,10 +156,16 @@ by webhook or sweep; it used to be held.
 set, `serve` runs a sweep at startup, every `ASHIGARU_SWEEP_EVERY` seconds and
 on `POST /sweep`. A run re-reads every open item's subject and PR and settles
 them as a delivery does; searches the org for subjects updated since the
-`sweep-search` mark, queuing a writer's or a trusted author's and holding
-strangers; links a trusted author's PR whose title or body names `(a676)` as
-that item's `pr`; then settles everything. It never writes to GitHub. Runs are
-rows of the `sweeps` table (migration 9).
+`sweep-search` mark less 10 minutes (the search index lags), queuing only an
+OWNER's, MEMBER's or trusted author's new subject and listing anyone else's in
+the run's `outsiders` (shown under NEEDS YOU for a day) without storing it;
+links a writer's PR whose title or body names `(a676)` as that item's `pr`; then
+settles everything. The mark moves to the run's start once the search was read
+whole, or to the last hit's time when the forge's cap of 1000 cut it short. One
+run at a time holds the `sweep-lock` mark, abandoned after twice the interval; a
+subject it cannot read, for any reason, is one error and the run goes on, and
+its row always finishes. It never writes to GitHub. Runs are rows of the
+`sweeps` table (migration 9).
 
 **Settling.** Each delivery records the subject; one older by `updated_at`
 never overwrites, and merged is sticky. It then settles items whose

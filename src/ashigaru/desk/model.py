@@ -492,15 +492,24 @@ class BoardRow(BaseModel):
 
 
 class NeedsYou(BaseModel):
-    """Something only Scott can move: his blocked work, a subject held for approval, or a manual seat
-    idle on a question."""
+    """Something only Scott can move: his blocked work, a subject held for approval, a manual seat
+    idle on a question, or an outsider's subject the sweep found and did not store."""
 
-    why: Literal["blocked", "held", "waiting"]
+    why: Literal["blocked", "held", "waiting", "outsider"]
     work: str | None
     seat: str | None = None
-    mode: Mode
+    mode: Mode | None
     state: State | None
     text: str | None = Field(description="The blocker, the approval asked for, or the seat's last word.")
+
+
+class Outsider(BaseModel):
+    """A subject the sweep found by someone who is not a member or a trusted author: never stored as
+    an item, only listed for Scott."""
+
+    subject_key: str
+    ref: str | None = None
+    author: str | None = None
 
 
 class SweepRun(BaseModel):
@@ -515,6 +524,7 @@ class SweepRun(BaseModel):
     new: int = Field(description="Subjects queued (or held) that had no item.")
     closed: int = Field(description="Items it settled: closed, requeued or marked landed.")
     error: str | None = Field(description="The first thing it could not read, e.g. `search: HTTP 403`.")
+    outsiders: list[Outsider] = Field(default_factory=list, description="New subjects by outsiders: listed.")
 
 
 class Sweep(BaseModel):

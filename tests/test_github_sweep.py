@@ -122,7 +122,7 @@ def test_updated_fields_and_query(monkeypatch: pytest.MonkeyPatch) -> None:
         hit(4, pull_request={"merged_at": None}, draft=True),
     ]
     asked = install(monkeypatch, lambda url: {"items": items})
-    found = github.FORGE.updated("crunchtools", SINCE, "token")
+    found = github.FORGE.updated("crunchtools", SINCE, "token").hits
     assert len(asked) == 1
     sent = query(asked[0])
     assert sent["q"] == [f"org:crunchtools updated:>={SINCE}"]
@@ -146,15 +146,15 @@ def test_updated_paginates_until_short_page(monkeypatch: pytest.MonkeyPatch) -> 
         return {"items": [hit(page * 1000 + n) for n in range(count)]}
 
     asked = install(monkeypatch, route)
-    found = github.FORGE.updated("crunchtools", SINCE, "token")
+    search = github.FORGE.updated("crunchtools", SINCE, "token")
     assert [query(url)["page"][0] for url in asked] == [str(n) for n in range(1, LAST + 1)]
-    assert len(found) == PAGE * (LAST - 1) + SHORT
+    assert len(search.hits) == PAGE * (LAST - 1) + SHORT and search.complete
 
 
 def test_updated_stops_at_ten_pages(monkeypatch: pytest.MonkeyPatch) -> None:
     asked = install(monkeypatch, lambda url: {"items": [hit(n) for n in range(PAGE)]})
-    github.FORGE.updated("crunchtools", SINCE, "token")
-    assert len(asked) == github.SEARCH_PAGES
+    search = github.FORGE.updated("crunchtools", SINCE, "token")
+    assert len(asked) == github.SEARCH_PAGES and not search.complete
 
 
 def test_updated_skips_bad_repository_url(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -165,7 +165,7 @@ def test_updated_skips_bad_repository_url(monkeypatch: pytest.MonkeyPatch) -> No
         hit(4),
     ]
     install(monkeypatch, lambda url: {"items": items})
-    found = github.FORGE.updated("crunchtools", SINCE, "token")
+    found = github.FORGE.updated("crunchtools", SINCE, "token").hits
     assert [f.item.subject_key for f in found] == [f"{REPO}#4"]
 
 

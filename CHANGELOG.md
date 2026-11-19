@@ -10,7 +10,8 @@ All notable changes to this project are documented here. The format follows
 
 - Server-side sweep: with `ASHIGARU_FORGE_TOKEN_GITHUB` and
   `ASHIGARU_FORGE_ORG_GITHUB`, `serve` re-reads every open item's subject and
-  PR, searches the org for updated subjects, links a trusted author's PR that
+  PR, searches the org for updated subjects (queuing only members' and trusted
+  authors', listing others' as outsiders for Scott), links a writer's PR that
   names `(a676)`, and settles items, at startup, every `ASHIGARU_SWEEP_EVERY`
   seconds (600) and on request. It never writes to GitHub; the token now also
   needs issues and pull requests read access and the search API. Runs are

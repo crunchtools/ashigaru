@@ -462,6 +462,16 @@ def status(conn: sqlite3.Connection) -> dict[str, Any]:
         if row["owner"] and row["turn"] == Turn.IDLE and row["waiting_on"]
     ]
     needs += [_needs(store.decode(item)) for item in conn.execute(NEEDS_YOU, {"limit": QUEUE_LIMIT})]
+    needs += [
+        {
+            "why": "outsider",
+            "work": None,
+            "mode": None,
+            "state": None,
+            "text": f"{found['ref'] or found['subject_key']} by {found['author']}: not queued",
+        }
+        for found in sweep.outsiders(conn)
+    ]
     return {
         "busy": busy,
         "free": [row["name"] for row in idle if not row["missing"]],

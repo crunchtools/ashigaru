@@ -1962,10 +1962,17 @@
         "type": "string"
       },
       "NeedsYou": {
-        "description": "Something only Scott can move: his blocked work, a subject held for approval, or a manual seat\nidle on a question.",
+        "description": "Something only Scott can move: his blocked work, a subject held for approval, a manual seat\nidle on a question, or an outsider's subject the sweep found and did not store.",
         "properties": {
           "mode": {
-            "$ref": "#/components/schemas/Mode"
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Mode"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "seat": {
             "anyOf": [
@@ -2004,7 +2011,8 @@
             "enum": [
               "blocked",
               "held",
-              "waiting"
+              "waiting",
+              "outsider"
             ],
             "title": "Why",
             "type": "string"
@@ -2084,6 +2092,42 @@
           "open"
         ],
         "title": "OutcomeRow",
+        "type": "object"
+      },
+      "Outsider": {
+        "description": "A subject the sweep found by someone who is not a member or a trusted author: never stored as\nan item, only listed for Scott.",
+        "properties": {
+          "author": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Author"
+          },
+          "ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ref"
+          },
+          "subject_key": {
+            "title": "Subject Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "subject_key"
+        ],
+        "title": "Outsider",
         "type": "object"
       },
       "Problem": {
@@ -3274,6 +3318,14 @@
             "description": "Subjects queued (or held) that had no item.",
             "title": "New",
             "type": "integer"
+          },
+          "outsiders": {
+            "description": "New subjects by outsiders: listed.",
+            "items": {
+              "$ref": "#/components/schemas/Outsider"
+            },
+            "title": "Outsiders",
+            "type": "array"
           },
           "started_at": {
             "title": "Started At",

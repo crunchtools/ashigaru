@@ -220,7 +220,8 @@ MIGRATIONS: tuple[str, ...] = (
         subjects INTEGER NOT NULL DEFAULT 0,
         new INTEGER NOT NULL DEFAULT 0,
         closed INTEGER NOT NULL DEFAULT 0,
-        error TEXT
+        error TEXT,
+        outsiders TEXT NOT NULL DEFAULT '[]'
     );
     """,
 )

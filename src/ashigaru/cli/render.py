@@ -234,7 +234,7 @@ BOARD: list[Column] = [
 ]
 NEEDS: list[Column] = [
     ("WORK", lambda n: n.get("work")),
-    ("MODE", lambda n: n["mode"]),
+    ("MODE", lambda n: n.get("mode")),
     ("WHY", lambda n: n["why"] if n["why"] != "blocked" else n["state"]),
     ("TEXT", lambda n: Whole(f"{n['seat']}: {n['text']}" if n.get("seat") else n.get("text") or "")),
 ]

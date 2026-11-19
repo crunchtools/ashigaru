@@ -1,27 +1,30 @@
 """The sweep: the Desk reads the forge back on a timer, records what it says, and settles items."""
 
 import dataclasses
+import http.client
 import sqlite3
 import time
 import urllib.error
+from datetime import UTC, datetime, timedelta
 from email.message import Message
 from http.client import CONFLICT, CREATED, FORBIDDEN, OK
 from pathlib import Path
 from typing import Any
 
+import pytest
 from conftest import Keys
 from fastapi.testclient import TestClient
 
-from ashigaru.desk import store, sweep
+from ashigaru.desk import dispatch, store, sweep
 from ashigaru.desk.api import create_app
-from ashigaru.desk.forges import Found, IntakeItem
+from ashigaru.desk.forges import Found, IntakeItem, Search
 from ashigaru.desk.model import Kind
 
 JOSUI, SEAT = "Josui Prime", "Exedore 1 - Max"
 ORG = "crunchtools"
 HOUR = 3600.0
-FOUR_KINDS = 3
-"""Of the four authors the search found, three are queued: the member, the stranger (held) and the app."""
+WRITERS = 2
+"""Of the four authors the search found, two are queued: the member and the app's bot."""
 
 
 def subject(number: int, kind: Kind = Kind.STORY, **fields: Any) -> IntakeItem:
@@ -45,20 +48,22 @@ class FakeForge:
     hits: list[Found] = dataclasses.field(default_factory=list)
     searched: list[str] = dataclasses.field(default_factory=list)
     refuse: dict[int, Exception] = dataclasses.field(default_factory=dict)
-    name: str = "github"
+    complete: bool = True
 
     def subject(self, repo: str, number: int, token: str) -> IntakeItem:
         if number in self.refuse:
             raise self.refuse[number]
         return self.subjects[number]
 
-    def updated(self, org: str, since: str, token: str) -> list[Found]:
+    def updated(self, org: str, since: str, token: str) -> Search:
         self.searched.append(since)
-        return self.hits
+        return Search(self.hits, self.complete)
 
 
 def sweeping(db: Path, forge: FakeForge, authors: frozenset[str] = frozenset()) -> dict[str, Any]:
-    return sweep.run(str(db), sweep.Settings(forge, "token", ORG, authors), "request")
+    run = sweep.run(str(db), sweep.Settings(forge, "token", ORG, authors), "request")
+    assert run is not None, "another run held the lock"
+    return run
 
 
 def create(client: TestClient, keys: Keys, **body: Any) -> str:
@@ -84,9 +89,7 @@ def test_a_missed_merge_is_caught_and_settles_the_item(
     assert (store.get_mark(conn, sweep.MARK) or {})["value"] == run["started_at"]
 
 
-def test_the_search_queues_writers_holds_strangers_and_drops_other_bots(
-    conn: sqlite3.Connection, db: Path
-) -> None:
+def test_the_search_queues_writers_and_only_lists_everyone_else(conn: sqlite3.Connection, db: Path) -> None:
     hits = [
         Found(subject(1, lane_hint="vertex"), "MEMBER", ""),
         Found(subject(2, author="outsider"), "CONTRIBUTOR", ""),
@@ -94,12 +97,19 @@ def test_the_search_queues_writers_holds_strangers_and_drops_other_bots(
         Found(subject(4, author="ashigaru-crunchtools[bot]"), "NONE", ""),
     ]
     run = sweeping(db, FakeForge(hits=hits), frozenset({"ashigaru-crunchtools[bot]"}))
-    assert run["new"] == FOUR_KINDS
+    assert run["new"] == WRITERS
     rows = {row["subject_key"]: row for row in store.list_items(conn)}
-    member, outsider = rows["crunchtools/x#1"], rows["crunchtools/x#2"]
+    assert set(rows) == {"crunchtools/x#1", "crunchtools/x#4"}
+    member = rows["crunchtools/x#1"]
     assert (member["mode"], member["lane"], member["extra"]["trusted"]) == ("auto", "vertex", True)
-    assert (outsider["mode"], outsider["lane"], outsider["extra"]["trusted"]) == ("manual", None, False)
-    assert "crunchtools/x#3" not in rows and rows["crunchtools/x#4"]["mode"] == "auto"
+    assert [found["author"] for found in run["outsiders"]] == ["outsider", "dependabot[bot]"]
+    stored = {row[0] for row in conn.execute("SELECT subject_key FROM subjects")}
+    assert stored == {"crunchtools/x#1", "crunchtools/x#4"}
+    listed = [need["text"] for need in dispatch.status(conn)["needs_you"] if need["why"] == "outsider"]
+    assert listed == [
+        "https://github.com/crunchtools/x/pull/2 by outsider: not queued",
+        "https://github.com/crunchtools/x/pull/3 by dependabot[bot]: not queued",
+    ]
 
 
 def test_a_writers_pr_naming_an_item_becomes_its_pr(
@@ -132,7 +142,7 @@ def test_a_search_that_fails_leaves_the_mark_for_the_next_run(conn: sqlite3.Conn
     store.set_mark(conn, sweep.MARK, "2026-11-19T09:00:00Z", JOSUI)
 
     class Down(FakeForge):
-        def updated(self, org: str, since: str, token: str) -> list[Found]:
+        def updated(self, org: str, since: str, token: str) -> Search:
             raise urllib.error.HTTPError("u", 403, "Forbidden", Message(), None)
 
     run = sweeping(db, Down())
@@ -140,7 +150,7 @@ def test_a_search_that_fails_leaves_the_mark_for_the_next_run(conn: sqlite3.Conn
     assert (store.get_mark(conn, sweep.MARK) or {})["value"] == "2026-11-19T09:00:00Z"
     forge = FakeForge()
     sweeping(db, forge)
-    assert forge.searched == ["2026-11-19T09:00:00Z"]
+    assert forge.searched == ["2026-11-19T08:50:00Z"], "the search reaches back OVERLAP past the mark"
 
 
 def test_sweep_routes_say_whether_a_timer_runs_and_only_an_admin_starts_one(
@@ -167,3 +177,50 @@ def test_the_timer_runs_at_startup_and_on_request(db: Path, keys: Keys, conn: sq
         state = running.get("/v1/sweep", headers=keys[SEAT]).json()
         assert state["configured"] and state["every"] == HOUR and state["last"]["trigger"] == "request"
         assert running.get("/v1/status", headers=keys[SEAT]).json()["sweep"]["trigger"] == "request"
+
+
+def test_a_run_holding_the_lock_keeps_others_out_until_it_is_abandoned(
+    conn: sqlite3.Connection, db: Path
+) -> None:
+    store.set_mark(conn, sweep.LOCK, sweep._stamp(datetime.now(UTC)), JOSUI)
+    settings = sweep.Settings(FakeForge(), "token", ORG, every=HOUR)
+    assert sweep.run(str(db), settings, "timer") is None
+    store.set_mark(conn, sweep.LOCK, sweep._stamp(datetime.now(UTC) - timedelta(hours=3)), JOSUI)
+    assert sweep.run(str(db), settings, "timer") is not None
+    assert store.get_mark(conn, sweep.LOCK) is None
+
+
+def test_a_body_cut_short_is_one_subjects_error_and_the_run_still_finishes(
+    client: TestClient, keys: Keys, conn: sqlite3.Connection, db: Path
+) -> None:
+    create(client, keys, subject_key="crunchtools/x#6")
+    merged = create(client, keys, subject_key="crunchtools/x#7")
+    forge = FakeForge(
+        subjects={7: subject(7, closed=True, merged=True)}, refuse={6: http.client.IncompleteRead(b"")}
+    )
+    run = sweeping(db, forge)
+    assert run["finished_at"] and run["error"] == "crunchtools/x#6: IncompleteRead"
+    assert item(conn, merged)["state"] == "done"
+
+
+def test_an_unexpected_failure_still_finishes_the_row_and_frees_the_lock(
+    conn: sqlite3.Connection, db: Path
+) -> None:
+    class Broken(FakeForge):
+        def updated(self, org: str, since: str, token: str) -> Search:
+            raise TypeError("a bug")
+
+    with pytest.raises(TypeError):
+        sweep.run(str(db), sweep.Settings(Broken(), "token", ORG), "timer")
+    row = sweep.last(conn) or {}
+    assert row["finished_at"] and row["error"] == "stopped: TypeError"
+    assert store.get_mark(conn, sweep.LOCK) is None
+
+
+def test_a_search_cut_at_the_cap_moves_the_mark_only_to_its_last_hit(
+    conn: sqlite3.Connection, db: Path
+) -> None:
+    hits = [Found(subject(1, updated_at="2026-11-19T07:00:00Z"), "MEMBER", "")]
+    run = sweeping(db, FakeForge(hits=hits, complete=False))
+    assert run["error"].startswith("search: cut at the forge's cap")
+    assert (store.get_mark(conn, sweep.MARK) or {})["value"] == "2026-11-19T07:00:00Z"
