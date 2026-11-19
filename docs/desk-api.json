@@ -3327,6 +3327,18 @@
             "title": "Outsiders",
             "type": "array"
           },
+          "skipped": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Why it did not run: another run's live lease, e.g. `run 41 holds the lease`.",
+            "title": "Skipped"
+          },
           "started_at": {
             "title": "Started At",
             "type": "string"

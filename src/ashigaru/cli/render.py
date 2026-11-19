@@ -112,6 +112,8 @@ def swept(run: dict[str, Any] | None) -> str:
     """The last sweep in a line: `swept 4m ago (31 subjects, 2 new, 2 closed)`, or its error."""
     if not run:
         return "no sweep yet"
+    if run.get("skipped"):
+        return f"sweep skipped {seen(run['finished_at'])}: {run['skipped']}"
     if not run.get("finished_at"):
         return f"sweep running for {age(run['started_at'])}"
     said = f"swept {seen(run['finished_at'])}"

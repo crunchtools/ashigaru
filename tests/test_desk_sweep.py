@@ -27,6 +27,8 @@ ORG = "crunchtools"
 HOUR = 3600.0
 LONG_AGO = "2020-01-01T00:00:00Z"
 TWO_MINUTES = 120.0
+LAPSED_AT = 10
+"""The tick at which the test lets the stale lease lapse."""
 WRITERS = 2
 """Of the four authors the search found, two are queued: the member and the app's bot."""
 
@@ -70,7 +72,7 @@ class FakeForge:
 
 def sweeping(db: Path, forge: FakeForge, authors: frozenset[str] = frozenset()) -> dict[str, Any]:
     run = sweep.run(str(db), sweep.Settings(forge, "token", ORG, authors), "request")
-    assert run is not None, "another run held the lock"
+    assert run["skipped"] is None, "another run held the lease"
     return run
 
 
@@ -84,6 +86,28 @@ def item(conn: sqlite3.Connection, item_id: str) -> dict[str, Any]:
     found = store.get_item(conn, item_id)
     assert found
     return found
+
+
+def test_subjects_are_read_in_bounded_batches_and_all_are_read(
+    client: TestClient, keys: Keys, conn: sqlite3.Connection, db: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(sweep, "READ_BATCH", 2)
+    numbers = range(1, 6)
+    for number in numbers:
+        create(client, keys, subject_key=f"crunchtools/x#{number}")
+    run = sweeping(db, FakeForge(subjects={number: subject(number) for number in numbers}))
+    assert run["subjects"] == len(numbers) and run["error"] is None
+
+
+def test_asking_who_may_write_looks_the_hits_up_in_one_query(conn: sqlite3.Connection) -> None:
+    hits = [Found(subject(number, author=f"member{number}"), "MEMBER", "") for number in range(1, 6)]
+    queries: list[str] = []
+    conn.set_trace_callback(queries.append)
+    counts = sweep.Counts()
+    sweep._ask(conn, sweep.Settings(FakeForge(), "token", ORG), hits, counts)
+    conn.set_trace_callback(None)
+    assert len([query for query in queries if "FROM items" in query]) == 1
+    assert len(counts.writers) == len(hits)
 
 
 def test_a_missed_merge_is_caught_and_settles_the_item(
@@ -187,15 +211,74 @@ def test_the_timer_runs_at_startup_and_on_request(db: Path, keys: Keys, conn: sq
         assert running.get("/v1/status", headers=keys[SEAT]).json()["sweep"]["trigger"] == "request"
 
 
-def test_a_run_holding_the_lock_keeps_others_out_until_it_is_abandoned(
+def test_a_live_lease_skips_a_run_with_a_row_and_a_killed_runs_lapses_in_a_lease(
     conn: sqlite3.Connection, db: Path
 ) -> None:
-    store.set_mark(conn, sweep.LOCK, sweep._stamp(datetime.now(UTC)), JOSUI)
     settings = sweep.Settings(FakeForge(), "token", ORG, every=HOUR)
-    assert sweep.run(str(db), settings, "timer") is None
-    store.set_mark(conn, sweep.LOCK, sweep._stamp(datetime.now(UTC) - timedelta(hours=3)), JOSUI)
-    assert sweep.run(str(db), settings, "timer") is not None
+    store.set_mark(conn, sweep.LOCK, f"{sweep._beat(datetime.now(UTC))} 41", JOSUI)
+    skipped = sweep.run(str(db), settings, "startup")
+    assert skipped["skipped"].startswith("run 41 holds the lease") and skipped["finished_at"]
+    assert sweep.last(conn) == skipped
+    killed = datetime.now(UTC) - timedelta(seconds=sweep.LEASE + 1)
+    store.set_mark(conn, sweep.LOCK, f"{sweep._beat(killed)} 41", JOSUI)
+    ran = sweep.run(str(db), settings, "startup")
+    assert ran["skipped"] is None and ran["error"] is None
     assert store.get_mark(conn, sweep.LOCK) is None
+
+
+def test_a_run_renews_its_lease_while_it_works(conn: sqlite3.Connection, db: Path) -> None:
+    settings = sweep.Settings(FakeForge(), "token", ORG, every=HOUR, lease=0.2)
+    others: list[dict[str, Any]] = []
+
+    class Slow(FakeForge):
+        def updated(self, org: str, since: str, token: str) -> Search:
+            time.sleep(0.5)
+            others.append(sweep.run(str(db), settings, "request"))
+            return Search([], True)
+
+    ran = sweep.run(str(db), dataclasses.replace(settings, forge=Slow()), "timer")
+    assert others[0]["skipped"].startswith(f"run {ran['id']} holds the lease"), "renewed past one lease"
+    assert store.get_mark(conn, sweep.LOCK) is None, "released at the end"
+
+
+def test_the_timer_retries_a_skipped_startup_once_the_lease_could_lapse(
+    db: Path, conn: sqlite3.Connection
+) -> None:
+    store.set_mark(conn, sweep.LOCK, f"{sweep._beat(datetime.now(UTC))} 41", JOSUI)
+    app = create_app(db)
+    app.state.sweeper = sweep.Sweeper(
+        str(db), sweep.Settings(FakeForge(), "token", ORG, every=HOUR, lease=0.05)
+    )
+    with TestClient(app):
+        for tick in range(100):
+            runs = [
+                tuple(row) for row in conn.execute("SELECT trigger, skipped IS NULL FROM sweeps ORDER BY id")
+            ]
+            if len(runs) > 1:
+                break
+            if tick == LAPSED_AT:
+                store.set_mark(conn, sweep.LOCK, f"{LONG_AGO} 41", JOSUI)
+            time.sleep(0.05)
+    assert runs[:2] == [("startup", 0), ("timer", 1)]
+
+
+def test_a_permission_check_cut_short_is_that_subjects_error_and_the_search_goes_on(
+    conn: sqlite3.Connection, db: Path
+) -> None:
+    class Cut(FakeForge):
+        def may_write(self, repo: str, account: str, token: str) -> bool:
+            if account == "reader":
+                raise http.client.IncompleteRead(b"")
+            return super().may_write(repo, account, token)
+
+    hits = [
+        Found(subject(1, author="reader"), "MEMBER", ""),
+        Found(subject(2, author="fatherlinux"), "MEMBER", ""),
+    ]
+    run = sweeping(db, Cut(hits=hits))
+    assert run["error"] == "crunchtools/x#1: may reader write? IncompleteRead"
+    keys = {row["subject_key"] for row in store.list_items(conn)}
+    assert keys == {"crunchtools/x#2"}, "the unjudged subject waits for the next run"
 
 
 def test_a_body_cut_short_is_one_subjects_error_and_the_run_still_finishes(
@@ -280,8 +363,8 @@ def test_two_runs_racing_for_the_lock_make_one_run(db: Path, conn: sqlite3.Conne
     settings = sweep.Settings(Slow(), "token", ORG, every=HOUR)
     with ThreadPoolExecutor(2) as pool:
         runs = list(pool.map(lambda trigger: sweep.run(str(db), settings, trigger), ["timer", "request"]))
-    assert sorted(run is None for run in runs) == [False, True]
-    assert conn.execute("SELECT count(*) FROM sweeps").fetchone()[0] == 1
+    assert sorted(bool(run["skipped"]) for run in runs) == [False, True]
+    assert conn.execute("SELECT count(*) FROM sweeps WHERE skipped IS NULL").fetchone()[0] == 1
 
 
 def test_serve_sweeps_only_with_a_token_and_an_org(monkeypatch: pytest.MonkeyPatch, db: Path) -> None:

@@ -525,6 +525,10 @@ class SweepRun(BaseModel):
     closed: int = Field(description="Items it settled: closed, requeued or marked landed.")
     error: str | None = Field(description="The first thing it could not read, e.g. `search: HTTP 403`.")
     outsiders: list[Outsider] = Field(default_factory=list, description="New subjects by outsiders: listed.")
+    skipped: str | None = Field(
+        default=None,
+        description="Why it did not run: another run's live lease, e.g. `run 41 holds the lease`.",
+    )
 
 
 class Sweep(BaseModel):

@@ -17,22 +17,28 @@ startup, and as soon as an admin asks (POST /v1/sweep), one run:
 3. settles every item against the subjects (subjects.hygiene).
 
 It never writes to the forge, and never re-judges an item it already has:
-trust is intake's, from signed deliveries. One run at a time: a run takes the
-`sweep-lock` mark, and one older than twice the interval was abandoned. A
-subject it cannot read, for any reason, is reported and skipped; the run's row
+trust is intake's, from signed deliveries. One run at a time: a run holds the
+`sweep-lock` mark as a LEASE it renews, so a run killed mid-way frees it within
+a lease; a run that finds a live lease writes a skipped row saying whose, and the
+timer tries again once that lease could lapse. A subject it cannot read, or
+whose author's write access the forge cannot say, is reported and skipped; the run's row
 always finishes, with its counts, outsiders and first error, and the board
 shows it. The forge calls run outside any transaction, so no write lock waits
 on the network.
 """
 
 import asyncio
+import contextlib
 import dataclasses
 import http.client
+import itertools
 import json
 import logging
 import re
 import sqlite3
+import threading
 import urllib.error
+from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 from typing import Any, Protocol
@@ -55,10 +61,15 @@ OUTSIDERS_SHOWN = 50
 """The most outsiders NEEDS YOU lists; a run keeps at most this many too."""
 FETCHERS = 8
 """Subjects read from the forge at once."""
+READ_BATCH = 4 * FETCHERS
+"""Subjects queued for reading at once."""
 KEPT = timedelta(days=30)
 """How long a run's row is kept."""
 LOCK = "sweep-lock"
-"""Held by the run under way, as its start time; abandoned after twice the interval."""
+"""Held by the run under way as a lease, `<heartbeat> <run id>`: the run renews it every quarter
+lease, so one killed mid-run (podman stops with SIGKILL after 10 s) frees it within a lease."""
+LEASE = 60.0
+"""Seconds a lease lasts unrenewed."""
 WRITERS = frozenset({"OWNER", "MEMBER"})
 LINK = re.compile(r"\((a\d+)\)")
 ACTOR = "desk"
@@ -70,6 +81,9 @@ OPEN_SUBJECTS = f"""
     UNION SELECT pr FROM items WHERE {store.OPEN} AND pr IS NOT NULL
 """
 START = "INSERT INTO sweeps (trigger, started_at) VALUES (?, ?)"
+SKIP = "INSERT INTO sweeps (trigger, started_at, finished_at, skipped) VALUES (?, ?, ?, ?)"
+RENEW = "UPDATE marks SET value = ?, updated_at = ? WHERE name = ? AND value LIKE ?"
+RELEASE = "DELETE FROM marks WHERE name = ? AND value LIKE ?"
 FINISH = """
     UPDATE sweeps SET finished_at = ?, subjects = ?, new = ?, closed = ?, error = ?, outsiders = ?
     WHERE id = ?
@@ -77,6 +91,8 @@ FINISH = """
 UNREADABLE = (OSError, ValueError, http.client.HTTPException)
 """What a forge call raises when it cannot say: the network, a bad answer, a body cut short."""
 LAST = "SELECT * FROM sweeps ORDER BY id DESC LIMIT 1"
+RUN = "SELECT * FROM sweeps WHERE id = ?"
+KNOWN = "SELECT subject_key FROM items WHERE subject_key IN (SELECT value FROM json_each(?))"
 
 
 class Reader(Protocol):
@@ -99,6 +115,7 @@ class Settings:
     org: str
     authors: frozenset[str] = frozenset()
     every: float = EVERY
+    lease: float = LEASE
 
 
 @dataclasses.dataclass
@@ -110,6 +127,8 @@ class Counts:
     errors: list[str] = dataclasses.field(default_factory=list)
     writers: dict[tuple[str, str], bool] = dataclasses.field(default_factory=dict)
     """The forge's answer for each (repo, author) asked this run."""
+    unasked: dict[tuple[str, str], str] = dataclasses.field(default_factory=dict)
+    """Why the forge could not answer for a (repo, author): its hits wait for the next run."""
 
     def error(self) -> str | None:
         more = f" (and {len(self.errors) - 1} more)" if len(self.errors) > 1 else ""
@@ -133,10 +152,18 @@ def outsiders(conn: sqlite3.Connection) -> list[dict[str, Any]]:
     return [dict(row) for row in conn.execute(OUTSIDERS, {"since": since, "limit": OUTSIDERS_SHOWN})]
 
 
+def _decoded(row: sqlite3.Row) -> dict[str, Any]:
+    return {**dict(row), "outsiders": json.loads(row["outsiders"])}
+
+
 def last(conn: sqlite3.Connection) -> dict[str, Any] | None:
     """The newest run, finished or not."""
     row = conn.execute(LAST).fetchone()
-    return {**dict(row), "outsiders": json.loads(row["outsiders"])} if row else None
+    return _decoded(row) if row else None
+
+
+def _run(conn: sqlite3.Connection, run_id: int) -> dict[str, Any]:
+    return _decoded(conn.execute(RUN, (run_id,)).fetchone())
 
 
 def _number(key: str) -> tuple[str, int] | None:
@@ -164,6 +191,9 @@ def _found(conn: sqlite3.Connection, settings: Settings, hit: Found, counts: Cou
         return
     named = LINK.findall(f"{item.title}\n{hit.body}") if member and item.kind == Kind.STORY else []
     asked = (item.repo or "", item.author or "")
+    if asked in counts.unasked:
+        counts.errors.append(f"{item.subject_key}: may {item.author} write? {counts.unasked[asked]}")
+        return
     writes = item.author in settings.authors or (member and counts.writers.get(asked, False))
     with store.transaction(conn):
         if store.item_by_subject(conn, item.subject_key) is None:
@@ -183,42 +213,74 @@ def _stamp(when: datetime) -> str:
     return when.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+def _beat(when: datetime) -> str:
+    """A lease's time, to the microsecond: a lease is shorter than a run."""
+    return when.strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+
+
 def _since(conn: sqlite3.Connection, started: datetime) -> str:
     mark = store.get_mark(conn, MARK)
     since = datetime.fromisoformat(mark["value"]) - OVERLAP if mark else started - FIRST
     return _stamp(since)
 
 
-def _locked(conn: sqlite3.Connection, settings: Settings, started: datetime) -> bool:
-    """Take the lock unless a run that is not abandoned holds it."""
+def _lease(conn: sqlite3.Connection, settings: Settings, trigger: str, started: datetime) -> tuple[int, bool]:
+    """Start a run's row and take the lease for it: (its id, True). When a live lease is held, the
+    row is a skipped one saying by which run: (its id, False)."""
+    stamp = _stamp(started)
     with store.transaction(conn):
         held = store.get_mark(conn, LOCK)
-        alive = _stamp(started - timedelta(seconds=2 * settings.every))
-        if held and held["value"] > alive:
-            return True
-        store.set_mark(conn, LOCK, _stamp(started), ACTOR)
-    return False
+        beat, _, holder = held["value"].partition(" ") if held else ("", "", "")
+        if beat > _beat(started - timedelta(seconds=settings.lease)):
+            why = f"run {holder or '?'} holds the lease, renewed {beat}"
+            return int(conn.execute(SKIP, (trigger, stamp, stamp, why)).lastrowid or 0), False
+        run_id = int(conn.execute(START, (trigger, stamp)).lastrowid or 0)
+        store.set_mark(conn, LOCK, f"{_beat(started)} {run_id}", ACTOR)
+    return run_id, True
+
+
+@contextlib.contextmanager
+def _renewing(db_path: str, settings: Settings, run_id: int) -> Iterator[None]:
+    """Renew run_id's lease every quarter lease, on its own connection, until the run ends."""
+    done = threading.Event()
+
+    def renew() -> None:
+        conn = store.connect(db_path)
+        try:
+            while not done.wait(settings.lease / 4):
+                beat = f"{_beat(datetime.now(UTC))} {run_id}"
+                conn.execute(RENEW, (beat, store.now(), LOCK, f"% {run_id}"))
+        finally:
+            conn.close()
+
+    renewer = threading.Thread(target=renew, name=f"sweep-lease-{run_id}", daemon=True)
+    renewer.start()
+    try:
+        yield
+    finally:
+        done.set()
+        renewer.join()
 
 
 def _read(conn: sqlite3.Connection, settings: Settings, keys: set[str], counts: Counts) -> None:
-    """Each open item's subject, read back FETCHERS at a time, then recorded and settled in key order;
-    one it cannot read is an error."""
-    wanted = {key: found for key in sorted(keys) if (found := _number(key))}
+    """Each open item's subject, read back FETCHERS at a time in batches of READ_BATCH, so the futures
+    queued stay bounded however many items are open, then recorded and settled in key order; one it
+    cannot read is an error."""
+    wanted = [(key, found) for key in sorted(keys) if (found := _number(key))]
     with ThreadPoolExecutor(FETCHERS) as pool:
-        reads = {
-            key: pool.submit(settings.forge.subject, *found, settings.token) for key, found in wanted.items()
-        }
-        for key, read in reads.items():
-            try:
-                item = read.result()
-            except UNREADABLE as failed:
-                counts.errors.append(f"{key}: {_why(failed)}")
-                LOG.warning("sweep could not read %s: %s", key, counts.errors[-1], exc_info=failed)
-                continue
-            with store.transaction(conn):
-                if subjects.record(conn, item, SOURCE):
-                    counts.closed += len(subjects.settle(conn, item.subject_key))
-                counts.subjects += 1
+        for batch in itertools.batched(wanted, READ_BATCH):
+            reads = {key: pool.submit(settings.forge.subject, *found, settings.token) for key, found in batch}
+            for key, read in reads.items():
+                try:
+                    item = read.result()
+                except UNREADABLE as failed:
+                    counts.errors.append(f"{key}: {_why(failed)}")
+                    LOG.warning("sweep could not read %s: %s", key, counts.errors[-1], exc_info=failed)
+                    continue
+                with store.transaction(conn):
+                    if subjects.record(conn, item, SOURCE):
+                        counts.closed += len(subjects.settle(conn, item.subject_key))
+                    counts.subjects += 1
 
 
 def _ask(conn: sqlite3.Connection, settings: Settings, hits: list[Found], counts: Counts) -> None:
@@ -226,6 +288,8 @@ def _ask(conn: sqlite3.Connection, settings: Settings, hits: list[Found], counts
     decision (a new subject, or a PR naming an item) may write to its repo, once per (repo, author),
     so `_found` reads the answers from `counts.writers`. A failed check is a no, as the forge's own
     permission check makes it. Org members are few, so this is a handful of calls."""
+    asked = json.dumps(sorted({hit.item.subject_key for hit in hits}))
+    known = {row[0] for row in conn.execute(KNOWN, (asked,))}
     pairs = {
         (hit.item.repo, hit.item.author)
         for hit in hits
@@ -233,14 +297,17 @@ def _ask(conn: sqlite3.Connection, settings: Settings, hits: list[Found], counts
         and hit.item.repo
         and hit.item.author
         and hit.item.author not in settings.authors
-        and (
-            LINK.search(f"{hit.item.title}\n{hit.body}")
-            or store.item_by_subject(conn, hit.item.subject_key) is None
-        )
+        and (LINK.search(f"{hit.item.title}\n{hit.body}") or hit.item.subject_key not in known)
     }
     with ThreadPoolExecutor(FETCHERS) as pool:
-        answers = {pair: pool.submit(settings.forge.may_write, *pair, settings.token) for pair in pairs}
-    counts.writers.update({pair: answer.result() for pair, answer in answers.items()})
+        answers = {
+            pair: pool.submit(settings.forge.may_write, *pair, settings.token) for pair in sorted(pairs)
+        }
+    for pair, answer in answers.items():
+        try:
+            counts.writers[pair] = answer.result()
+        except UNREADABLE as failed:
+            counts.unasked[pair] = _why(failed)
 
 
 def _search(
@@ -265,21 +332,22 @@ def _search(
     store.set_mark(conn, MARK, reached or _stamp(started), ACTOR)
 
 
-def run(db_path: str, settings: Settings, trigger: str) -> dict[str, Any] | None:
-    """One sweep, start to finish, on its own connection. Returns its `sweeps` row, or None when
-    another run holds the lock."""
+def run(db_path: str, settings: Settings, trigger: str) -> dict[str, Any]:
+    """One sweep, start to finish, on its own connection, holding the lease. Returns its `sweeps`
+    row; a skipped one, saying why, when another run's lease is live."""
     conn = store.connect(db_path)
     started = datetime.now(UTC)
     try:
-        if _locked(conn, settings, started):
-            return None
-        run_id = conn.execute(START, (trigger, _stamp(started))).lastrowid
+        run_id, holding = _lease(conn, settings, trigger, started)
+        if not holding:
+            return _run(conn, run_id)
         counts = Counts()
         try:
-            keys = {row[0] for row in conn.execute(OPEN_SUBJECTS)}
-            _read(conn, settings, keys, counts)
-            _search(conn, settings, keys, started, counts)
-            counts.closed += len(subjects.hygiene(conn))
+            with _renewing(db_path, settings, run_id):
+                keys = {row[0] for row in conn.execute(OPEN_SUBJECTS)}
+                _read(conn, settings, keys, counts)
+                _search(conn, settings, keys, started, counts)
+                counts.closed += len(subjects.hygiene(conn))
         except Exception as failed:  # the row still finishes, saying why it stopped
             counts.errors.insert(0, f"stopped: {_why(failed)}")
             raise
@@ -295,9 +363,9 @@ def run(db_path: str, settings: Settings, trigger: str) -> dict[str, Any] | None
                 run_id,
             )
             conn.execute(FINISH, finish)
-            conn.execute("DELETE FROM marks WHERE name = ?", (LOCK,))
+            conn.execute(RELEASE, (LOCK, f"% {run_id}"))
             conn.execute("DELETE FROM sweeps WHERE started_at < ?", (_stamp(started - KEPT),))
-        return last(conn)
+        return _run(conn, run_id)
     finally:
         conn.close()
 
@@ -319,14 +387,17 @@ class Sweeper:
         trigger = "startup"
         while True:
             self.running = True
+            wait = self.settings.every
             try:
-                await run_in_threadpool(run, self.db_path, self.settings, trigger)
+                done = await run_in_threadpool(run, self.db_path, self.settings, trigger)
+                if done.get("skipped"):  # a dead run's lease: try again once it lapses
+                    wait = min(wait, self.settings.lease)
             except Exception:  # the timer outlives any one run
                 LOG.exception("sweep failed")
             finally:
                 self.running = False
             try:
-                await asyncio.wait_for(self._wake.wait(), self.settings.every)
+                await asyncio.wait_for(self._wake.wait(), wait)
                 trigger = "request"
             except TimeoutError:
                 trigger = "timer"

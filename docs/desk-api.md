@@ -164,9 +164,11 @@ the run's `outsiders` (shown under NEEDS YOU for a day) without storing it;
 links a writer's PR whose title or body names `(a676)` as that item's `pr`; then
 settles everything. The mark moves to the run's start once the search was read
 whole, or to the last hit's time when the forge's cap of 1000 cut it short. One
-run at a time holds the `sweep-lock` mark, abandoned after twice the interval; a
-subject it cannot read, for any reason, is one error and the run goes on, and
-its row always finishes. It never writes to GitHub. Runs are rows of the
+run at a time holds the `sweep-lock` mark as a 60-second lease it renews every
+15 seconds, so a run killed mid-way frees it within a minute; a run that finds a
+live lease writes a row with `skipped` saying whose, and the timer retries once
+it could lapse. A subject it cannot read, or whose author's write access the
+forge cannot say, is one error and the run goes on, and its row always finishes. It never writes to GitHub. Runs are rows of the
 `sweeps` table (migration 9).
 
 **Settling.** Each delivery records the subject; one older by `updated_at`

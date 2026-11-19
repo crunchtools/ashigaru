@@ -221,7 +221,8 @@ MIGRATIONS: tuple[str, ...] = (
         new INTEGER NOT NULL DEFAULT 0,
         closed INTEGER NOT NULL DEFAULT 0,
         error TEXT,
-        outsiders TEXT NOT NULL DEFAULT '[]'
+        outsiders TEXT NOT NULL DEFAULT '[]',
+        skipped TEXT
     );
     CREATE INDEX sweeps_finished ON sweeps(finished_at);
     """,
