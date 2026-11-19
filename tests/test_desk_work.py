@@ -351,3 +351,26 @@ def test_a_clear_drops_what_the_seat_was_waiting_on(client: TestClient, keys: Ke
         client.patch(path, headers=keys[SEAT], json={"turn": "idle", "task": None}).json()["waiting_on"]
         is None
     )
+
+
+def test_only_an_admin_and_the_seat_itself_read_what_it_is_waiting_on(
+    client: TestClient, keys: Keys, conn: sqlite3.Connection
+) -> None:
+    path = f"/v1/seats/{SEAT}"
+    client.patch(path, headers=keys[SEAT], json={"turn": "active", "task": "OLF deck"})
+    client.patch(path, headers=keys[SEAT], json={"turn": "idle", "waiting_on": "Keep slide 4?"})
+
+    def read(who: str) -> list[Any]:
+        listed = {row["name"]: row for row in client.get("/v1/seats", headers=keys[who]).json()}
+        rounds = {row["name"]: row for row in client.get("/v1/work", headers=keys[who]).json()["seats"]}
+        needs = client.get("/v1/status", headers=keys[who]).json()["needs_you"]
+        return [
+            listed[SEAT]["waiting_on"],
+            client.get(path, headers=keys[who]).json()["waiting_on"],
+            rounds[SEAT]["waiting_on"],
+            [need["text"] for need in needs if need["why"] == "waiting"],
+        ]
+
+    shown = ["Keep slide 4?", "Keep slide 4?", "Keep slide 4?", ["Keep slide 4?"]]
+    assert read(JOSUI) == shown and read(SEAT) == shown
+    assert read("Exedore 2 - Max") == read("ci") == [None, None, None, []]

@@ -865,6 +865,21 @@ def test_stop_without_a_transcript_sends_only_idle(seat: FakeDesk, tmp_path: Pat
     assert patches(seat) == [{"turn": "idle"}]
 
 
+def test_stop_still_goes_idle_when_the_transcript_cannot_be_read(
+    seat: FakeDesk, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    hook("stop", {"hook_event_name": "Stop", "transcript_path": str(tmp_path)})
+    transcript = tmp_path / "s1.jsonl"
+    transcript.write_text(entry(text("unread")))
+
+    def refused(path: str) -> str:
+        raise PermissionError(path)
+
+    monkeypatch.setattr(hooks, "_last_message", refused)
+    hook("stop", {"hook_event_name": "Stop", "transcript_path": str(transcript)})
+    assert patches(seat) == [{"turn": "idle"}, {"turn": "idle"}]
+
+
 @pytest.mark.parametrize(("started", "sent"), [(10, []), (120, [{"turn": "idle"}])])
 def test_idle_prompt_skips_a_turn_that_just_started(seat: FakeDesk, started: int, sent: list[Any]) -> None:
     stamp = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() - started))

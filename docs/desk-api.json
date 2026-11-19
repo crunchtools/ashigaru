@@ -5750,7 +5750,7 @@
     },
     "/v1/status": {
       "get": {
-        "description": "`ashigaru status`, the board a person reads: each busy seat with its work, how long it has held\nit, its last check-in and its whole task; the free and missing seats by name; how many seats are\nup and items open; and NEEDS YOU: each manual seat idle on what it last said, Scott's blocked work,\nand subjects held for his approval.",
+        "description": "`ashigaru status`, the board a person reads: each busy seat with its work, how long it has held\nit, its last check-in and its whole task; the free and missing seats by name; how many seats are\nup and items open; and NEEDS YOU: each manual seat idle on what it last said, Scott's blocked work,\nand subjects held for his approval. A seat other than an admin sees only its own question.",
         "operationId": "board_v1_status_get",
         "responses": {
           "200": {

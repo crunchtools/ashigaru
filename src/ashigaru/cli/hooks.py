@@ -145,14 +145,17 @@ def _last_message(transcript: str) -> str | None:
 
 
 def _waiting_on(event: dict[str, Any]) -> str | None:
-    """What the seat said last, trimmed to WAITING_LENGTH from the front, or None when unknown."""
+    """What the seat said last, trimmed to WAITING_LENGTH from the front, or None when unknown or
+    unreadable."""
     text = event.get("last_assistant_message")
-    if not isinstance(text, str):
-        transcript = event.get("transcript_path")
-        text = (
-            _last_message(transcript) if isinstance(transcript, str) and Path(transcript).is_file() else None
-        )
-    text = (text or "").strip()
+    transcript = event.get("transcript_path")
+    if not isinstance(text, str) and isinstance(transcript, str):
+        try:
+            text = _last_message(transcript)
+        except OSError:
+            # Best effort: a transcript it cannot read costs the question, never the idle report.
+            text = None
+    text = (text or "").strip() if isinstance(text, str) else ""
     if not text:
         return None
     return text if len(text) <= WAITING_LENGTH else "…" + text[-(WAITING_LENGTH - 1) :]
