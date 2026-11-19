@@ -92,10 +92,12 @@ class Found:
 @dataclass(frozen=True)
 class Search:
     """A sweep search's hits, oldest change first, and whether it read them all: False when the
-    forge's cap cut it short, so the caller reads on from the last hit."""
+    forge's cap cut it short, so the caller reads on from `reached`, the change time it read up to
+    (the earliest of its cut searches', when it ran several), or else from the last hit."""
 
     hits: list[Found]
     complete: bool
+    reached: str | None = None
 
 
 @dataclass(frozen=True)
