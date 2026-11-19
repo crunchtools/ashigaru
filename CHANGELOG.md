@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [4.3.0] - 2026-11-19
+
 ### Changed
 - The sweep no longer lists Dependabot PRs under NEEDS YOU as outsiders. It
   records them as subjects, reads them back every run while open, and queues
