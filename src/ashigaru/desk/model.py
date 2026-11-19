@@ -15,6 +15,8 @@ from pydantic import AfterValidator, BaseModel, ConfigDict, Field, computed_fiel
 REPO = r"([a-z\d](?:[a-z\d]|-(?=[a-z\d])){0,38}/[a-z\d_.-]{1,100})"
 """GitHub's names: an owner is 1-39 letters, digits or single inner hyphens; a repo adds _ and ."""
 GITHUB_URL = re.compile(rf"^https?://(?:www\.)?github\.com/{REPO}/(?:issues|pull)/(\d+)(?![\w.-])", re.I)
+ISSUE_URL = re.compile(rf"^https?://(?:www\.)?github\.com/{REPO}/issues/", re.I)
+"""A GitHub issue's URL, which `subject_key` reads like a PR's: a `pr` must not be one."""
 RT_URL = re.compile(r"^https?://[^\s?]+/Ticket/\w+\.html\?(?:[^\s&]*&)*id=(\d+)\b", re.I)
 RT_REF = re.compile(r"^RT\s*(?:#\s*)?(\d+)$", re.I)
 REPO_REF = re.compile(rf"^{REPO}#(\d+)$", re.I)
@@ -202,7 +204,7 @@ class _Fields(BaseModel):
         if value is None or not value.strip():
             return None
         key = subject_key(value)
-        if key is None or key.startswith("RT#") or "/issues/" in value:
+        if key is None or key.startswith("RT#") or ISSUE_URL.match(value.strip()):
             raise ValueError("pr is a pull request: its URL or owner/repo#N")
         return key
 

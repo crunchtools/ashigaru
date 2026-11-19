@@ -212,6 +212,11 @@ def test_a_blank_pr_is_none(hooked: TestClient, keys: Keys, pr: str | None) -> N
     assert get(hooked, keys, create(hooked, keys, pr=pr))["pr"] is None
 
 
+def test_a_pr_in_a_repo_named_issues_is_a_pr(hooked: TestClient, keys: Keys) -> None:
+    story = create(hooked, keys, pr="https://github.com/crunchtools/issues/pull/191")
+    assert get(hooked, keys, story)["pr"] == "crunchtools/issues#191"
+
+
 @pytest.mark.parametrize(
     "pr",
     [
