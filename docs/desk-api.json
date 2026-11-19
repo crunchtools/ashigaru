@@ -2336,6 +2336,24 @@
         "title": "NeedsYou",
         "type": "object"
       },
+      "NextItem": {
+        "description": "What a free seat claimed: the item, and the brief its hook hands Claude Code.",
+        "properties": {
+          "brief": {
+            "title": "Brief",
+            "type": "string"
+          },
+          "item": {
+            "$ref": "#/components/schemas/Item"
+          }
+        },
+        "required": [
+          "item",
+          "brief"
+        ],
+        "title": "NextItem",
+        "type": "object"
+      },
       "OutcomeRow": {
         "description": "One row of `ashigaru outcomes`: an outcome and the state of its stories.",
         "properties": {
@@ -6474,6 +6492,101 @@
           }
         ],
         "summary": "Patch Seat",
+        "tags": [
+          "seats"
+        ]
+      }
+    },
+    "/v1/seats/{name}/next": {
+      "post": {
+        "description": "The seat's `next` hook: claim the oldest queued auto item in the seat's lane whose `after` items\nare done, waiting up to `wait` seconds for one. 204 when none came or the `autodispatch` mark is\nnot `on`; 409 when the seat cannot take work (busy, held, unseen or laneless), so the hook stops.",
+        "operationId": "next_item_v1_seats__name__next_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Seconds to wait for work; 0 asks once.",
+            "in": "query",
+            "name": "wait",
+            "required": false,
+            "schema": {
+              "default": 90,
+              "description": "Seconds to wait for work; 0 asks once.",
+              "maximum": 90,
+              "minimum": 0,
+              "title": "Wait",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NextItem"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "204": {
+            "description": "No work yet, or the switch is off."
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Missing, unknown or revoked API key."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The caller's role, or its seat, may not do this."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A taken id or subject_key (the detail names the item holding it), an existing identity, a second child in one assignment, or an item or seat not in a state to assign, claim or wrap."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Next Item",
         "tags": [
           "seats"
         ]

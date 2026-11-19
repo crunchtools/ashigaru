@@ -12,6 +12,11 @@ seat-state.json hooks and keep their rules.
                   idle. idle_prompt leaves alone a turn that started too
                   recently to be the one it reports on. Stop also sends the
                   seat's final message as waiting_on, trimmed to WAITING_LENGTH.
+  next            SessionStart (startup, clear), registered async with
+                  asyncRewake: waits up to NEXT_SECONDS for the Desk to hand
+                  this free seat its next queued item, then prints the brief
+                  on stderr and exits 2, which wakes the idle session with it.
+                  It stops, exit 0, when the seat cannot take work.
   statusline      The status line command, not a hook: model, context, session
                   tokens and running cost to POST /v1/seats/{name}/usage. It
                   runs on every refresh, so it posts at most once per
@@ -20,7 +25,8 @@ seat-state.json hooks and keep their rules.
 
 A hook must never stand between a person and their prompt: the whole run is
 bounded at HOOK_SECONDS, every failure (no config, no network, a refusal) goes
-to stderr, and the exit is 0. Nothing goes to stdout, which UserPromptSubmit
+to stderr, and the exit is 0. `next` alone runs in the background, bounded at
+NEXT_SECONDS, and exits 2 only to hand over a brief. Nothing goes to stdout, which UserPromptSubmit
 would add to the conversation.
 """
 
@@ -30,8 +36,10 @@ import re
 import signal
 import stat
 import sys
+import time
 from collections.abc import Mapping
 from datetime import UTC, datetime, timedelta
+from http import HTTPStatus
 from pathlib import Path
 from types import FrameType
 from typing import Any, TextIO
@@ -39,11 +47,23 @@ from urllib.parse import quote
 
 import httpx
 
-from .client import Desk
+from .client import Desk, DeskError, Unreachable
 from .config import load
 
-EVENTS = ("session-start", "prompt-submit", "stop", "statusline")
+EVENTS = ("session-start", "prompt-submit", "stop", "next", "statusline")
 HOOK_SECONDS = 2.0
+# How long `next` waits for work, under the 1800 s timeout its hook entry sets.
+NEXT_SECONDS = 1750.0
+# One long-poll to the Desk, under its MAX_WAIT.
+NEXT_WAIT = 60
+# Before the first ask: SessionStart's own hook frees the seat on a /clear, and runs alongside.
+NEXT_SETTLE = 3.0
+# How much longer than one long-poll the client waits for the Desk's answer.
+NEXT_GRACE = 15
+# After an unreachable Desk, before asking again.
+NEXT_RETRY = 30.0
+# Claude Code's asyncRewake: an async hook exiting 2 wakes the idle session with its stderr.
+WAKE = 2
 TASK_LENGTH = 120
 # The most of the seat's final message kept as waiting_on; the end, where the question is.
 WAITING_LENGTH = 500
@@ -173,6 +193,25 @@ def _stop(event: dict[str, Any], desk: Desk, path: str) -> None:
     desk.request("PATCH", path, body=body)
 
 
+def _next(desk: Desk, path: str) -> str | None:
+    """The brief of the item the Desk hands this seat, or None once the seat cannot take work."""
+    time.sleep(NEXT_SETTLE)
+    while True:
+        try:
+            found = desk.request(
+                "POST", f"{path}/next", params={"wait": NEXT_WAIT}, timeout=NEXT_WAIT + NEXT_GRACE
+            )
+        except DeskError as error:
+            if error.status == HTTPStatus.CONFLICT:
+                return None
+            raise
+        except Unreachable:
+            time.sleep(NEXT_RETRY)
+            continue
+        if found:
+            return str(found["brief"])
+
+
 def usage_state(session: str, env: Mapping[str, str]) -> Path:
     """Where the status line keeps its throttle and transcript offset: tmpfs, private to the user,
     since it is looked at on every refresh."""
@@ -275,19 +314,24 @@ def _throttled(event: dict[str, Any], env: Mapping[str, str]) -> bool:
 HANDLERS = {"session-start": _start, "prompt-submit": _prompt, "stop": _stop, "statusline": _statusline}
 
 
-def _report(name: str, stdin: TextIO, env: Mapping[str, str] | None, transport: Any) -> None:
+def _report(name: str, stdin: TextIO, env: Mapping[str, str] | None, transport: Any) -> str | None:
+    """Run the hook; `next` returns the brief it was handed."""
     event = {} if stdin.isatty() else json.loads(stdin.read() or "{}")
     if not isinstance(event, dict):
         raise ValueError("the hook event is not a JSON object")
     if name == "statusline" and _throttled(event, os.environ if env is None else env):
-        return
+        return None
     config = load(env)
     desk = Desk(config, timeout=HOOK_SECONDS, transport=transport)
     try:
         seat = config.seat or desk.get("/v1/me")["name"]
-        HANDLERS[name](event, desk, f"/v1/seats/{quote(seat, safe='')}")
+        path = f"/v1/seats/{quote(seat, safe='')}"
+        if name == "next":
+            return _next(desk, path)
+        HANDLERS[name](event, desk, path)
     finally:
         desk.close()
+    return None
 
 
 def run(
@@ -296,14 +340,19 @@ def run(
     env: Mapping[str, str] | None = None,
     transport: httpx.BaseTransport | None = None,
 ) -> int:
-    """Run one hook; always 0."""
+    """Run one hook; 0, or WAKE once `next` has printed a brief on stderr."""
+    bound = NEXT_SECONDS if name == "next" else HOOK_SECONDS
     previous = signal.signal(signal.SIGALRM, _alarm)
-    signal.setitimer(signal.ITIMER_REAL, HOOK_SECONDS)
+    signal.setitimer(signal.ITIMER_REAL, bound)
     try:
-        _report(name, stdin, env, transport)
+        brief = _report(name, stdin, env, transport)
+        if brief is not None:
+            signal.setitimer(signal.ITIMER_REAL, 0)
+            print(brief, file=sys.stderr)
+            return WAKE
     except _Deadline:
         if name != "statusline":
-            print(f"ashigaru hook {name}: no answer in {HOOK_SECONDS:g}s", file=sys.stderr)
+            print(f"ashigaru hook {name}: no answer in {bound:g}s", file=sys.stderr)
     except Exception as exc:  # a hook never fails Claude Code
         if name != "statusline":
             print(f"ashigaru hook {name}: {exc}", file=sys.stderr)

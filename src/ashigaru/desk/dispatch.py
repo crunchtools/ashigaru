@@ -74,6 +74,14 @@ FROM_TIME = """
 """The cursor for a time: just before the first event stamped at or after it, so an event stamped
 late but committed early is read again rather than skipped."""
 SWEEP = "sweep"
+AUTODISPATCH = "autodispatch"
+"""The mark that is the dispatch switch: `on` lets free seats claim queued auto work; off by default."""
+NEXT_CANDIDATES = f"""
+    SELECT * FROM items
+    WHERE {store.OPEN} AND state = 'queued' AND seat IS NULL AND mode = 'auto' AND lane = :lane
+    ORDER BY created_at, id
+"""
+"""Oldest first: what a free seat in the lane would claim, before checking each one's `after`."""
 CATCH_UP_DEFAULT = timedelta(days=1)
 
 NEEDS_YOU = f"""
@@ -191,6 +199,42 @@ def claim(conn: sqlite3.Connection, item_id: str, seat: str) -> None:
         if item["lane"] != row["lane"]:
             raise store.Conflict(f"{item_id} is in lane {item['lane']}, seat {seat!r} in {row['lane']}")
         _take(conn, item, row, seat)
+
+
+def autodispatch(conn: sqlite3.Connection) -> bool:
+    """The AUTODISPATCH switch: on hands queued auto items to free seats; anything else, nothing."""
+    mark = store.get_mark(conn, AUTODISPATCH)
+    return mark is not None and mark["value"] == "on"
+
+
+def next_item(conn: sqlite3.Connection, seat: str) -> dict[str, Any] | None:
+    """`POST /seats/{name}/next`: the free seat claims the oldest queued auto item in its lane whose
+    `after` items are done, or None when there is none or the switch is off. Raises Conflict when the
+    seat cannot take work at all (busy, held, unseen or laneless), so its hook stops asking."""
+    with store.transaction(conn):
+        row = _free(store.get_seat(conn, seat), seat)
+        if row["lane"] is None:
+            raise store.Conflict(f"seat {seat!r} has no lane; Josui sets it before it can claim")
+        if not autodispatch(conn):
+            return None
+        for candidate in conn.execute(NEXT_CANDIDATES, {"lane": row["lane"]}).fetchall():
+            item = store.decode(candidate)
+            try:
+                _ready(conn, item)
+            except store.Conflict:
+                continue
+            _take(conn, item, row, seat)
+            return store.get_item(conn, item["id"])
+    return None
+
+
+def brief(item: dict[str, Any]) -> str:
+    """What a woken seat reads: the item, its task, and how to report on it."""
+    return (
+        f"Desk assignment {item['id']} (lane {item['lane']}), claimed for this seat by the Desk.\n\n"
+        f"{item['task']}\n\n"
+        f"Work it as a brief from Josui Prime. Report with `ashigaru report {item['id']} <verb>`."
+    )
 
 
 def report_seat(conn: sqlite3.Connection, name: str, fields: dict[str, Any], actor: str) -> dict[str, Any]:

@@ -992,6 +992,57 @@ def test_the_hook_subcommand_reads_stdin(seat: FakeDesk, monkeypatch: pytest.Mon
     assert patches(seat) == [{"turn": "idle"}]
 
 
+NEXT = "/v1/seats/Max%201/next"
+
+
+@pytest.fixture
+def waking(seat: FakeDesk, monkeypatch: pytest.MonkeyPatch) -> FakeDesk:
+    monkeypatch.setattr(hooks, "NEXT_SETTLE", 0)
+    monkeypatch.setattr(hooks, "NEXT_RETRY", 0)
+    return seat
+
+
+def test_next_wakes_the_seat_with_the_brief_on_stderr(
+    waking: FakeDesk, capsys: pytest.CaptureFixture[str]
+) -> None:
+    answers = iter([(204, None), (204, None), (200, {"item": {"id": "a7"}, "brief": "Desk assignment a7"})])
+    waking.on("POST", NEXT, lambda seen: next(answers))
+    assert hook("next", {"hook_event_name": "SessionStart", "source": "clear"}) == hooks.WAKE
+    captured = capsys.readouterr()
+    assert captured.out == "" and captured.err.strip() == "Desk assignment a7"
+    asks = waking.calls("POST", NEXT)
+    assert len(asks) == len(["204", "204", "200"]) and asks[0].query == {"wait": [str(hooks.NEXT_WAIT)]}
+
+
+def test_next_stops_quietly_when_the_seat_cannot_take_work(
+    waking: FakeDesk, capsys: pytest.CaptureFixture[str]
+) -> None:
+    waking.on("POST", NEXT, (409, {"detail": "seat 'Max 1' is busy with a3"}))
+    assert hook("next", {}) == 0
+    assert capsys.readouterr().out == "" and len(waking.calls("POST", NEXT)) == 1
+
+
+def test_next_gives_up_at_its_deadline(waking: FakeDesk, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(hooks, "NEXT_SECONDS", 0.3)
+    waking.on("POST", NEXT, (204, None))
+    started = time.monotonic()
+    assert hook("next", {}) == 0
+    assert time.monotonic() - started < 1.0
+
+
+def test_next_asks_again_after_an_unreachable_desk(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr(hooks, "NEXT_SETTLE", 0)
+    monkeypatch.setattr(hooks, "NEXT_SECONDS", 0.3)
+    monkeypatch.setattr(hooks, "NEXT_RETRY", 0.05)
+    monkeypatch.setenv("ASHIGARU_URL", "http://127.0.0.1:9")
+    monkeypatch.setenv("ASHIGARU_API_KEY", KEY)
+    monkeypatch.setenv("ASHIGARU_SEAT", "Max 1")
+    assert hook("next", {}) == 0
+    assert "no answer" in capsys.readouterr().err
+
+
 def statusline(session: str = "s1", **fields: Any) -> dict[str, Any]:
     return {
         "session_id": session,

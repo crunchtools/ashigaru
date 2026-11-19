@@ -266,7 +266,7 @@ def parser() -> argparse.ArgumentParser:
 
     hook = sub.add_parser(
         "hook",
-        help="Claude Code hooks and status line: report this seat's turn, task and usage; always exit 0",
+        help="Claude Code hooks and status line: report this seat's turn, task and usage; exit 0, next 2",
     )
     hook.add_argument("event", choices=hooks.EVENTS)
     return top

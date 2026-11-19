@@ -12,9 +12,10 @@ from collections.abc import AsyncIterator, Iterator, Mapping, Sequence
 from pathlib import Path
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query, Request, Response, status
 from fastapi import Path as PathParam
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from starlette.concurrency import run_in_threadpool
 from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 
 from . import auth, changes, dispatch, store, subjects, sweep
@@ -44,6 +45,8 @@ from .model import (
     Mark,
     MarkSet,
     MintedKey,
+    NextItem,
+    NextWait,
     OutcomeRow,
     Problem,
     Queue,
@@ -440,6 +443,37 @@ def patch_seat(conn: Conn, who: Who, name: str, body: SeatPatch) -> Seat:
     if refused and not who.admin:
         raise HTTPException(status.HTTP_403_FORBIDDEN, f"a seat may not set: {', '.join(refused)}")
     return Seat.model_validate(dispatch.report_seat(conn, name, fields, who.name))
+
+
+NEXT_TICK = 2.0
+"""Seconds between a waiting seat's looks at the queue."""
+
+
+@router.post(
+    "/v1/seats/{name}/next",
+    tags=["seats"],
+    response_model=NextItem,
+    responses={**errors(401, 403, 409), 204: {"description": "No work yet, or the switch is off."}},
+)
+async def next_item(
+    conn: Conn, who: Who, name: str, query: Annotated[NextWait, Query()]
+) -> NextItem | Response:
+    """The seat's `next` hook: claim the oldest queued auto item in the seat's lane whose `after` items
+    are done, waiting up to `wait` seconds for one. 204 when none came or the `autodispatch` mark is
+    not `on`; 409 when the seat cannot take work (busy, held, unseen or laneless), so the hook stops."""
+    own_seat(who, name)
+    loop = asyncio.get_running_loop()
+    until = loop.time() + query.wait
+    while True:
+        try:
+            item = await run_in_threadpool(dispatch.next_item, conn, name)
+        except store.Conflict as error:
+            raise _conflict(error) from error
+        if item is not None:
+            return NextItem(item=Item.model_validate(item), brief=dispatch.brief(item))
+        if loop.time() + NEXT_TICK > until:
+            return Response(status_code=status.HTTP_204_NO_CONTENT)
+        await asyncio.sleep(NEXT_TICK)
 
 
 @router.post("/v1/seats/{name}/usage", tags=["seats"], responses=errors(401, 403))

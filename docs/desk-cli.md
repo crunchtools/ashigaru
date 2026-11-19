@@ -97,9 +97,21 @@ Notification) ends the turn and records the final assistant message as the seat'
 Each run is bounded at 2 seconds, prints nothing on stdout, and exits 0 on
 every failure, so a hook never blocks Claude.
 
+`ashigaru hook next` is how the Desk hands out work without Josui's round. It
+runs on SessionStart (startup and `/clear`, the points where a seat's context is
+clean), registered `async` with `asyncRewake`, so it never holds the prompt. It
+long-polls `POST /v1/seats/{name}/next` for up to 29 minutes; when the Desk
+hands this free seat an item, it prints the brief on stderr and exits 2, which
+wakes the idle session with it. It exits 0 once the seat cannot take work (busy,
+held, laneless). Nothing flows until an admin sets the `autodispatch` mark to
+`on` (`ashigaru mark autodispatch --set on`); any other value is off.
+
 ```json
 "UserPromptSubmit": [{"hooks": [{"type": "command", "command": "ashigaru hook prompt-submit", "timeout": 5}]}],
-"SessionStart": [{"hooks": [{"type": "command", "command": "ashigaru hook session-start", "timeout": 5}]}],
+"SessionStart": [{"hooks": [
+  {"type": "command", "command": "ashigaru hook session-start", "timeout": 5},
+  {"type": "command", "command": "ashigaru hook next", "async": true, "asyncRewake": true, "timeout": 1800}
+]}],
 "Stop": [{"hooks": [{"type": "command", "command": "ashigaru hook stop", "timeout": 5}]}]
 ```
 

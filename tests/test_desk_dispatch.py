@@ -1,16 +1,19 @@
 """Assign with seat-pick, desk_claim, usage and spend, and the outcomes rollup."""
 
 import sqlite3
-from http.client import CONFLICT, FORBIDDEN, NOT_FOUND, OK, UNPROCESSABLE_ENTITY
+import time
+from http.client import CONFLICT, FORBIDDEN, NO_CONTENT, NOT_FOUND, OK, UNPROCESSABLE_ENTITY
 from pathlib import Path
+from typing import Any
 
 import pytest
 from conftest import Keys
 from fastapi.testclient import TestClient
 
-from ashigaru.desk import dispatch, store
+from ashigaru.desk import api, dispatch, store
 
 MONTHLY_LIMIT = 500
+WAIT = 1
 JOSUI, MINE, OTHER, CI = "Josui Prime", "Exedore 1 - Max", "Exedore 2 - Max", "ci"
 
 
@@ -118,6 +121,67 @@ def test_a_second_claim_from_another_connection_loses(
     with pytest.raises(store.Conflict):
         dispatch.claim(other, work, OTHER)
     other.close()
+
+
+def next_item(client: TestClient, keys: Keys, name: str, who: str | None = None, wait: int = 0) -> Any:
+    return client.post(f"/v1/seats/{name}/next?wait={wait}", headers=keys[who or name])
+
+
+def switch(client: TestClient, keys: Keys, value: str) -> None:
+    assert client.put("/v1/marks/autodispatch", headers=keys[JOSUI], json={"value": value}).status_code == OK
+
+
+def test_next_hands_out_nothing_until_the_switch_is_on(client: TestClient, keys: Keys) -> None:
+    seat(client, keys, MINE)
+    work = item(client, keys, lane="exedore-max", task="the brief's task")
+    assert next_item(client, keys, MINE).status_code == NO_CONTENT
+    switch(client, keys, "off")
+    assert next_item(client, keys, MINE).status_code == NO_CONTENT
+    switch(client, keys, "on")
+    handed = next_item(client, keys, MINE)
+    assert handed.status_code == OK, handed.text
+    body = handed.json()
+    assert (body["item"]["id"], body["item"]["seat"], body["item"]["state"]) == (work, MINE, "assigned")
+    assert "the brief's task" in body["brief"] and f"ashigaru report {work}" in body["brief"]
+    taken = client.get(f"/v1/seats/{MINE}", headers=keys[MINE]).json()
+    assert (taken["status"], taken["item"]) == ("busy", work)
+
+
+def test_next_takes_the_oldest_ready_auto_item_in_the_seats_lane(client: TestClient, keys: Keys) -> None:
+    seat(client, keys, MINE)
+    switch(client, keys, "on")
+    blocker = item(client, keys, lane="dolza-max")
+    item(client, keys, lane="exedore-max", after=[blocker])
+    item(client, keys, lane="exedore-max", mode="manual")
+    item(client, keys, lane="dolza-max")
+    item(client, keys, lane="exedore-max", state="proposed")
+    ready = item(client, keys, lane="exedore-max")
+    item(client, keys, lane="exedore-max")
+    assert next_item(client, keys, MINE).json()["item"]["id"] == ready
+
+
+def test_next_refuses_a_seat_that_cannot_take_work(client: TestClient, keys: Keys) -> None:
+    seat(client, keys, MINE)
+    seat(client, keys, OTHER, lane=None)
+    switch(client, keys, "on")
+    item(client, keys, lane="exedore-max")
+    item(client, keys, lane="exedore-max")
+    assert next_item(client, keys, MINE).status_code == OK
+    assert next_item(client, keys, MINE).status_code == CONFLICT
+    assert next_item(client, keys, OTHER).status_code == CONFLICT
+    assert next_item(client, keys, MINE, who=OTHER).status_code == FORBIDDEN
+    assert next_item(client, keys, OTHER, who=CI).status_code == FORBIDDEN
+
+
+def test_next_waits_out_its_window_when_nothing_comes(
+    client: TestClient, keys: Keys, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(api, "NEXT_TICK", 0.05)
+    seat(client, keys, MINE)
+    switch(client, keys, "on")
+    started = time.monotonic()
+    assert next_item(client, keys, MINE, wait=WAIT).status_code == NO_CONTENT
+    assert WAIT - api.NEXT_TICK < time.monotonic() - started < WAIT + 1
 
 
 def test_usage_books_session_cost_deltas_against_spend_and_limits(

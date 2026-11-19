@@ -752,6 +752,19 @@ MAX_WAIT = 90
 """Seconds one wait may block. Cloudflare drops a proxied request at 100s, so a client waits again."""
 
 
+class NextWait(BaseModel):
+    """POST /v1/seats/{name}/next query parameters."""
+
+    wait: int = Field(MAX_WAIT, ge=0, le=MAX_WAIT, description="Seconds to wait for work; 0 asks once.")
+
+
+class NextItem(BaseModel):
+    """What a free seat claimed: the item, and the brief its hook hands Claude Code."""
+
+    item: Item
+    brief: str
+
+
 class CIWait(BaseModel):
     """GET /v1/ci/wait query parameters."""
 

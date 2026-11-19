@@ -6,6 +6,15 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- The Desk hands out work itself. `POST /v1/seats/{name}/next` claims the
+  oldest queued auto item in a free seat's lane whose `after` items are done,
+  long-polling up to 90 seconds, and returns the item and its brief.
+  `ashigaru hook next`, on SessionStart (startup, clear) as an async
+  `asyncRewake` hook, waits on it and wakes the idle seat with the brief by
+  exiting 2. The `autodispatch` mark is the switch: nothing flows until an
+  admin sets it to `on`.
+
 ## [4.1.0] - 2026-11-19
 
 ### Added
