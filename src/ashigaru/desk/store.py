@@ -210,6 +210,19 @@ MIGRATIONS: tuple[str, ...] = (
     ALTER TABLE items ADD COLUMN landed_at TEXT;
     CREATE INDEX items_pr ON items(pr) WHERE pr IS NOT NULL;
     """,
+    # Each run of the sweep, the timer that reads the forge back in case a webhook was missed.
+    """
+    CREATE TABLE sweeps (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        trigger TEXT NOT NULL,
+        started_at TEXT NOT NULL,
+        finished_at TEXT,
+        subjects INTEGER NOT NULL DEFAULT 0,
+        new INTEGER NOT NULL DEFAULT 0,
+        closed INTEGER NOT NULL DEFAULT 0,
+        error TEXT
+    );
+    """,
 )
 
 ITEM_DEFAULTS: dict[str, Any] = {

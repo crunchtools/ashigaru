@@ -503,6 +503,30 @@ class NeedsYou(BaseModel):
     text: str | None = Field(description="The blocker, the approval asked for, or the seat's last word.")
 
 
+class SweepRun(BaseModel):
+    """One run of the sweep: what started it, when, what it read, queued and closed, and why it
+    stopped short, if it did."""
+
+    id: int
+    trigger: Literal["startup", "timer", "request"]
+    started_at: str
+    finished_at: str | None = Field(description="null while it runs.")
+    subjects: int = Field(description="Subjects read from the forge.")
+    new: int = Field(description="Subjects queued (or held) that had no item.")
+    closed: int = Field(description="Items it settled: closed, requeued or marked landed.")
+    error: str | None = Field(description="The first thing it could not read, e.g. `search: HTTP 403`.")
+
+
+class Sweep(BaseModel):
+    """`ashigaru sweep`: whether the timer runs here, how often, if a run is under way, and the last."""
+
+    configured: bool = Field(description="False without the forge's token and org: no timer runs.")
+    every: float | None = Field(description="Seconds between runs.")
+    running: bool
+    requested: bool = Field(False, description="True when this call asked for a run now.")
+    last: SweepRun | None
+
+
 class Board(BaseModel):
     """`ashigaru status`: the busy seats in full, the free ones, the tally, and what needs Scott."""
 
@@ -511,6 +535,7 @@ class Board(BaseModel):
     missing: list[str] = Field(description="Free seats that never checked in or went quiet for a day.")
     summary: SeatSummary
     needs_you: list[NeedsYou]
+    sweep: SweepRun | None = Field(None, description="The last sweep, so a person sees the fallback alive.")
 
 
 class Usage(BaseModel):

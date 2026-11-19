@@ -52,6 +52,7 @@ from ..model import (
     Report,
     Round,
     Seat,
+    Sweep,
     Usage,
     Verb,
     Wrap,
@@ -66,6 +67,7 @@ SETTLED = {"review", "done", "blocked", "wontdo", "abandoned"}
 POLL = 2.0
 DB = "desk_db"
 WAITERS = "desk_waiters"
+SWEEPER = "desk_sweeper"
 ItemId = Annotated[str, Field(description="An item id, e.g. a204.")]
 
 mcp = FastMCP(
@@ -142,6 +144,20 @@ def desk_queue() -> Queue:
     proposed children with their expiry."""
     with desk() as (conn, who):
         return api.queue(conn, who)
+
+
+@mcp.tool
+async def desk_sweep(
+    run: Annotated[bool, Field(description="Admin: start a run now; it returns at once.")] = False,
+) -> Sweep:
+    """`ashigaru sweep`: whether the timer that reads GitHub back runs, how often, whether a run is
+    under way, and the last run's counts and error; with `run` (admin), start one now."""
+    sweeper = get_http_request().scope["state"][SWEEPER]
+    with desk() as (conn, who):
+        if run:
+            api.admin(who)
+            return api.sweep_start(sweeper, conn)
+        return api.sweep_view(sweeper, conn)
 
 
 @mcp.tool
@@ -380,9 +396,12 @@ class Endpoint:
         if who is None:
             await JSONResponse({"detail": "Not Found"}, status_code=404)(scope, receive, send)
             return
-        # The MCP app becomes scope["app"] below, so the Desk's waiters travel in the state.
-        waiters = scope["app"].state.waiters
-        state = {**scope.get("state", {}), CALLER: who, DB: self.db_path, WAITERS: waiters}
+        # The MCP app becomes scope["app"] below, so the Desk's waiters and sweeper travel in the state.
+        desk_state = scope["app"].state
+        state = {
+            **scope.get("state", {}), CALLER: who, DB: self.db_path,
+            WAITERS: desk_state.waiters, SWEEPER: desk_state.sweeper,
+        }  # fmt: skip
         inner = {**scope, "path": "/", "raw_path": b"/", "root_path": "", "path_params": {}, "state": state}
         await self.app(inner, receive, send)
 

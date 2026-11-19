@@ -11,9 +11,9 @@ in FORGES.
 """
 
 from . import github
-from .base import CIUpdate, Delivery, Forge, IntakeItem
+from .base import CIUpdate, Delivery, Forge, Found, IntakeItem
 
-__all__ = ["DEFAULT", "FORGES", "CIUpdate", "Delivery", "Forge", "IntakeItem"]
+__all__ = ["DEFAULT", "FORGES", "CIUpdate", "Delivery", "Forge", "Found", "IntakeItem"]
 
 FORGES: dict[str, Forge] = {forge.name: forge for forge in (github.FORGE,)}
 

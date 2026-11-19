@@ -10,7 +10,7 @@ import sqlite3
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from . import store, subjects
+from . import store, subjects, sweep
 from .model import CLOSED, SEAT_ROW_FIELDS, STALE_SEAT, Billing, Lane, Role, SeatStatus, State, Turn, Wrap
 
 PICK_SEAT = """
@@ -468,6 +468,7 @@ def status(conn: sqlite3.Connection) -> dict[str, Any]:
         "missing": [row["name"] for row in idle if row["missing"]],
         "summary": summary(conn, roster),
         "needs_you": needs,
+        "sweep": sweep.last(conn),
     }
 
 

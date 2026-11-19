@@ -1057,13 +1057,13 @@ def test_which_permission_levels_may_write(
     assert github.FORGE.may_write(REPO, "someone", "token") is writes
 
 
-def test_a_bot_author_is_held_without_asking(
+def test_a_bot_author_is_not_queued_and_never_asked_about(
     trusting: TestClient, conn: sqlite3.Connection, permissions: Permissions
 ) -> None:
     permissions.by_account["release-bot[bot]"] = "write"
     bot = {"login": "release-bot[bot]"}
     deliver(trusting, "issues", {**payload("issues", user=bot), "sender": bot})
-    assert held_item(conn)["extra"]["author"] == "release-bot[bot]" and permissions.asked == []
+    assert store.item_by_subject(conn, f"{REPO}#190") is None and permissions.asked == []
 
 
 def test_a_failed_permission_check_is_logged_without_the_token(
@@ -1150,10 +1150,10 @@ def test_the_apps_own_issue_is_trusted_without_asking_the_forge(
     assert permissions.asked == []
 
 
-def test_a_bot_not_on_the_list_is_still_held(trusting_the_bot: TestClient, conn: sqlite3.Connection) -> None:
+def test_a_bot_not_on_the_list_is_not_queued(trusting_the_bot: TestClient, conn: sqlite3.Connection) -> None:
     other = {"login": "other-app[bot]"}
     deliver(trusting_the_bot, "issues", {**payload("issues", user=other), "sender": other})
-    assert held_item(conn)["extra"]["author"] == "other-app[bot]"
+    assert store.item_by_subject(conn, f"{REPO}#190") is None
 
 
 def test_the_apps_lane_label_approves_nobody_elses_issue(
@@ -1214,24 +1214,10 @@ def bot_pr(action: str = "opened", by: str = BOT, head: str = FORK_HEAD) -> dict
     return {**body, "action": action, "sender": {"login": by}, **pushed}
 
 
-def test_a_held_pr_of_the_apps_is_trusted_on_the_retry_at_its_held_head(
+def test_the_apps_pr_is_queued_once_the_desk_lists_its_bot(
     trusting: TestClient, trusting_the_bot: TestClient, conn: sqlite3.Connection
 ) -> None:
     deliver(trusting, "pull_request", bot_pr(), "d-1")  # before the Desk listed the app's bot
-    assert (pr_item(conn)["mode"], pr_item(conn)["extra"]["trusted"]) == ("manual", False)
+    assert pr_item(conn) == {}
     deliver(trusting_the_bot, "pull_request", bot_pr("edited"), "d-2")
     assert (pr_item(conn)["mode"], pr_item(conn)["extra"]["trusted"]) == ("auto", True)
-
-
-def test_the_retry_for_the_apps_pr_still_needs_its_held_head(
-    trusting: TestClient, trusting_the_bot: TestClient, conn: sqlite3.Connection
-) -> None:
-    deliver(trusting, "pull_request", bot_pr(), "d-1")
-    deliver(trusting_the_bot, "pull_request", bot_pr("synchronize", "stranger", PUSHED), "d-2")
-    deliver(trusting_the_bot, "pull_request", bot_pr("edited", head=PUSHED), "d-3")
-    item = pr_item(conn)
-    assert (item["mode"], item["extra"]["trusted"], item["extra"].get("held_head")) == (
-        "manual",
-        False,
-        FORK_HEAD,
-    )

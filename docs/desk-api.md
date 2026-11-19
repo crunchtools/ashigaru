@@ -58,6 +58,8 @@ can return.
 | `GET /work` | `ashigaru work`, the whole check round: `items`, the check table (id, seat, mode, task, state, wrap, result or blocker, next) of open items, blocked first, then newest, with `?all=true` adding done, wontdo, abandoned and cleared ones, at most 1000 (`truncated`); `seats` as `GET /seats`; `summary` (`up`: seats not missing, `seats`, `open` items); `queue` as `GET /queue`; and `catch_up`, the issues and PRs intake recorded from the org webhook after a cursor: `new`, first seen, with title, `filed_by` (the author), lane, mode and `held`, and `reopened`, the delivery that took the source from closed to open while the item is closed, each item once. The cursor is an event seq (`after`): the `sweep` mark, or with `?since=` (or a mark that is a time) the event before the first stamped then; with neither, a day back; 422 for a time that is not one. `until` is the last event covered: the last committed when the round began, or the 1000th read when `truncated`. Events are numbered in commit order, so nothing is lost or repeated between rounds. It leaves the mark alone, though like `GET /queue` it abandons proposed children past their expiry |
 | `POST /work` | admin: the same round, then the `sweep` mark becomes its `until` (`advanced` is true), so the next round reads on from there. Only forward: when it is already there, or a concurrent round moved it further, it stays and `advanced` is false. `?since=` is 422 here, since a round read from a time could move the mark past events it never read |
 | `GET /status` | `ashigaru status` (`desk_status`), the `Board`: `busy` seats (seat, mode, item, `since`, last check-in, whole task), `free` and `missing` seat names, `summary` (`up`, `seats`, `open`), and `needs_you`: manual seats idle with their `waiting_on`, Scott's blocked manual items, and subjects intake holds for approval |
+| `GET /sweep` | `ashigaru sweep` (`desk_sweep`), anyone: `configured`, `every` (seconds), `running`, and `last`, the latest run with `trigger`, `started_at`, `finished_at`, `subjects`, `new`, `closed` and `error` |
+| `POST /sweep` | admin, `ashigaru sweep --run` (`desk_sweep` with `run`): wakes the timer and returns at once; 409 when the sweep is not configured |
 | `GET /subjects/{key}` | a `Subject`: the forge's own state of one issue or PR (`owner/repo#N`, `#` URL-encoded as `%23`): open, closed or merged, head, draft, review, title, labels, source and `source_updated_at`; 404 if no delivery has named it (migration 8) |
 | `GET /check` | `items` of `GET /work` alone, for clients older than 3.5 |
 | `GET /marks/{name}` | a named watermark (`sweep`: the event `GET /work`'s catch-up starts after; a time is read too): value, updated_at, updated_by; 404 until first set |
@@ -137,7 +139,7 @@ subscribe the org webhook to Workflow runs, Check suites, Issues, Pull
 requests and Pull request reviews (`pull_request_review`: submitted or dismissed
 sets the subject's review to approved, changes_requested or dismissed). Its permission checks call the collaborator permission API with
 `ASHIGARU_FORGE_TOKEN_GITHUB`, which needs read access to the repos'
-collaborators, metadata (rulesets, branches), checks and commit statuses, and
+collaborators, metadata (rulesets, branches), checks and commit statuses, issues and pull requests, and the search API, and
 nothing more. GitHub never calls an app's bot a writer, so
 the accounts in `ASHIGARU_FORGE_AUTHORS_GITHUB` (the image sets
 `ashigaru-crunchtools[bot]`) are trusted as authors of their own issues and
@@ -146,7 +148,18 @@ label on one sets its lane and mode `auto`, as for any writer's. Their lane
 labels on anyone else's subject approve nothing. The record issues the sweep
 keeps (labeled `ashigaru-inbox`, `ashigaru-releases`, `ashigaru-red` or
 `ashigaru-observe`) are
-never queued, and one queued before is held on its next delivery.
+never queued, and one queued before is held on its next delivery. A subject
+authored by a bot that is not in that list (dependabot, say) is not queued,
+by webhook or sweep; it used to be held.
+
+**Sweep.** With `ASHIGARU_FORGE_TOKEN_GITHUB` and `ASHIGARU_FORGE_ORG_GITHUB`
+set, `serve` runs a sweep at startup, every `ASHIGARU_SWEEP_EVERY` seconds and
+on `POST /sweep`. A run re-reads every open item's subject and PR and settles
+them as a delivery does; searches the org for subjects updated since the
+`sweep-search` mark, queuing a writer's or a trusted author's and holding
+strangers; links a trusted author's PR whose title or body names `(a676)` as
+that item's `pr`; then settles everything. It never writes to GitHub. Runs are
+rows of the `sweeps` table (migration 9).
 
 **Settling.** Each delivery records the subject; one older by `updated_at`
 never overwrites, and merged is sticky. It then settles items whose
@@ -263,9 +276,11 @@ Settings are flags on `ashigaru-desk serve`, else these environment variables:
 | `ASHIGARU_TRUSTED_PROXIES` | comma-separated addresses or CIDRs of the reverse proxies in front | none |
 | `ASHIGARU_WEBHOOK_SECRET_GITHUB` | GitHub's webhook secret; each forge has its own `ASHIGARU_WEBHOOK_SECRET_<FORGE>` | none: its deliveries are refused |
 | `ASHIGARU_WEBHOOK_SECRET_GITHUB_FILE` | a file of GitHub's secrets, one per line, all accepted while one rotates | none |
-| `ASHIGARU_FORGE_TOKEN_GITHUB` | a GitHub token that can read collaborator permissions, rulesets, branches, checks and commit statuses; each forge has its own `ASHIGARU_FORGE_TOKEN_<FORGE>` | none: all intake is held for Josui, and no commit's CI is `success` |
+| `ASHIGARU_FORGE_TOKEN_GITHUB` | a GitHub token that can read collaborator permissions, rulesets, branches, checks, commit statuses, issues and pull requests, and use the search API; each forge has its own `ASHIGARU_FORGE_TOKEN_<FORGE>` | none: all intake is held for Josui, and no commit's CI is `success` |
 | `ASHIGARU_FORGE_TOKEN_GITHUB_FILE` | a file holding that token | none |
 | `ASHIGARU_FORGE_AUTHORS_GITHUB` | comma-separated accounts, such as the app's bot, whose own issues and PRs are trusted as a writer's, so a lane label on one makes it auto-claimable; each forge has its own `ASHIGARU_FORGE_AUTHORS_<FORGE>` | none; the image sets `ashigaru-crunchtools[bot]` |
+| `ASHIGARU_FORGE_ORG_GITHUB` | the GitHub org the sweep searches; the sweep runs only with this and the token | none: no sweep |
+| `ASHIGARU_SWEEP_EVERY` | seconds between sweeps | `600` |
 | `ASHIGARU_WEBHOOK_SECRET` | GitHub's secret under the bare name the first deploy used; added to `_GITHUB` | none |
 | `ASHIGARU_WEBHOOK_SECRET_FILE` | the same, as a file | none |
 

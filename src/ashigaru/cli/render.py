@@ -108,12 +108,33 @@ def _rows(rows: Sequence[dict[str, Any]], columns: Sequence[Column]) -> str:
     return table(rows, columns).partition("\n")[2]
 
 
+def swept(run: dict[str, Any] | None) -> str:
+    """The last sweep in a line: `swept 4m ago (31 subjects, 2 new, 2 closed)`, or its error."""
+    if not run:
+        return "no sweep yet"
+    if not run.get("finished_at"):
+        return f"sweep running for {age(run['started_at'])}"
+    said = f"swept {seen(run['finished_at'])}"
+    counts = f"({run['subjects']} subjects, {run['new']} new, {run['closed']} closed)"
+    return f"{said}: {run['error']} {counts}" if run.get("error") else f"{said} {counts}"
+
+
+def sweep(state: dict[str, Any]) -> str:
+    """Whether a timer runs, how often, and the last run."""
+    if not state["configured"]:
+        return "no sweep runs here: the Desk has no forge token and org"
+    every = duration(state["every"])
+    asked = "run requested; " if state.get("requested") else ""
+    running = "running now; " if state.get("running") else ""
+    return f"{asked}{running}every {every}; {swept(state.get('last'))}"
+
+
 def status(board: dict[str, Any]) -> str:
     """The busy seats, one line for the free and missing ones and the tally, then NEEDS YOU."""
     seats = [f"{len(board['free'])} free" + (f": {seat_names(board['free'])}" if board["free"] else "")]
     if board["missing"]:
         seats.append(f"{len(board['missing'])} missing: {seat_names(board['missing'])}")
-    seats.append(tally(board["summary"]))
+    seats += [tally(board["summary"]), swept(board.get("sweep"))]
     parts = [table(board["busy"], BOARD) if board["busy"] else "no seat is busy", "   ".join(seats)]
     if board["needs_you"]:
         parts.append(f"NEEDS YOU\n{_rows(board['needs_you'], NEEDS)}")
@@ -230,14 +251,14 @@ QUEUED: list[Column] = [
     ("QUEUED", lambda i: i["id"]),
     ("LANE", lambda i: i.get("lane")),
     ("MODE", lambda i: i["mode"]),
-    ("TASK", lambda i: i["task"]),
+    ("TASK", lambda i: Whole(i["task"])),
     ("WAITS ON", lambda i: ", ".join(f"{w['id']} {w['state']}" for w in i["waits_on"])),
 ]
 PROPOSED: list[Column] = [
     ("PROPOSED", lambda i: i["id"]),
     ("UNDER", lambda i: i.get("parent")),
     ("FILED BY", lambda i: i.get("filed_by")),
-    ("TASK", lambda i: i["task"]),
+    ("TASK", lambda i: Whole(i["task"])),
     ("EXPIRES", lambda i: i.get("expires_at")),
 ]
 OUTCOMES: list[Column] = [
@@ -289,6 +310,7 @@ VIEWS: dict[str, Callable[[Any], str]] = {
     "usage": usage,
     "agents": agents,
     "status": status,
+    "sweep": sweep,
     "queue": queue,
     "work": work,
     "mcp_mint": minted,

@@ -29,7 +29,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from ..model import Kind, Verdict, subject_key
-from .base import CIUpdate, Delivery, IntakeItem, payload_get
+from .base import CIUpdate, Delivery, Found, IntakeItem, payload_get
 
 SIGNATURE = "x-hub-signature-256"
 EVENT = "x-github-event"
@@ -47,6 +47,9 @@ NOT_A_COLLABORATOR = 404
 RULES_TTL = 60.0
 """Seconds a branch's required checks are remembered."""
 PAGE = 100
+SEARCH_PAGES = 10
+"""Search returns at most 1000 results: ten pages of PAGE."""
+SWEEP_TIMEOUT = 10
 LOG = logging.getLogger(__name__)
 
 CONCLUSIONS = {
@@ -76,10 +79,10 @@ def _headers(token: str) -> dict[str, str]:
     }
 
 
-def _get(url: str, token: str) -> Any:
+def _get(url: str, token: str, timeout: int = 5) -> Any:
     """An authenticated GET, parsed as JSON. HTTPError, OSError and ValueError propagate."""
     request = urllib.request.Request(url, headers=_headers(token))
-    with urllib.request.urlopen(request, timeout=5) as response:
+    with urllib.request.urlopen(request, timeout=timeout) as response:
         return json.load(response)
 
 
@@ -282,12 +285,6 @@ def check_suite(payload: Mapping[str, Any]) -> tuple[CIUpdate, ...]:
     )
 
 
-def _merged(thing: Mapping[str, Any]) -> bool:
-    """A merged PR: `merged` is true, or (some payloads omit it) `merged_at` is a non-empty string."""
-    merged_at = thing.get("merged_at")
-    return thing.get("merged") is True or (isinstance(merged_at, str) and merged_at != "")
-
-
 def _draft(thing: Mapping[str, Any]) -> bool | None:
     return draft if isinstance(draft := thing.get("draft"), bool) else None
 
@@ -312,37 +309,57 @@ def _intake(
     thing = payload.get(subject)
     if not isinstance(thing, Mapping):
         raise ValueError(f"no {subject}")
-    repo = _repo(payload)
+    return (
+        _item(
+            thing,
+            _repo(payload),
+            kind,
+            subject,
+            merged_in=thing if subject == "pull_request" else None,
+            sender=sender if isinstance(sender := payload_get(payload, "sender", "login"), str) else None,
+            approves_lane=_lane_label(payload, "labeled"),
+            revokes_lane=_lane_label(payload, "unlabeled"),
+            review=_review(payload) if review else None,
+            head_before=before.lower()
+            if payload.get("action") == "synchronize" and isinstance(before := payload.get("before"), str)
+            else None,
+        ),
+    )
+
+
+def _item(
+    thing: Mapping[str, Any], repo: str, kind: Kind, what: str, *, merged_in: Any, **event: Any
+) -> IntakeItem:
+    """The IntakeItem for an issue or PR mapping, whichever way it reached us (a webhook, a fetch, a
+    search). `merged_in` is the mapping that says whether a PR merged (None for an issue): `merged` is
+    true there, or (some payloads omit it) `merged_at` is a non-empty string. `event` carries what only
+    a delivery knows (sender, lane changes, review, head_before)."""
     labels = tuple(
         label["name"]
         for label in thing.get("labels") or ()
         if isinstance(label, Mapping) and isinstance(label.get("name"), str)
     )
     lanes = [label[len(LANE_LABEL) :] for label in labels if label.startswith(LANE_LABEL)]
-    return (
-        IntakeItem(
-            subject_key=_subject_key(repo, _text(thing.get("number"), f"{subject}.number")),
-            title=_text(thing.get("title"), f"{subject}.title"),
-            ref=_text(thing.get("html_url"), f"{subject}.html_url"),
-            source="github",
-            repo=repo,
-            kind=kind,
-            closed=thing.get("state") == "closed",
-            lane_hint=lanes[0] if lanes else None,
-            labels=labels,
-            author=author if isinstance(author := payload_get(thing, "user", "login"), str) else None,
-            sender=sender if isinstance(sender := payload_get(payload, "sender", "login"), str) else None,
-            approves_lane=_lane_label(payload, "labeled"),
-            revokes_lane=_lane_label(payload, "unlabeled"),
-            merged=subject == "pull_request" and _merged(thing),
-            draft=_draft(thing) if subject == "pull_request" else None,
-            review=_review(payload) if review else None,
-            updated_at=updated if isinstance(updated := thing.get("updated_at"), str) else None,
-            head=head.lower() if isinstance(head := payload_get(thing, "head", "sha"), str) else None,
-            head_before=before.lower()
-            if payload.get("action") == "synchronize" and isinstance(before := payload.get("before"), str)
-            else None,
-        ),
+    merged_at = merged_in.get("merged_at") if isinstance(merged_in, Mapping) else None
+    merged = isinstance(merged_in, Mapping) and (
+        merged_in.get("merged") is True or (isinstance(merged_at, str) and merged_at != "")
+    )
+    return IntakeItem(
+        subject_key=_subject_key(repo, _text(thing.get("number"), f"{what}.number")),
+        title=_text(thing.get("title"), f"{what}.title"),
+        ref=_text(thing.get("html_url"), f"{what}.html_url"),
+        source="github",
+        repo=repo,
+        kind=kind,
+        closed=thing.get("state") == "closed",
+        lane_hint=lanes[0] if lanes else None,
+        labels=labels,
+        author=author if isinstance(author := payload_get(thing, "user", "login"), str) else None,
+        merged=merged,
+        draft=_draft(thing) if kind is Kind.STORY else None,
+        updated_at=updated if isinstance(updated := thing.get("updated_at"), str) else None,
+        head=head.lower() if isinstance(head := payload_get(thing, "head", "sha"), str) else None,
+        **event,
     )
 
 
@@ -359,6 +376,22 @@ def _lane_label(payload: Mapping[str, Any], action: str) -> str | None:
     label = payload_get(payload, "label", "name")
     matched = payload.get("action") == action and isinstance(label, str) and label.startswith(LANE_LABEL)
     return label[len(LANE_LABEL) :] if matched else None
+
+
+def _hit(thing: Mapping[str, Any]) -> Found | None:
+    """One search result as a Found; None for one in a repo we cannot name."""
+    url = str(thing.get("repository_url"))
+    repo = url.removeprefix(f"{API}/repos/").lower()
+    pull = thing.get("pull_request")
+    if not REPO.match(repo):
+        return None
+    kind = Kind.STORY if isinstance(pull, Mapping) else Kind.OUTCOME
+    association, body = thing.get("author_association"), thing.get("body")
+    return Found(
+        item=_item(thing, repo, kind, "issue", merged_in=pull),
+        association=association if isinstance(association, str) else "",
+        body=body if isinstance(body, str) else "",
+    )
 
 
 class GitHub:
@@ -413,6 +446,44 @@ class GitHub:
             LOG.warning("permission check for %s on %s failed: %s", account, repo, type(error).__name__)
             return False
         return isinstance(found, Mapping) and found.get("permission") in WRITERS
+
+    def subject(self, repo: str, number: int, token: str) -> IntakeItem:
+        """One issue or PR as a delivery would have mapped it, read from the API; a PR takes a second
+        call for its merged, draft and head. Read-only."""
+        if not (token and REPO.match(repo)):
+            raise ValueError("a repo as owner/name and a token are needed")
+        base = f"{API}/repos/{repo}"
+        found = _get(f"{base}/issues/{int(number)}", token, SWEEP_TIMEOUT)
+        if not isinstance(found, Mapping):
+            raise ValueError("the issue is not an object")
+        if "pull_request" not in found:
+            return _item(found, repo, Kind.OUTCOME, "issue", merged_in=None)
+        pull = _get(f"{base}/pulls/{int(number)}", token, SWEEP_TIMEOUT)
+        if not isinstance(pull, Mapping):
+            raise ValueError("the pull request is not an object")
+        return _item(pull, repo, Kind.STORY, "pull_request", merged_in=pull)
+
+    def updated(self, org: str, since: str, token: str) -> list[Found]:
+        """Every issue and PR in `org` changed at or after `since`, oldest change first, by search
+        (at most 1000). A hit whose repository is not owner/name is skipped. Read-only."""
+        if not (token and ACCOUNT.match(org)):
+            raise ValueError("an org login and a token are needed")
+        found: list[Found] = []
+        for page in range(1, SEARCH_PAGES + 1):
+            query = urllib.parse.urlencode(
+                {
+                    "q": f"org:{org} updated:>={since}",
+                    "sort": "updated",
+                    "order": "asc",
+                    "per_page": PAGE,
+                    "page": page,
+                }
+            )
+            hits = _items(_get(f"{API}/search/issues?{query}", token, SWEEP_TIMEOUT), "items")
+            found += [hit for thing in hits if (hit := _hit(thing)) is not None]
+            if len(hits) < PAGE:
+                break
+        return found
 
     def required(self, repo: str, sha: str, branch: str | None, token: str) -> tuple[str, dict[str, Verdict]]:
         """The branch and each required check's verdict on `sha`; one nobody has reported is pending.

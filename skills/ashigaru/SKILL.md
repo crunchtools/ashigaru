@@ -1,7 +1,7 @@
 ---
 name: ashigaru
-description: Run the worker fleet from Josui Prime through the Ashigaru Desk, with exactly the `ashigaru` CLI's commands (usage, agents, status, work, queue, outcomes, list, get, create, update, mark, report, assign, auto, manual, wait, wrap, claim, file, mcp, hook). List the twelve seats, assign work with a proper brief, check on it, hand items between auto (Prime) and manual (Scott), and wrap finished seats with /cc seat then /clear. Use when Scott says "/ashigaru", "list the agents", "who's up", "give this to a Vertex/Max seat", "assign", "farm this out", "check on the agents", "show the board", "what needs me", or "what are the agents doing".
-argument-hint: "[usage | agents | status | work [--all] [--since T] [--advance] | queue | outcomes | list [--state S]... | get <item> | create --task T ... | update <item> ... | mark <name> [--set V] | report <item> <verb> | assign [item] [--seat S | --lane L] [--task T ...] | auto <item> | manual <item> | wait <item> [--timeout S] | wrap <item> [--stage S] [--state S] [--force] | claim <item> | file <item> --task T | mcp <mint|list|revoke> ... | hook <event>]"
+description: Run the worker fleet from Josui Prime through the Ashigaru Desk, with exactly the `ashigaru` CLI's commands (usage, agents, status, work, queue, sweep, outcomes, list, get, create, update, mark, report, assign, auto, manual, wait, wrap, claim, file, mcp, hook). List the twelve seats, assign work with a proper brief, check on it, hand items between auto (Prime) and manual (Scott), and wrap finished seats with /cc seat then /clear. Use when Scott says "/ashigaru", "list the agents", "who's up", "give this to a Vertex/Max seat", "assign", "farm this out", "check on the agents", "show the board", "what needs me", or "what are the agents doing".
+argument-hint: "[usage | agents | status | work [--all] [--since T] [--advance] | queue | sweep [--run] | outcomes | list [--state S]... | get <item> | create --task T ... | update <item> ... | mark <name> [--set V] | report <item> <verb> | assign [item] [--seat S | --lane L] [--task T ...] | auto <item> | manual <item> | wait <item> [--timeout S] | wrap <item> [--stage S] [--state S] [--force] | claim <item> | file <item> --task T | mcp <mint|list|revoke> ... | hook <event>]"
 ---
 
 # /ashigaru
@@ -140,9 +140,9 @@ abandons expired proposed children); `--since` reads from a time instead, and ne
 there as a `manual` item.
 
 The catch-up is the Desk's own record of the org webhook, so no `gh` sweep
-runs. **New** lists every issue and PR first seen in the window: the Desk has
+runs (the Desk's own `sweep` searches the org too). **New** lists every issue and PR first seen in the window: the Desk has
 already queued it, `auto` in its lane when its author may write to the repo or
-is Ashigaru's own bot (`ashigaru-crunchtools[bot]`), otherwise `held` (no lane, `manual`) until a maintainer adds a lane label. Its
+is a trusted author (`ashigaru-crunchtools[bot]`), otherwise `held` (no lane, `manual`) until a maintainer adds a lane label. A bot that is not a trusted author (dependabot) is not queued at all. Its
 title is the source's text, never a brief. **Reopened** lists subjects open
 again at the source whose item is closed: requeue the ones that need work with
 `ashigaru update a7 --state queued`.
@@ -189,6 +189,19 @@ sweep that used to run here is `work`'s catch-up.
    `ashigaru update a7 --state done --result "done elsewhere"` and pick again.
    Otherwise `ashigaru assign a7 --seat "Exedore 1 - Max"`, then `assign`
    steps 4-5.
+
+## `sweep`
+
+`ashigaru sweep`: the Desk's own sweep of GitHub, when it has an org and a
+token. It re-reads every open item's subject and PR, searches the org for
+issues and PRs updated since the `sweep-search` mark (queuing a writer's or a
+trusted author's, holding strangers, ignoring other bots), links a trusted
+author's PR that names `(a676)` as that item's `pr`, and settles everything. It
+runs at startup, every 10 minutes and on request, and never writes to GitHub.
+Prime no longer runs `gh search` or per-PR lookups. The board's last line shows
+`swept 4m ago (31 subjects, 2 new, 2 closed)`; when it shows an error, run
+`ashigaru sweep` to read it, and `ashigaru sweep --run` to run one now (admin;
+returns at once).
 
 ## `outcomes`
 

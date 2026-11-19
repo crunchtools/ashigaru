@@ -78,6 +78,18 @@ class IntakeItem:
 
 
 @dataclass(frozen=True)
+class Found:
+    """One subject a sweep search found."""
+
+    item: IntakeItem
+    association: str
+    """The author's tie to the org, as the adapter maps it: OWNER and MEMBER count as writers; anything
+    else (CONTRIBUTOR, NONE) does not."""
+    body: str
+    """The subject's text, empty when it has none."""
+
+
+@dataclass(frozen=True)
 class Delivery:
     """A verified delivery, mapped. An event the adapter does not handle maps to neither."""
 
@@ -108,6 +120,16 @@ class Forge(Protocol):
         """The branch (`branch`, else the repo's default) and the verdict on `sha` of each check it
         requires, pending for one that has not reported. Raises OSError or ValueError when the forge
         cannot say."""
+        ...
+
+    def subject(self, repo: str, number: int, token: str) -> IntakeItem:
+        """One issue or PR as a delivery would have mapped it, read from the forge. Raises OSError or
+        ValueError when the forge cannot say."""
+        ...
+
+    def updated(self, org: str, since: str, token: str) -> list[Found]:
+        """Every subject in `org` changed at or after `since` (a UTC time as ISO 8601 with a Z),
+        oldest change first. Raises OSError or ValueError when the forge cannot say."""
         ...
 
 

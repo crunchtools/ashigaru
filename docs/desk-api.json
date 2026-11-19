@@ -166,6 +166,17 @@
           },
           "summary": {
             "$ref": "#/components/schemas/SeatSummary"
+          },
+          "sweep": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SweepRun"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The last sweep, so a person sees the fallback alive."
           }
         },
         "required": [
@@ -3173,6 +3184,129 @@
         "title": "SubjectState",
         "type": "string"
       },
+      "Sweep": {
+        "description": "`ashigaru sweep`: whether the timer runs here, how often, if a run is under way, and the last.",
+        "properties": {
+          "configured": {
+            "description": "False without the forge's token and org: no timer runs.",
+            "title": "Configured",
+            "type": "boolean"
+          },
+          "every": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Seconds between runs.",
+            "title": "Every"
+          },
+          "last": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SweepRun"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "requested": {
+            "default": false,
+            "description": "True when this call asked for a run now.",
+            "title": "Requested",
+            "type": "boolean"
+          },
+          "running": {
+            "title": "Running",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "configured",
+          "every",
+          "running",
+          "last"
+        ],
+        "title": "Sweep",
+        "type": "object"
+      },
+      "SweepRun": {
+        "description": "One run of the sweep: what started it, when, what it read, queued and closed, and why it\nstopped short, if it did.",
+        "properties": {
+          "closed": {
+            "description": "Items it settled: closed, requeued or marked landed.",
+            "title": "Closed",
+            "type": "integer"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The first thing it could not read, e.g. `search: HTTP 403`.",
+            "title": "Error"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "null while it runs.",
+            "title": "Finished At"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "new": {
+            "description": "Subjects queued (or held) that had no item.",
+            "title": "New",
+            "type": "integer"
+          },
+          "started_at": {
+            "title": "Started At",
+            "type": "string"
+          },
+          "subjects": {
+            "description": "Subjects read from the forge.",
+            "title": "Subjects",
+            "type": "integer"
+          },
+          "trigger": {
+            "enum": [
+              "startup",
+              "timer",
+              "request"
+            ],
+            "title": "Trigger",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "trigger",
+          "started_at",
+          "finished_at",
+          "subjects",
+          "new",
+          "closed",
+          "error"
+        ],
+        "title": "SweepRun",
+        "type": "object"
+      },
       "Turn": {
         "enum": [
           "active",
@@ -6048,6 +6182,98 @@
           }
         ],
         "summary": "Subject",
+        "tags": [
+          "views"
+        ]
+      }
+    },
+    "/v1/sweep": {
+      "get": {
+        "description": "`ashigaru sweep`: whether the timer that reads the forge back runs here, how often, whether a\nrun is under way, and the last run's counts and error.",
+        "operationId": "sweep_state_v1_sweep_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Sweep"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Missing, unknown or revoked API key."
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Sweep State",
+        "tags": [
+          "views"
+        ]
+      },
+      "post": {
+        "description": "`ashigaru sweep --run`, admin: wake the timer for a run now, and return at once; the run's\ncounts land in `last` when it finishes. 409 when no timer runs (no forge token or org).",
+        "operationId": "sweep_now_v1_sweep_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Sweep"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Missing, unknown or revoked API key."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The caller's role, or its seat, may not do this."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A taken id or subject_key (the detail names the item holding it), an existing identity, a second child in one assignment, or an item or seat not in a state to assign, claim or wrap."
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Sweep Now",
         "tags": [
           "views"
         ]
