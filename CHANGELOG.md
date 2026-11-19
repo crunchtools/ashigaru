@@ -8,6 +8,13 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- Subjects (migration 8, `GET /v1/subjects/{key}`): the forge's own state of
+  each issue and PR, from the webhook, now also `pull_request_review`.
+- Items carry `pr` (`--pr`, `--clear pr`; a seat may set it) and server-set
+  `landed_at`.
+- The Desk settles items on delivery (and in `work`/`status`): seatless auto
+  items close when their subject merges or closes and requeue on reopen; seat
+  and manual items only get `landed_at`.
 - `ashigaru status` (`GET /v1/status`, MCP `desk_status`): the board a person
   reads. Busy seats with their whole task, free and missing seats, `X of Y up,
   Z open`, and NEEDS YOU: idle manual seats with their question, Scott's

@@ -6,9 +6,9 @@ that is not GitHub Actions, whose suites `workflow_run` already names better).
 An org webhook receives only `completed` for check suites, so another App's
 check appears once it finishes.
 
-Intake comes from `issues` (an outcome) and `pull_request` (a story), keyed
-`owner/name#number`; GitHub numbers issues and PRs from one sequence. A label
-`lane:<lane>` is the lane hint.
+Intake comes from `issues` (an outcome), `pull_request` (a story) and `pull_request_review` (the same
+story, plus the review it submits or dismisses), keyed `owner/name#number`; GitHub numbers issues and PRs
+from one sequence. A label `lane:<lane>` is the lane hint.
 
 `required_checks` names the status checks a branch requires (rulesets, org ones included, and classic
 protection), each with the App it must come from, and `reported` what each name and App has said on a
@@ -42,6 +42,7 @@ ACCOUNT = re.compile(r"^[A-Za-z0-9][A-Za-z0-9-]{0,38}$")
 REPO = re.compile(r"^[a-z0-9_.-]+/[a-z0-9_.-]+$")
 ACTIONS_APP = "github-actions"
 LANE_LABEL = "lane:"
+REVIEWS = frozenset({"approved", "changes_requested"})
 NOT_A_COLLABORATOR = 404
 RULES_TTL = 60.0
 """Seconds a branch's required checks are remembered."""
@@ -281,7 +282,31 @@ def check_suite(payload: Mapping[str, Any]) -> tuple[CIUpdate, ...]:
     )
 
 
-def _intake(payload: Mapping[str, Any], subject: str, kind: Kind) -> tuple[IntakeItem, ...]:
+def _merged(thing: Mapping[str, Any]) -> bool:
+    """A merged PR: `merged` is true, or (some payloads omit it) `merged_at` is a non-empty string."""
+    merged_at = thing.get("merged_at")
+    return thing.get("merged") is True or (isinstance(merged_at, str) and merged_at != "")
+
+
+def _draft(thing: Mapping[str, Any]) -> bool | None:
+    return draft if isinstance(draft := thing.get("draft"), bool) else None
+
+
+def _review(payload: Mapping[str, Any]) -> str | None:
+    """The review a `pull_request_review` event submits or dismisses; a plain comment, or any other
+    action, changes nothing."""
+    action = payload.get("action")
+    if action == "dismissed":
+        return "dismissed"
+    state = payload_get(payload, "review", "state")
+    if action == "submitted" and isinstance(state, str) and state.lower() in REVIEWS:
+        return state.lower()
+    return None
+
+
+def _intake(
+    payload: Mapping[str, Any], subject: str, kind: Kind, *, review: bool = False
+) -> tuple[IntakeItem, ...]:
     if payload.get("action") == "deleted":
         return ()
     thing = payload.get(subject)
@@ -309,6 +334,10 @@ def _intake(payload: Mapping[str, Any], subject: str, kind: Kind) -> tuple[Intak
             sender=sender if isinstance(sender := payload_get(payload, "sender", "login"), str) else None,
             approves_lane=_lane_label(payload, "labeled"),
             revokes_lane=_lane_label(payload, "unlabeled"),
+            merged=subject == "pull_request" and _merged(thing),
+            draft=_draft(thing) if subject == "pull_request" else None,
+            review=_review(payload) if review else None,
+            updated_at=updated if isinstance(updated := thing.get("updated_at"), str) else None,
             head=head.lower() if isinstance(head := payload_get(thing, "head", "sha"), str) else None,
             head_before=before.lower()
             if payload.get("action") == "synchronize" and isinstance(before := payload.get("before"), str)
@@ -358,6 +387,8 @@ class GitHub:
             return Delivery(event, intake=_intake(payload, "issue", Kind.OUTCOME))
         if event == "pull_request":
             return Delivery(event, intake=_intake(payload, "pull_request", Kind.STORY))
+        if event == "pull_request_review":
+            return Delivery(event, intake=_intake(payload, "pull_request", Kind.STORY, review=True))
         return Delivery(event)
 
     def may_write(self, repo: str, account: str, token: str) -> bool:

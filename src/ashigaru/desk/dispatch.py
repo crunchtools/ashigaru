@@ -10,7 +10,7 @@ import sqlite3
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from . import store
+from . import store, subjects
 from .model import CLOSED, SEAT_ROW_FIELDS, STALE_SEAT, Billing, Lane, Role, SeatStatus, State, Turn, Wrap
 
 PICK_SEAT = """
@@ -444,6 +444,7 @@ def status(conn: sqlite3.Connection) -> dict[str, Any]:
     """`ashigaru status`, the board a person reads: each busy seat with its work in full, the free and
     missing seats by name, the tally, and NEEDS YOU: each manual seat idle on what it last said, then
     Scott's blocked work, then subjects held for his approval."""
+    subjects.hygiene(conn)
     roster = seats(conn)
     busy = [_busy(conn, row) for row in roster if row["status"] == SeatStatus.BUSY]
     idle = [row for row in roster if row["status"] != SeatStatus.BUSY]
@@ -473,7 +474,9 @@ def status(conn: sqlite3.Connection) -> dict[str, Any]:
 def work(conn: sqlite3.Connection, show_all: bool = False, since: str | None = None) -> dict[str, Any]:
     """`ashigaru work`, the whole check round: the check table, the seats with how many are up and how
     many items are open, the queue, and the catch-up. The check table stops at QUEUE_LIMIT rows
-    (`truncated`); GET /v1/items pages the rest."""
+    (`truncated`); GET /v1/items pages the rest. Like every view of the queue, it first settles items
+    whose subject moved (subjects.hygiene)."""
+    subjects.hygiene(conn)
     items = store.check(conn, show_all, limit=QUEUE_LIMIT + 1)
     roster = seats(conn)
     return {

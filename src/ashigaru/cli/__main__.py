@@ -39,6 +39,7 @@ FIELDS = (
     ("--state", None),
     ("--note", None),
     ("--filed-by", "admin: the identity that filed it"),
+    ("--pr", "the PR carrying the work, owner/repo#N or its URL"),
 )
 """Item fields `create` and `update` both take."""
 UPDATE_ONLY = (
@@ -52,7 +53,7 @@ UPDATE_ONLY = (
 )
 CLEARABLE = (
     "kind", "parent", "subject_key", "done_when", "ref", "repo", "lane", "note", "filed_by", "result",
-    "next", "learned", "blocked_reason", "check_after", "verified_by", "wrap", "after",
+    "next", "learned", "blocked_reason", "check_after", "verified_by", "wrap", "after", "pr",
 )  # fmt: skip
 
 

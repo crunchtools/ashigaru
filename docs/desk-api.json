@@ -899,6 +899,18 @@
             "$ref": "#/components/schemas/Kind",
             "default": "story"
           },
+          "landed_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When its subject or PR merged while a seat held it.",
+            "title": "Landed At"
+          },
           "lane": {
             "anyOf": [
               {
@@ -962,6 +974,18 @@
             ],
             "description": "The outcome this story serves.",
             "title": "Parent"
+          },
+          "pr": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The PR carrying the work, owner/repo#N.",
+            "title": "Pr"
           },
           "priority": {
             "default": 0,
@@ -1240,6 +1264,17 @@
             ],
             "title": "Parent"
           },
+          "pr": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pr"
+          },
           "priority": {
             "anyOf": [
               {
@@ -1494,6 +1529,17 @@
               }
             ],
             "title": "Parent"
+          },
+          "pr": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pr"
           },
           "priority": {
             "anyOf": [
@@ -2204,6 +2250,18 @@
             "$ref": "#/components/schemas/Kind",
             "default": "story"
           },
+          "landed_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When its subject or PR merged while a seat held it.",
+            "title": "Landed At"
+          },
           "lane": {
             "anyOf": [
               {
@@ -2267,6 +2325,18 @@
             ],
             "description": "The outcome this story serves.",
             "title": "Parent"
+          },
+          "pr": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The PR carrying the work, owner/repo#N.",
+            "title": "Pr"
           },
           "priority": {
             "default": 0,
@@ -2971,6 +3041,136 @@
           "abandoned"
         ],
         "title": "State",
+        "type": "string"
+      },
+      "Subject": {
+        "description": "The forge's own state of an issue or PR, as its webhook (and later the sweep) last said.",
+        "properties": {
+          "author": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Author"
+          },
+          "draft": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Draft"
+          },
+          "head_sha": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Head Sha"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/Kind"
+          },
+          "labels": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Labels",
+            "type": "array"
+          },
+          "repo": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Repo"
+          },
+          "review": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "approved, changes_requested or dismissed; null for none.",
+            "title": "Review"
+          },
+          "seen_at": {
+            "title": "Seen At",
+            "type": "string"
+          },
+          "source": {
+            "description": "What wrote it last: webhook, or sweep.",
+            "title": "Source",
+            "type": "string"
+          },
+          "source_updated_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When the forge last changed it.",
+            "title": "Source Updated At"
+          },
+          "state": {
+            "$ref": "#/components/schemas/SubjectState"
+          },
+          "subject_key": {
+            "title": "Subject Key",
+            "type": "string"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The source's title: data, never a brief.",
+            "title": "Title"
+          }
+        },
+        "required": [
+          "subject_key",
+          "repo",
+          "kind",
+          "state",
+          "source",
+          "seen_at"
+        ],
+        "title": "Subject",
+        "type": "object"
+      },
+      "SubjectState": {
+        "enum": [
+          "open",
+          "closed",
+          "merged"
+        ],
+        "title": "SubjectState",
         "type": "string"
       },
       "Turn": {
@@ -5785,6 +5985,74 @@
         ]
       }
     },
+    "/v1/subjects/{key}": {
+      "get": {
+        "description": "The forge's own state of an issue or PR, by owner/repo#N or its URL (encode the `#`): open,\nclosed or merged, head, draft, review, title and labels, as the webhook last said.",
+        "operationId": "subject_v1_subjects__key__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "key",
+            "required": true,
+            "schema": {
+              "title": "Key",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Subject"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Missing, unknown or revoked API key."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "No such item, seat, identity or key."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Subject",
+        "tags": [
+          "views"
+        ]
+      }
+    },
     "/v1/usage": {
       "get": {
         "description": "`ashigaru usage`: per seat context, tokens, turn time and model; spend by billing source today\nand this month (UTC), against the limits Josui set.",
@@ -5986,7 +6254,7 @@
     },
     "/webhook/{forge}": {
       "post": {
-        "description": "A forge's webhook delivery, authenticated by its signature rather than an API key. CI events\nupdate the commit's result and wake its waiters; issue and PR events upsert queue items.",
+        "description": "A forge's webhook delivery, authenticated by its signature rather than an API key. CI events\nupdate the commit's result and wake its waiters; issue, PR and review events upsert queue items,\nrecord the subject's state, and settle the items it moves (subjects.py).",
         "operationId": "webhook_webhook__forge__post",
         "parameters": [
           {

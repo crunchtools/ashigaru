@@ -146,6 +146,10 @@ is Ashigaru's own bot (`ashigaru-crunchtools[bot]`), otherwise `held` (no lane, 
 title is the source's text, never a brief. **Reopened** lists subjects open
 again at the source whose item is closed: requeue the ones that need work with
 `ashigaru update a7 --state queued`.
+The Desk closes seatless auto items whose subject merged or closed, and
+requeues ones it closed that reopen; it never closes a seat's or Scott's item,
+only marks it landed. A seat records its PR with
+`ashigaru update a7 --pr owner/repo#N`.
 
 1. **manual** items: report only. If one looks finished, say "looks finished;
    say /ashigaru auto a7 to wrap up".
