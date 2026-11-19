@@ -165,7 +165,10 @@ links a writer's PR whose title or body names `(a676)` as that item's `pr` when
 the item is in the PR's repo; then settles everything. The mark moves to the
 run's start once the search was read whole, or to the last hit's time when the
 forge's cap of 1000 cut it short, but never past a hit it could not judge (its
-author's write access unknown), so the next run reads that hit again. One
+author's write access unknown), so the next run reads that hit again; a hit
+deferred for over a day stops holding it. A PR links to an item in its repo (the
+item's `repo`, else its subject's). A run that cannot renew its lease stops at
+once, without moving the mark. One
 run at a time holds the `sweep-lock` mark as a 60-second lease it renews every
 15 seconds, so a run killed mid-way frees it within a minute; a run that finds a
 live lease writes a row with `skipped` saying whose, and the timer retries once

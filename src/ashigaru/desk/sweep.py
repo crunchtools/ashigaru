@@ -64,6 +64,8 @@ FETCHERS = 8
 """Subjects read from the forge at once."""
 READ_BATCH = 4 * FETCHERS
 """Subjects queued for reading at once."""
+DEFERRED_FOR = timedelta(days=1)
+"""How long a hit the sweep could not judge may hold the mark back before the search reads on."""
 KEPT = timedelta(days=30)
 """How long a run's row is kept."""
 LOCK = "sweep-lock"
@@ -128,6 +130,8 @@ class Counts:
     errors: list[str] = dataclasses.field(default_factory=list)
     writers: dict[tuple[str, str], bool] = dataclasses.field(default_factory=dict)
     """The forge's answer for each (repo, author) asked this run."""
+    lost: threading.Event = dataclasses.field(default_factory=threading.Event)
+    """Set when the lease could not be renewed: another run may start, so this one stops."""
     unasked: dict[tuple[str, str], str] = dataclasses.field(default_factory=dict)
     """Why the forge could not answer for a (repo, author): its hits wait for the next run."""
 
@@ -173,6 +177,10 @@ def _number(key: str) -> tuple[str, int] | None:
     return (repo, int(number)) if "/" in repo and number.isdigit() else None
 
 
+class LeaseLostError(Exception):
+    """The run's lease could not be renewed: it stops before another run's work overlaps it."""
+
+
 class Unanswered(ValueError):
     """The forge could not say whether a hit's author may write: the hit waits for the next run."""
 
@@ -214,7 +222,8 @@ def _found(conn: sqlite3.Connection, settings: Settings, hit: Found, counts: Cou
             found = store.get_item(conn, work)
             if (
                 found
-                and (found["repo"] or "").lower() == (item.repo or "").lower()
+                and (found["repo"] or (_number(found["subject_key"] or "") or ("",))[0]).lower()
+                == (item.repo or "").lower()
                 and not found["pr"]
                 and found["state"] not in CLOSED
                 and found["wrap"] != Wrap.CLEARED
@@ -257,8 +266,9 @@ def _lease(conn: sqlite3.Connection, settings: Settings, trigger: str, started: 
 
 
 @contextlib.contextmanager
-def _renewing(db_path: str, settings: Settings, run_id: int) -> Iterator[None]:
-    """Renew run_id's lease every quarter lease, on its own connection, until the run ends."""
+def _renewing(db_path: str, settings: Settings, run_id: int, lost: threading.Event) -> Iterator[None]:
+    """Renew run_id's lease every quarter lease, on its own connection, until the run ends. A renewal
+    that fails, or finds the lease no longer this run's, sets `lost` and stops renewing."""
     done = threading.Event()
 
     def renew() -> None:
@@ -266,7 +276,13 @@ def _renewing(db_path: str, settings: Settings, run_id: int) -> Iterator[None]:
         try:
             while not done.wait(settings.lease / 4):
                 beat = f"{_beat(datetime.now(UTC))} {run_id}"
-                conn.execute(RENEW, (beat, store.now(), LOCK, f"% {run_id}"))
+                if not conn.execute(RENEW, (beat, store.now(), LOCK, f"% {run_id}")).rowcount:
+                    LOG.error("sweep run %s no longer holds the lease", run_id)
+                    lost.set()
+                    return
+        except sqlite3.Error:
+            LOG.exception("sweep run %s could not renew its lease", run_id)
+            lost.set()
         finally:
             conn.close()
 
@@ -287,6 +303,8 @@ def _read(conn: sqlite3.Connection, settings: Settings, keys: set[str], counts: 
     with ThreadPoolExecutor(FETCHERS) as pool:
         for batch in itertools.batched(wanted, READ_BATCH):
             reads = {key: pool.submit(settings.forge.subject, *found, settings.token) for key, found in batch}
+            if counts.lost.is_set():
+                raise LeaseLostError
             for key, read in reads.items():
                 try:
                     item = read.result()
@@ -339,6 +357,8 @@ def _search(
     _ask(conn, settings, [hit for hit in search.hits if hit.item.subject_key not in keys], counts)
     deferred: list[str] = []
     for hit in search.hits:
+        if counts.lost.is_set():
+            raise LeaseLostError
         try:
             if hit.item.subject_key not in keys:
                 _found(conn, settings, hit, counts)
@@ -348,7 +368,10 @@ def _search(
     reached = _stamp(started) if search.complete or not search.hits else search.hits[-1].item.updated_at
     if not search.complete:
         counts.errors.insert(0, "search: cut at the forge's cap; the next run reads on")
-    held = min([reached or _stamp(started), *deferred])
+    oldest = _stamp(started - DEFERRED_FOR)
+    held = min([reached or _stamp(started), *(when for when in deferred if when >= oldest)])
+    if any(when < oldest for when in deferred):
+        counts.errors.insert(0, f"search: gave up on hits deferred past {DEFERRED_FOR}")
     if held:  # a hit with no time cannot be read from again: the mark stays
         store.set_mark(conn, MARK, held, ACTOR)
 
@@ -364,11 +387,13 @@ def run(db_path: str, settings: Settings, trigger: str) -> dict[str, Any]:
             return _run(conn, run_id)
         counts = Counts()
         try:
-            with _renewing(db_path, settings, run_id):
+            with _renewing(db_path, settings, run_id, counts.lost):
                 keys = {row[0] for row in conn.execute(OPEN_SUBJECTS)}
                 _read(conn, settings, keys, counts)
                 _search(conn, settings, keys, started, counts)
                 counts.closed += len(subjects.hygiene(conn))
+        except LeaseLostError:  # the next run reads it all again; the mark has not moved
+            counts.errors.insert(0, "stopped: lost the lease")
         except Exception as failed:  # the row still finishes, saying why it stopped
             counts.errors.insert(0, f"stopped: {_why(failed)}")
             raise

@@ -148,16 +148,18 @@ def test_a_writers_pr_naming_an_item_becomes_its_pr(
     client: TestClient, keys: Keys, conn: sqlite3.Connection, db: Path
 ) -> None:
     story = create(client, keys, repo="crunchtools/x")
+    keyed = create(client, keys, subject_key="crunchtools/x#77")
     other = create(client, keys, repo="crunchtools/x")
     elsewhere = create(client, keys, repo="crunchtools/y")
     hits = [
-        Found(subject(9, closed=True, merged=True), "MEMBER", f"Does the thing ({story}) ({elsewhere})"),
+        Found(subject(9, closed=True, merged=True), "MEMBER", f"Does ({story}) ({keyed}) ({elsewhere})"),
         Found(subject(10), "CONTRIBUTOR", f"Hijack ({other})"),
     ]
-    sweeping(db, FakeForge(hits=hits))
+    sweeping(db, FakeForge({77: subject(77)}, hits))
     assert item(conn, story)["pr"] == "crunchtools/x#9" and item(conn, story)["state"] == "done"
     assert item(conn, other)["pr"] is None
     assert item(conn, elsewhere)["pr"] is None, "a PR links only to work in its own repo"
+    assert item(conn, keyed)["pr"] == "crunchtools/x#9", "a repo-less item's repo is its subject's"
 
 
 def test_a_subject_it_cannot_read_is_reported_and_the_rest_still_settle(
@@ -288,6 +290,32 @@ def test_a_permission_check_cut_short_is_that_subjects_error_and_the_search_goes
     sweeping(db, answered)
     assert answered.searched[-1] == "2026-11-19T08:50:00Z", "the next run reads the deferred hit again"
     assert {row["subject_key"] for row in store.list_items(conn)} == {"crunchtools/x#1", "crunchtools/x#2"}
+
+
+def test_a_hit_deferred_for_a_day_no_longer_holds_the_mark(conn: sqlite3.Connection, db: Path) -> None:
+    class Cut(FakeForge):
+        def may_write(self, repo: str, account: str, token: str) -> bool:
+            raise http.client.IncompleteRead(b"")
+
+    hits = [Found(subject(1, author="reader", updated_at=LONG_AGO), "MEMBER", "")]
+    run = sweeping(db, Cut(hits=hits))
+    assert "gave up on hits deferred past 1 day" in run["error"]
+    assert (store.get_mark(conn, sweep.MARK) or {})["value"] > LONG_AGO, "the mark reads on"
+
+
+def test_a_lost_lease_stops_the_run_cleanly(conn: sqlite3.Connection, db: Path) -> None:
+    class Stolen(FakeForge):
+        def updated(self, org: str, since: str, token: str) -> Search:
+            store.set_mark(conn, sweep.LOCK, f"{sweep._beat(datetime.now(UTC))} 99", JOSUI)
+            time.sleep(0.2)
+            return Search([Found(subject(1), "MEMBER", "")], True)
+
+    settings = sweep.Settings(Stolen(), "token", ORG, every=HOUR, lease=0.1)
+    run = sweep.run(str(db), settings, "timer")
+    assert run["finished_at"] and run["error"].startswith("stopped: lost the lease")
+    assert store.list_items(conn) == [], "nothing after the loss is written"
+    assert store.get_mark(conn, sweep.MARK) is None, "the next run reads the window again"
+    assert (store.get_mark(conn, sweep.LOCK) or {})["value"].endswith(" 99"), "the new holder's lease stays"
 
 
 def test_a_body_cut_short_is_one_subjects_error_and_the_run_still_finishes(
