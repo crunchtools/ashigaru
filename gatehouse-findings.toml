@@ -23,3 +23,11 @@ file = "src/ashigaru/desk/subjects.py"
 evidence = "if item.updated_at and stored_at and item.updated_at < stored_at:\n    return False"
 status = "not-a-bug"
 reason = "GitHub stamps updated_at to the second and sends nothing finer, so two changes in one second cannot be ordered by any field it gives; equal wins so a second change in that second lands, merged is sticky regardless, and the subject's next delivery (any later edit, label, push or review) records its state again."
+
+[[findings]]
+agent = "performance"
+category = "performance"
+file = "src/ashigaru/desk/sweep.py"
+evidence = "with ThreadPoolExecutor(FETCHERS) as pool:\n    reads = {\n        key: pool.submit(settings.forge.subject, *found, settings.token) for key, found in wanted.items()\n    }"
+status = "not-a-bug"
+reason = "The keys are the Desk's open items, a few dozen and capped by the check table's 1000; a queued future per key is a few hundred bytes, and batching would only add waits between batches."
