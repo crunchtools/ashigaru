@@ -1,7 +1,7 @@
 ---
 name: ashigaru
-description: Run the worker fleet from Josui Prime through the Ashigaru Desk, with exactly the `ashigaru` CLI's commands (usage, agents, work, queue, outcomes, list, get, create, update, mark, report, assign, auto, manual, wait, wrap, claim, file, mcp, hook). List the twelve seats, assign work with a proper brief, check on it, hand items between auto (Prime) and manual (Scott), and wrap finished seats with /cc seat then /clear. Use when Scott says "/ashigaru", "list the agents", "who's up", "give this to a Vertex/Max seat", "assign", "farm this out", "check on the agents", or "what are the agents doing".
-argument-hint: "[usage | agents | work [--all] [--since T] [--advance] | queue | outcomes | list [--state S]... | get <item> | create --task T ... | update <item> ... | mark <name> [--set V] | report <item> <verb> | assign [item] [--seat S | --lane L] [--task T ...] | auto <item> | manual <item> | wait <item> [--timeout S] | wrap <item> [--stage S] [--state S] [--force] | claim <item> | file <item> --task T | mcp <mint|list|revoke> ... | hook <event>]"
+description: Run the worker fleet from Josui Prime through the Ashigaru Desk, with exactly the `ashigaru` CLI's commands (usage, agents, status, work, queue, outcomes, list, get, create, update, mark, report, assign, auto, manual, wait, wrap, claim, file, mcp, hook). List the twelve seats, assign work with a proper brief, check on it, hand items between auto (Prime) and manual (Scott), and wrap finished seats with /cc seat then /clear. Use when Scott says "/ashigaru", "list the agents", "who's up", "give this to a Vertex/Max seat", "assign", "farm this out", "check on the agents", "show the board", "what needs me", or "what are the agents doing".
+argument-hint: "[usage | agents | status | work [--all] [--since T] [--advance] | queue | outcomes | list [--state S]... | get <item> | create --task T ... | update <item> ... | mark <name> [--set V] | report <item> <verb> | assign [item] [--seat S | --lane L] [--task T ...] | auto <item> | manual <item> | wait <item> [--timeout S] | wrap <item> [--stage S] [--state S] [--force] | claim <item> | file <item> --task T | mcp <mint|list|revoke> ... | hook <event>]"
 ---
 
 # /ashigaru
@@ -100,8 +100,9 @@ near its limit.
 ## `agents`
 
 `ashigaru agents`: who's up, one table by seat name with `free` / `busy-auto` / `busy-manual` /
-`missing` and the item each holds. `work` carries the same table and its
-`N of 12 up, M items open` line, so a round needs no separate `agents`. Call
+`missing`, the work each holds (WORK), how long (TIME), last check-in (SEEN)
+and its whole TASK, ending `N of 12 up`. `work` carries the same table and its
+`N of 12 up, K open` line, so a round needs no separate `agents`. Call
 **ListAgents** too when a seat is `missing`: several `offline` rows with one name are stale registrations. For a
 missing seat, the likely cause and fix:
 
@@ -116,12 +117,21 @@ missing seat, the likely cause and fix:
   claude-agent (developer 1.12.0+), the pane is `tmux -L claude-agent …
   -t =claude-agent:0`. The `=` stops tmux prefix-matching another session.
 
+## `status`
+
+`ashigaru status`: the board Scott reads. Each busy seat (SEAT, MODE, WORK,
+TIME, ACTIVE, whole TASK), one line of free and missing seats with `X of Y up,
+Z open`, then NEEDS YOU: manual seats idle with the question they last asked
+(`waiting_on`, from the seat's `stop` hook, dropped on a new turn or `/clear`),
+Scott's blocked manual work, and subjects intake holds for approval. Show it
+for "show the board" or "what needs me"; `work` is the round that acts.
+
 ## `work`
 
 The check round in one call. Seats report on their own; this is for silence
 and for Scott. `ashigaru work --advance` returns, in order: the check table of
 open items (`--all` adds closed and cleared ones), the seats with
-`N of 12 up, M items open`, the queue with what each item waits on, and the
+`N of 12 up, K open`, the queue with what each item waits on, and the
 GitHub catch-up after the `sweep` mark, then moves the mark to the last event
 the round covered. A round cut at 1000 (`truncated`) reads on from there next
 time, so nothing is lost or repeated. Without `--advance` the mark stays put,

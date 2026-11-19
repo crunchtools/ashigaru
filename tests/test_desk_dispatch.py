@@ -207,7 +207,7 @@ def test_the_migration_counts_billed_sessions_as_booked(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     old = store.connect(tmp_path / "old.db")
-    monkeypatch.setattr(store, "MIGRATIONS", store.MIGRATIONS[:-1])
+    monkeypatch.setattr(store, "MIGRATIONS", store.MIGRATIONS[:5])
     store.migrate(old)
     for name, billing in ((MINE, "max"), (OTHER, None)):
         old.execute(

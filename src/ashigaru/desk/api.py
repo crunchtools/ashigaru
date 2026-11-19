@@ -26,6 +26,7 @@ from .model import (
     Assign,
     Billing,
     BillingLimits,
+    Board,
     CheckRow,
     Event,
     FileChild,
@@ -259,9 +260,16 @@ def check(conn: Conn, who: Who, show_all: Annotated[bool, Query(alias="all")] = 
 Since = Annotated[str | None, Query(description="Start the catch-up at this time instead of the sweep mark.")]
 
 
-def _round(conn: sqlite3.Connection, show_all: bool, since: str | None) -> Round:
+def mine(who: auth.Caller, seat: dict[str, Any]) -> dict[str, Any]:
+    """A seat row as `who` may read it: `waiting_on` is what a seat said to Scott, so only an admin
+    and the seat itself see it."""
+    return seat if who.admin or seat["name"] == who.name else {**seat, "waiting_on": None}
+
+
+def _round(conn: sqlite3.Connection, who: auth.Caller, show_all: bool, since: str | None) -> Round:
     try:
-        return Round.model_validate(dispatch.work(conn, show_all, since))
+        found = dispatch.work(conn, show_all, since)
+        return Round.model_validate({**found, "seats": [mine(who, seat) for seat in found["seats"]]})
     except ValueError as error:
         what = "since" if since is not None else "the sweep mark"
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, f"{what} is not a time: {error}") from error
@@ -275,7 +283,7 @@ def work(
     the seats with how many are up and how many items are open, the queue, and the forge catch-up
     from the org webhook's intake after the sweep mark. It leaves the mark alone; like every view of
     the queue, it abandons proposed children past their expiry."""
-    return _round(conn, show_all, since)
+    return _round(conn, who, show_all, since)
 
 
 @router.post("/v1/work", tags=["views"], responses=errors(401, 403, 422))
@@ -289,9 +297,24 @@ def advance(
     move the mark past events it never read."""
     if since is not None:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "since cannot be used with advance")
-    found = _round(conn, show_all, since)
+    found = _round(conn, who, show_all, since)
     moved = store.advance_mark(conn, dispatch.SWEEP, found.catch_up.until, who.name)
     return found.model_copy(update={"catch_up": found.catch_up.model_copy(update={"advanced": moved})})
+
+
+@router.get("/v1/status", tags=["views"], responses=errors(401))
+def board(conn: Conn, who: Who) -> Board:
+    """`ashigaru status`, the board a person reads: each busy seat with its work, how long it has held
+    it, its last check-in and its whole task; the free and missing seats by name; how many seats are
+    up and items open; and NEEDS YOU: each manual seat idle on what it last said, Scott's blocked work,
+    and subjects held for his approval. A seat other than an admin sees only its own question."""
+    found = dispatch.status(conn)
+    needs = [
+        need
+        for need in found["needs_you"]
+        if need["why"] != "waiting" or who.admin or need["seat"] == who.name
+    ]
+    return Board.model_validate({**found, "needs_you": needs})
 
 
 @router.get("/v1/queue", tags=["views"], responses=errors(401))
@@ -305,12 +328,12 @@ def queue(conn: Conn, who: Who) -> Queue:
 def list_seats(conn: Conn, who: Who) -> list[Seat]:
     """Every seat, then each seat identity that never checked in. `missing` marks those, and any seat
     whose row has not changed in a day."""
-    return [Seat.model_validate(row) for row in dispatch.seats(conn)]
+    return [Seat.model_validate(mine(who, row)) for row in dispatch.seats(conn)]
 
 
 @router.get("/v1/seats/{name}", tags=["seats"], responses=errors(401, 404))
 def get_seat(conn: Conn, who: Who, name: str) -> Seat:
-    return Seat.model_validate(_found(dispatch.seat(conn, name), "seat"))
+    return Seat.model_validate(mine(who, _found(dispatch.seat(conn, name), "seat")))
 
 
 @router.patch("/v1/seats/{name}", tags=["seats"], responses=errors(401, 403))

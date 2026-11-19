@@ -283,3 +283,94 @@ def test_the_check_table_stops_at_its_limit_and_says_so(
     create(client, keys, task="two")
     round_ = work(client, keys)
     assert len(round_["items"]) == 1 and round_["truncated"] is True and round_["summary"]["open"] == TWO
+
+
+def board(client: TestClient, keys: Keys) -> dict[str, Any]:
+    got = client.get("/v1/status", headers=keys[SEAT])
+    assert got.status_code == OK, got.text
+    result: dict[str, Any] = got.json()
+    return result
+
+
+def test_the_board_shows_busy_seats_in_full_and_free_ones_by_name(
+    client: TestClient, keys: Keys, conn: sqlite3.Connection
+) -> None:
+    other = "Exedore 2 - Max"
+    with store.transaction(conn):
+        for name in (SEAT, other, "Dolza 1 - Max"):
+            store.write_seat(conn, name, {"status": "free", "lane": "exedore-max"})
+        conn.execute("UPDATE seats SET updated_at = ? WHERE name = 'Dolza 1 - Max'", (LONG_AGO,))
+    task = "a task long enough that any table would have clipped it, " * 3
+    work_id = create(client, keys, task=task)["id"]
+    assigned = client.post(f"/v1/items/{work_id}/assign", headers=keys[JOSUI], json={"seat": other})
+    assert assigned.status_code == OK, assigned.text
+    found = board(client, keys)
+    assert [row["seat"] for row in found["busy"]] == [other]
+    row = found["busy"][0]
+    assert (row["mode"], row["work"], row["state"], row["task"]) == ("auto", work_id, "assigned", task)
+    assert row["since"] and row["active"] and row["missing"] is False
+    assert (found["free"], found["missing"]) == ([SEAT], ["Dolza 1 - Max"])
+    assert found["summary"] == {"up": TWO, "seats": 3, "open": 1}
+
+
+def test_needs_you_lists_a_waiting_manual_seat_then_blocked_manual_work_then_held_subjects(
+    client: TestClient, keys: Keys, conn: sqlite3.Connection
+) -> None:
+    with store.transaction(conn):
+        store.write_seat(conn, SEAT, {"status": "free", "lane": "exedore-max"})
+    held = seen(conn, 7, ago(minutes=5))
+    seen(conn, 8, ago(minutes=5), author_writes=True, lane_hint="vertex")
+    blocked = create(client, keys, mode="manual", state="blocked", blocked_reason="which deck?")["id"]
+    create(client, keys, state="blocked", blocked_reason="Josui's, not Scott's")
+    path = f"/v1/seats/{SEAT}"
+    assert (
+        client.patch(path, headers=keys[SEAT], json={"turn": "active", "task": "OLF deck"}).status_code == OK
+    )
+    assert client.patch(
+        path, headers=keys[SEAT], json={"turn": "idle", "waiting_on": "Keep slide 4?"}
+    ).json()["waiting_on"] == ("Keep slide 4?")
+    needs = board(client, keys)["needs_you"]
+    assert [(need["why"], need["work"]) for need in needs][1:] == [("blocked", blocked), ("held", held)]
+    waiting = needs[0]
+    assert (waiting["why"], waiting["seat"], waiting["mode"], waiting["text"]) == (
+        "waiting",
+        SEAT,
+        "manual",
+        "Keep slide 4?",
+    )
+    assert waiting["state"] == "working"
+    assert "crunchtools/x#7 by fatherlinux" in needs[2]["text"]
+    client.patch(path, headers=keys[SEAT], json={"turn": "active"})
+    assert [need["why"] for need in board(client, keys)["needs_you"]] == ["blocked", "held"]
+
+
+def test_a_clear_drops_what_the_seat_was_waiting_on(client: TestClient, keys: Keys) -> None:
+    path = f"/v1/seats/{SEAT}"
+    client.patch(path, headers=keys[SEAT], json={"turn": "idle", "waiting_on": "Ship it?"})
+    assert (
+        client.patch(path, headers=keys[SEAT], json={"turn": "idle", "task": None}).json()["waiting_on"]
+        is None
+    )
+
+
+def test_only_an_admin_and_the_seat_itself_read_what_it_is_waiting_on(
+    client: TestClient, keys: Keys, conn: sqlite3.Connection
+) -> None:
+    path = f"/v1/seats/{SEAT}"
+    client.patch(path, headers=keys[SEAT], json={"turn": "active", "task": "OLF deck"})
+    client.patch(path, headers=keys[SEAT], json={"turn": "idle", "waiting_on": "Keep slide 4?"})
+
+    def read(who: str) -> list[Any]:
+        listed = {row["name"]: row for row in client.get("/v1/seats", headers=keys[who]).json()}
+        rounds = {row["name"]: row for row in client.get("/v1/work", headers=keys[who]).json()["seats"]}
+        needs = client.get("/v1/status", headers=keys[who]).json()["needs_you"]
+        return [
+            listed[SEAT]["waiting_on"],
+            client.get(path, headers=keys[who]).json()["waiting_on"],
+            rounds[SEAT]["waiting_on"],
+            [need["text"] for need in needs if need["why"] == "waiting"],
+        ]
+
+    shown = ["Keep slide 4?", "Keep slide 4?", "Keep slide 4?", ["Keep slide 4?"]]
+    assert read(JOSUI) == shown and read(SEAT) == shown
+    assert read("Exedore 2 - Max") == read("ci") == [None, None, None, []]

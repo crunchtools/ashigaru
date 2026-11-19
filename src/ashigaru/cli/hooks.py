@@ -10,7 +10,8 @@ seat-state.json hooks and keep their rules.
                   leave the task alone.
   stop            Stop, StopFailure and the idle_prompt Notification: turn
                   idle. idle_prompt leaves alone a turn that started too
-                  recently to be the one it reports on.
+                  recently to be the one it reports on. Stop also sends the
+                  seat's final message as waiting_on, trimmed to WAITING_LENGTH.
   statusline      The status line command, not a hook: model, context, session
                   tokens and running cost to POST /v1/seats/{name}/usage. It
                   runs on every refresh, so it posts at most once per
@@ -44,6 +45,10 @@ from .config import load
 EVENTS = ("session-start", "prompt-submit", "stop", "statusline")
 HOOK_SECONDS = 2.0
 TASK_LENGTH = 120
+# The most of the seat's final message kept as waiting_on; the end, where the question is.
+WAITING_LENGTH = 500
+# The most of a transcript's tail a Stop reads to find that message.
+WAITING_TAIL = 256 << 10
 # Claude Code's messageIdleNotifThresholdMs: idle_prompt comes at least this
 # long after the turn it reports on ended.
 IDLE_NOTICE_AFTER = timedelta(seconds=60)
@@ -105,12 +110,67 @@ def _prompt(event: dict[str, Any], desk: Desk, path: str) -> None:
     marker.write_text(session + "\n")
 
 
+def _entry_text(entry: Any) -> str | None:
+    """The text blocks of an assistant transcript entry joined by a blank line, or None."""
+    if not isinstance(entry, dict) or entry.get("type") != "assistant":
+        return None
+    message = entry.get("message")
+    content = message.get("content") if isinstance(message, dict) else None
+    if not isinstance(content, list):
+        return None
+    texts = [
+        block["text"]
+        for block in content
+        if isinstance(block, dict) and block.get("type") == "text" and isinstance(block.get("text"), str)
+    ]
+    return "\n\n".join(texts) if texts else None
+
+
+def _last_message(transcript: str) -> str | None:
+    """The last assistant text in the final WAITING_TAIL bytes of the transcript. Claude Code writes
+    a line per content block, so lines with only tool_use or thinking are passed over."""
+    with open(transcript, "rb") as handle:
+        size = handle.seek(0, os.SEEK_END)
+        handle.seek(max(0, size - WAITING_TAIL))
+        tail = handle.read()
+    lines = tail.splitlines()
+    for line in reversed(lines[1:] if size > WAITING_TAIL else lines):
+        try:
+            text = _entry_text(json.loads(line))
+        except ValueError:
+            continue
+        if text is not None:
+            return text
+    return None
+
+
+def _waiting_on(event: dict[str, Any]) -> str | None:
+    """What the seat said last, trimmed to WAITING_LENGTH from the front, or None when unknown or
+    unreadable."""
+    text = event.get("last_assistant_message")
+    transcript = event.get("transcript_path")
+    if not isinstance(text, str) and isinstance(transcript, str):
+        try:
+            text = _last_message(transcript)
+        except OSError:
+            # Best effort: a transcript it cannot read costs the question, never the idle report.
+            text = None
+    text = (text or "").strip() if isinstance(text, str) else ""
+    if not text:
+        return None
+    return text if len(text) <= WAITING_LENGTH else "…" + text[-(WAITING_LENGTH - 1) :]
+
+
 def _stop(event: dict[str, Any], desk: Desk, path: str) -> None:
-    if event.get("hook_event_name") == "Notification":
+    kind = event.get("hook_event_name")
+    if kind == "Notification":
         seat = desk.get(path)
         if seat["turn"] == "idle" or _started_within(seat, IDLE_NOTICE_AFTER):
             return
-    desk.request("PATCH", path, body={"turn": "idle"})
+    body: dict[str, Any] = {"turn": "idle"}
+    if kind in (None, "Stop") and (waiting := _waiting_on(event)) is not None:
+        body["waiting_on"] = waiting
+    desk.request("PATCH", path, body=body)
 
 
 def usage_state(session: str, env: Mapping[str, str]) -> Path:
