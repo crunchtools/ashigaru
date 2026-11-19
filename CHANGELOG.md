@@ -6,7 +6,18 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [4.2.0] - 2026-11-19
+
 ### Added
+- `ashigaru work` with no flags is the seat board: one GET of `/v1/status`,
+  three sections (On the seats, Needs you, Changed since you looked) in one
+  column layout, one line per row. `--markdown` prints Markdown tables fitted
+  to the terminal, with state marks and OUTCOME linked to GitHub or RT;
+  `--wide` shows every column. `--all`, `--since` and `--advance` run the
+  round as before. Board rows carry pr, done_when, check_after and step;
+  NEEDS YOU rows carry task, outcome and since.
+- `POST /v1/changes` takes `{"until": N}` and acks no further than that
+  event, so the board acks only the changes it printed.
 - The Desk hands out work itself. `POST /v1/seats/{name}/next` claims the
   oldest queued auto item in a free seat's lane whose `after` items are done,
   long-polling up to 90 seconds, and returns the item and its brief.
