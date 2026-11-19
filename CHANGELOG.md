@@ -7,6 +7,8 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Changed
+- Gatehouse triage gets `review_result` from the review job, so a pull request
+  whose review died before posting anything is held instead of passing.
 - The constitution's workflows are called at `@v1`, the major tag each release
   moves (XV rule 5, constitution 1.45.0), and `Inherits:` is v1.51.0: that tag
   alone is the version this repo is judged by, so the repo stops sitting
