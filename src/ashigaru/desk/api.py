@@ -32,6 +32,7 @@ from .model import (
     BillingLimits,
     Board,
     Changes,
+    ChangesAck,
     CheckRow,
     Event,
     FileChild,
@@ -359,10 +360,11 @@ def changed(conn: Conn, who: Who, since: Since = None) -> Changes:
 
 
 @router.post("/v1/changes", tags=["views"], responses=errors(401))
-def ack(conn: Conn, who: Who) -> Changes:
+def ack(conn: Conn, who: Who, body: ChangesAck | None = None) -> Changes:
     """`ashigaru changes --ack`: the same look, then the caller's seen mark moves to its `until`, only
-    forward, so the next look starts after it; `acked` is false when it was already there."""
-    return Changes.model_validate(changes.ack(conn, who.name))
+    forward, so the next look starts after it; with `until`, no further than that event, the end of
+    the look the caller was shown. `acked` is false when it was already there."""
+    return Changes.model_validate(changes.ack(conn, who.name, body.until if body else None))
 
 
 @router.get("/v1/subjects/{key:path}", tags=["views"], responses=errors(401, 404))

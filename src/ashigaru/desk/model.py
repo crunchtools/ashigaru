@@ -460,6 +460,14 @@ WAITING_LENGTH = 2000
 """The longest `waiting_on` a seat may send; its stop hook trims well under it."""
 
 
+class ChangesAck(BaseModel):
+    """POST /v1/changes: how far the caller read, so the ack never passes what it was shown."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    until: int | None = Field(None, ge=0, description="The `until` of the look the caller was shown.")
+
+
 class SeatPatch(BaseModel):
     """A seat may send SEAT_ROW_FIELDS for its own row. The rest are Josui's: lane, status, the owner
     that is Scott's manual hold, and the item it holds. `since` is server-set."""
@@ -549,6 +557,10 @@ class BoardRow(BaseModel):
     task: str | None = Field(description="The work's task, else the session's first prompt; never clipped.")
     missing: bool = False
     outcome_label: str | None = Field(None, description="The outcome the work serves.")
+    pr: str | None = Field(None, description="The PR carrying the work, owner/repo#N.")
+    done_when: str | None = Field(None, description="The work's done-when.")
+    check_after: str | None = Field(None, description="When Prime looks at the work next.")
+    step: str | None = Field(None, description="NEXT: the one next step.")
 
 
 class NeedsYou(BaseModel):
@@ -562,6 +574,13 @@ class NeedsYou(BaseModel):
     mode: Mode | None
     state: State | None
     text: str | None = Field(description="The blocker, the approval asked for, or the seat's last word.")
+    task: str | None = Field(None, description="The work's task.")
+    outcome_label: str | None = Field(None, description="The outcome the work serves.")
+    since: str | None = Field(None, description="When the work last changed.")
+    pr: str | None = Field(None, description="The PR carrying the work, owner/repo#N.")
+    done_when: str | None = Field(None, description="The work's done-when.")
+    check_after: str | None = Field(None, description="When Prime looks at the work next.")
+    step: str | None = Field(None, description="NEXT: the one next step.")
 
 
 class Outsider(BaseModel):

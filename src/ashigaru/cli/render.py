@@ -2,10 +2,11 @@
 
 import re
 import shutil
-import textwrap
 from collections.abc import Callable, Sequence
 from datetime import UTC, datetime
 from typing import Any
+
+from ashigaru.cli import config
 
 Column = tuple[str, Callable[[dict[str, Any]], Any]]
 TEXT_WIDTH = 60
@@ -23,12 +24,48 @@ CLIP_MIN = 12
 """The narrowest a clipped column gets to make room for a wrapped one."""
 
 
+MARKDOWN = False
+"""Tables as Markdown (`--markdown`), for a chat that renders them."""
+WIDE_VIEW = False
+"""`work --wide`: every column."""
+CHANGED_SHOWN = 10
+"""How many changed items the board shows."""
+
+GITHUB_KEY = re.compile(r"^([\w.-]+)/([\w.-]+)#(\d+)$")
+RT_KEY = re.compile(r"^RT#(\d+)$")
+RT_TICKET = "https://rt.fatherlinux.com/Ticket/Display.html?id="
+
+
+def outcome(row: dict[str, Any]) -> str:
+    """OUTCOME: `python-sdlc#66` or `RT#1652`, a link in Markdown; a one-off outcome's name as is."""
+    return linked(row.get("outcome_label"), "issues") or "-"
+
+
+def pr(row: dict[str, Any]) -> str:
+    """PR: `python-sdlc#67`, a link in Markdown."""
+    return linked(row.get("pr"), "pull")
+
+
+def linked(label: str | None, kind: str) -> str:
+    """`owner/repo#N` as `repo#N` and `RT#N` as is, each a link in Markdown; anything else as is."""
+    if not label:
+        return ""
+    if found := GITHUB_KEY.match(label):
+        owner, repo, number = found.groups()
+        short, url = f"{repo}#{number}", f"https://github.com/{owner}/{repo}/{kind}/{number}"
+    elif found := RT_KEY.match(label):
+        short, url = label, RT_TICKET + found.group(1)
+    else:
+        return label
+    return f"[{short}]({url})" if MARKDOWN else short
+
+
 SEAT_NAME = re.compile(r"^(.*\S) (\d+) - (.+)$")
 """A seat's name, `Dolza 2 - Vertex`: host, number, lane."""
 
 
 class Whole(str):
-    """A cell table() never clips: a task is read in full."""
+    """A cell table() clips last: a task keeps the room the others leave, on one line."""
 
 
 class Tail(str):
@@ -89,11 +126,13 @@ def money(value: float | None) -> str:
 
 def table(rows: Sequence[dict[str, Any]], columns: Sequence[Column], width: int | None = None) -> str:
     """Rows under their headers, each column as wide as its widest cell. When the table is wider than
-    `width` (the terminal's, else 120), a Whole column word-wraps, never cut, in the room the others
-    leave (WRAP_MIN at least); then, while the row still overflows, a Tail column and then the widest
-    others are clipped, none below CLIP_MIN and none widened. Every cell but a Whole one stays on its
-    row's first line, so the columns line up."""
+    `width` (the terminal's, else 120), a Whole column is clipped to the room the others leave
+    (WRAP_MIN at least); then, while the row still overflows, a Tail column and then the widest
+    others are clipped, none below CLIP_MIN and none widened. Every row is one line; `get` shows a
+    task in full."""
     raw = [[get(row) for _, get in columns] for row in rows]
+    if MARKDOWN:
+        return _markdown(raw, columns)
     whole, tail = (
         {i for i in range(len(columns)) if any(isinstance(line[i], kind) for line in raw)}
         for kind in (Whole, Tail)
@@ -115,12 +154,93 @@ def table(rows: Sequence[dict[str, Any]], columns: Sequence[Column], width: int 
     lines: list[str] = []
     for line in cells:
         parts = [
-            textwrap.wrap(cell, widths[i]) or [""] if i in whole else [clip(cell, widths[i])]
+            [cell if len(cell) <= widths[i] else cell[: widths[i] - 1] + "…"]
+            if i in whole
+            else [clip(cell, widths[i])]
             for i, cell in enumerate(line)
         ]
         for depth in range(max(len(part) for part in parts)):
             row = [part[depth] if depth < len(part) else "" for part in parts]
             lines.append("  ".join(cell.ljust(w) for cell, w in zip(row, widths, strict=True)).rstrip())
+    return "\n".join(lines)
+
+
+MD_CLIP: dict[str, int] = {}
+"""How much text a FLEX column keeps: its width, on one line; `get` shows the rest."""
+MD_WIDTH: dict[str, int] = {}
+"""Each Markdown column's width across every table on the board, set by seat_board(): a header is
+padded to it with PAD, so all three tables share their columns."""
+STATE_MARK = {
+    "working": "🟢", "assigned": "🔵", "review": "👀", "blocked": "🛑", "queued": "⏳", "done": "✅",
+}  # fmt: skip
+"""Before the state in a Markdown STATE cell."""
+PAD = "\u2800"
+"""A blank cell filler a renderer keeps: a no-break space is whitespace to JavaScript's trim(), so
+Claude Code's table drops it and sizes each table to its own text; the braille blank is not."""
+WIDE_CHAR = 0x2600
+"""Above this, a character (an emoji) takes two terminal columns."""
+LINK = re.compile(r"\[([^\]]*)\]\([^)]*\)")
+MD_SPECIAL = re.compile(r"([\\`*_\[\]<>|#~])")
+"""What Markdown would read as markup in a cell; seat and forge text is escaped, never rendered."""
+
+
+def _md_cell(value: Any, header: str) -> str:
+    text = " ".join(("" if value is None else str(value)).split())
+    if not LINK.fullmatch(text):
+        text = MD_SPECIAL.sub(r"\\\1", text)
+    if header == "STATE" and text:
+        text = f"{STATE_MARK.get(text.split('/')[0], '⚪')} {text}"
+    width = MD_CLIP.get(header) if header in FLEX else CAP.get(header)
+    if width and _shown(text) > width:
+        if found := LINK.fullmatch(text):
+            label = found.group(1)
+            return text.replace(f"[{label}]", f"[{label[: width - 1]}…]", 1)
+        text = text[: width - 1] + "…"
+    return text
+
+
+def _shown(text: str) -> int:
+    """How wide a cell renders: a link shows only its label, an emoji takes two columns."""
+    plain = re.sub(r"\\(.)", r"\1", LINK.sub(r"\1", text))
+    return len(plain) + sum(1 for ch in plain if ord(ch) > WIDE_CHAR)
+
+
+CAP = {"SEAT": 18, "OUTCOME": 20}
+"""The most a fixed column takes before its text is clipped with "…": a longer seat name or outcome
+label never pushes TASK and NEXT out of the terminal."""
+FLEX = ("TASK", "NEXT", "DONE WHEN")
+"""The columns that share what room is left and are clipped to it; every other column is as wide as
+its longest cell, never cut."""
+
+
+def _fit(rows: list[dict[str, Any]], columns: Sequence[Column]) -> None:
+    """Size the board for the reader's terminal: each fixed column as wide as its longest cell, the
+    FLEX columns an even share of the rest with their text clipped to it, so the table is never wider
+    than the terminal and the renderer never squeezes a short column. Every header is padded to its
+    width, so all three tables share their columns."""
+    MD_WIDTH.clear()
+    MD_CLIP.clear()
+    natural = {h: max([len(h), *(_shown(_md_cell(get(r), h)) for r in rows)]) for h, get in columns}
+    flex = [h for h, _ in columns if h in FLEX]
+    room = (
+        config.markdown_columns()
+        - 4
+        - 3 * len(columns)
+        - 1
+        - sum(w for h, w in natural.items() if h not in FLEX)
+    )
+    share = max(CLIP_MIN, room // max(1, len(flex)))
+    MD_CLIP.update({h: share for h in flex})
+    MD_WIDTH.update({h: min(w, share) if h in FLEX else w for h, w in natural.items()})
+
+
+def _markdown(raw: list[list[Any]], columns: Sequence[Column]) -> str:
+    head = [h + PAD * max(0, MD_WIDTH.get(h, 0) - len(h)) for h, _ in columns]
+    lines = ["| " + " | ".join(head) + " |", "|" + "---|" * len(columns)]
+    lines += [
+        "| " + " | ".join(_md_cell(v, h) or " " for v, (h, _) in zip(line, columns, strict=True)) + " |"
+        for line in raw
+    ]
     return "\n".join(lines)
 
 
@@ -212,12 +332,50 @@ def queue(lists: dict[str, Any]) -> str:
 
 def state(row: dict[str, Any]) -> str:
     """STATE: `review`, `manual · blocked`; auto, the default, shows bare; a wrap stage follows."""
-    shown = row["state"] + (f"/{row['wrap']}" if row.get("wrap") else "")
-    return f"manual · {shown}" if row.get("mode") == "manual" else shown
+    shown = (row.get("state") or "-") + (f"/{row['wrap']}" if row.get("wrap") else "")
+    return shown
+
+
+def seat_board(board: dict[str, Any]) -> str:
+    """Bare `work`: each busy seat's work, one line of free and missing seats, then NEEDS YOU, with
+    the subjects held for a lane label folded into one line."""
+    columns = WIDE if WIDE_VIEW else WORK
+    rows = [{**row, "state": row.get("state") or "working"} for row in board["busy"]]
+    changed = (board.get("changes") or {}).get("items") or []
+    more = (
+        f"{len(changed) - CHANGED_SHOWN} more, left unseen until you look: ashigaru changes"
+        if len(changed) > CHANGED_SHOWN
+        else ""
+    )
+    seats = [f"{len(board['free'])} free" + (f": {seat_names(board['free'])}" if board["free"] else "")]
+    if board["missing"]:
+        seats.append(f"{len(board['missing'])} missing: {seat_names(board['missing'])}")
+    needs = [n for n in board["needs_you"] if n["why"] not in ("held", "outsider")]
+    held = len(board["needs_you"]) - len(needs)
+    waiting = f"{held} PRs and issues wait for a lane label or a close: ashigaru queue" if held else ""
+    if MARKDOWN:
+        _fit([*rows, *needs, *changed[:CHANGED_SHOWN]], columns)
+    sections = [
+        ("On the seats", table(rows, columns) if rows else "no seat is busy", ""),
+        ("Needs you", table(needs, columns) if needs else "", waiting),
+        ("Changed since you looked", table(changed[:CHANGED_SHOWN], columns) if changed else "", more),
+    ]
+    free = "   ".join([*seats, tally(board["summary"])])
+    parts: list[str] = []
+    for i, (title, body, after) in enumerate(sections):
+        if not body and not after:
+            continue
+        head = f"### {title}\n" if MARKDOWN else f"{title.upper()}\n"
+        parts.append(head + ("\n" if MARKDOWN else "") + "\n\n".join(x for x in (body, after) if x))
+        if i == 0:
+            parts.append("**" + " · ".join([*seats, tally(board["summary"])]) + "**" if MARKDOWN else free)
+    return "\n\n".join(parts)
 
 
 def work(round_: dict[str, Any]) -> str:
     """The check table, the seats and their tally, the queue, then what the forge brought in."""
+    if round_.get("board"):
+        return seat_board(round_)
     caught = round_["catch_up"]
     window = f"events {caught['after']} to {caught['until']}"
     if caught.get("truncated"):
@@ -226,7 +384,7 @@ def work(round_: dict[str, Any]) -> str:
         window += " (sweep mark moved)"
     cut = "\n(the first 1000; ashigaru list pages the rest)" if round_.get("truncated") else ""
     parts = [
-        table(round_["items"], WORK) + cut,
+        table(round_["items"], ROW) + cut,
         table(round_["seats"], AGENTS),
         tally(round_["summary"]),
         queue(round_["queue"]),
@@ -252,7 +410,7 @@ def _row(item: dict[str, Any]) -> dict[str, Any]:
 def waited(result: dict[str, Any]) -> str:
     """A settled item's row, or a commit's CI: its status, what it still waits on, then each check."""
     if "status" not in result:
-        return table([_row(result)], WORK)
+        return table([_row(result)], ROW)
     head = f"{result['repo']}@{result['sha'][:12]}  {result['status']}"
     if result.get("pending"):
         head += f"\npending: {', '.join(result['pending'])}"
@@ -267,7 +425,7 @@ def view(command: str, result: Any) -> str:
         return VIEWS[command](result)
     if command in LISTS:
         return table(result, LISTS[command])
-    return table([_row(result)], WORK)
+    return table([_row(result)], ROW)
 
 
 USAGE: list[Column] = [
@@ -296,7 +454,7 @@ AGENTS: list[Column] = [
     ("TASK", lambda s: Whole(s.get("task") or "")),
 ]
 BOARD: list[Column] = [
-    ("OUTCOME", lambda r: r.get("outcome_label") or "-"),
+    ("OUTCOME", outcome),
     ("MODE", lambda r: r["mode"]),
     ("SEAT", lambda r: r["seat"]),
     ("WORK", lambda r: r.get("work")),
@@ -313,27 +471,43 @@ NEEDS: list[Column] = [
 CHANGES: list[Column] = [
     ("WORK", lambda r: r["id"]),
     ("WHEN", lambda r: seen(r["at"])),
+    ("MODE", lambda r: r.get("mode")),
     ("STATE", lambda r: state(r)),
     ("BY", lambda r: ", ".join(r["by"])),
     ("CHANGED", lambda r: "new" if r["new"] else ", ".join(r["fields"])),
     ("TASK", lambda r: Whole(r["task"])),
     ("NEXT", lambda r: Tail(r.get("step") or "")),
 ]
-WORK: list[Column] = [
-    ("WORK", lambda r: r["id"]),
-    ("TIME", lambda r: age(r.get("since") or r.get("updated_at"))),
-    ("SEAT", lambda r: r.get("seat")),
-    ("STATE", lambda r: state(r)),
-    ("OUTCOME", lambda r: r.get("outcome_label") or "-"),
-    ("TASK", lambda r: Whole(r["task"])),
-    (
-        "NEXT",
-        lambda r: Tail(
-            " ".join(str(r.get("step") or r.get("next") or r.get("result_or_blocker") or "").split())
-        ),
+BOARD_COLUMN: dict[str, Callable[[dict[str, Any]], Any]] = {
+    "WORK": lambda r: r.get("id"),
+    "TIME": lambda r: age(r.get("since") or r.get("updated_at")),
+    "SEAT": lambda r: r.get("seat"),
+    "MODE": lambda r: r.get("mode"),
+    "STATE": lambda r: state(r),
+    "OUTCOME": outcome,
+    "PR": pr,
+    "TASK": lambda r: Whole(r.get("task") or ""),
+    "DONE WHEN": lambda r: r.get("done_when"),
+    "NEXT": lambda r: Tail(
+        " ".join(str(r.get("step") or r.get("next") or r.get("result_or_blocker") or "").split())
     ),
-]
-"""Scott's `work` columns: the mode shows inside STATE, and NEXT is the one next step."""
+    "CHECK": lambda r: r.get("check_after"),
+}
+"""Every column the board and the round draw from, by header, so each view names its own order."""
+
+
+def _columns(*headers: str) -> list[Column]:
+    return [(header, BOARD_COLUMN[header]) for header in headers]
+
+
+WORK = _columns("SEAT", "MODE", "STATE", "OUTCOME", "WORK", "TASK", "NEXT")
+"""Scott's `work` columns; NEXT is the one next step."""
+ROW = _columns("WORK", "TIME", "SEAT", "MODE", "STATE", "OUTCOME", "TASK", "NEXT")
+"""One item an action returned, and the round's rows: the id first."""
+WIDE = _columns(
+    "TIME", "SEAT", "MODE", "STATE", "OUTCOME", "PR", "WORK", "TASK", "DONE WHEN", "NEXT", "CHECK"
+)
+"""`work --wide`: every field, time first."""
 QUEUED: list[Column] = [
     ("QUEUED", lambda i: i["id"]),
     ("LANE", lambda i: i.get("lane")),

@@ -54,6 +54,23 @@ item = "relock"
 justification = "matched only against hooks._throttled, a status line throttle with no shared logic; the similarity is a run of guards and early returns"
 classification = "gourmand_bug"
 
+# Shape, not copy: the seat board opens with a run of plain assignments and one
+# guard, which normalizes to the same statements as required_checks' cache
+# lookup and as table's column fitting. Neither shares a line of logic with it.
+[[exceptions]]
+check = "copy_paste_detection"
+path = "src/ashigaru/cli/render.py"
+item = "seat_board"
+justification = "matched against forges.github.required_checks (a cached ruleset lookup) on statement shape alone: a run of assignments and one guard, no shared logic"
+classification = "gourmand_bug"
+
+[[exceptions]]
+check = "copy_paste_detection"
+path = "src/ashigaru/cli/render.py"
+item = "table"
+justification = "matched against seat_board, which builds the board's sections and calls table; table's column fitting shares only a run of assignments with it"
+classification = "gourmand_bug"
+
 # _combine is GitHub's rule for several reports of one check (pending wins,
 # then a failure, then a pass). `reported` applies it per name and App and
 # `GitHub.required` per requirement; Gourmand misses the call in `reported`'s

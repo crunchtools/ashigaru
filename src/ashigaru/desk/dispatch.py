@@ -504,7 +504,18 @@ def _needs(item: dict[str, Any]) -> dict[str, Any]:
         author = item["extra"].get("author")
         by = f" by {author}" if author else ""
         why, text = "held", f"{subject}{by}: approve with a lane label or close"
-    return {"why": why, "work": item["id"], "mode": item["mode"], "state": item["state"], "text": text}
+    return {
+        "why": why,
+        "work": item["id"],
+        "seat": item.get("seat"),
+        "mode": item["mode"],
+        "state": item["state"],
+        "text": text,
+        "task": item["task"],
+        "outcome_label": item.get("outcome_label"),
+        "since": item.get("updated_at"),
+        **_detail(item),
+    }
 
 
 def _busy(seat: dict[str, Any], work: dict[str, Any]) -> dict[str, Any]:
@@ -521,6 +532,17 @@ def _busy(seat: dict[str, Any], work: dict[str, Any]) -> dict[str, Any]:
         "task": work.get("task") or seat["task"],
         "missing": seat["missing"],
         "outcome_label": work.get("outcome_label"),
+        **_detail(work),
+    }
+
+
+def _detail(work: dict[str, Any]) -> dict[str, Any]:
+    """The fields `work --wide` shows and NEXT, which a board row carries beside its own."""
+    return {
+        "pr": work.get("pr"),
+        "done_when": work.get("done_when"),
+        "check_after": work.get("check_after"),
+        "step": served.step(work, store.now()) if work else None,
     }
 
 
@@ -547,6 +569,9 @@ def _silent_seat(seat: dict[str, Any], busy: dict[str, Any]) -> dict[str, Any]:
         "mode": busy["mode"],
         "state": busy["state"],
         "text": f"silent since {seat['silent_since']}: check the seat or wrap {seat['item']}",
+        "task": busy["task"],
+        "outcome_label": busy.get("outcome_label"),
+        "since": seat["silent_since"],
     }
 
 
@@ -564,9 +589,14 @@ def status(conn: sqlite3.Connection) -> dict[str, Any]:
     served.attach(conn, list(items.values()))
     busy = [_busy(row, items.get(row["item"], {})) for row in working]
     idle = [row for row in roster if row["status"] != SeatStatus.BUSY]
-    held = {row["work"]: row["state"] for row in busy}
+    held = {row["work"]: row for row in busy}
     needs = [
-        _held_seat(row, held.get(row["item"]))
+        {
+            **_held_seat(row, (held.get(row["item"]) or {}).get("state")),
+            "task": (held.get(row["item"]) or {}).get("task"),
+            "outcome_label": (held.get(row["item"]) or {}).get("outcome_label"),
+            "since": row["updated_at"],
+        }
         for row in roster
         if row["owner"] and row["turn"] == Turn.IDLE and (row["waiting_on"] or row["missing"])
     ]
@@ -576,7 +606,9 @@ def status(conn: sqlite3.Connection) -> dict[str, Any]:
         for row, found in zip(working, busy, strict=True)
         if row["silent_since"] and row["name"] not in listed
     ]
-    needs += [_needs(store.decode(item)) for item in conn.execute(NEEDS_YOU, {"limit": QUEUE_LIMIT})]
+    blocked = [store.decode(item) for item in conn.execute(NEEDS_YOU, {"limit": QUEUE_LIMIT})]
+    served.attach(conn, blocked)
+    needs += [_needs(item) for item in blocked]
     needs += [
         {
             "why": "outsider",

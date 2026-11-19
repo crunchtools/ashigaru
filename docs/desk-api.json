@@ -215,6 +215,30 @@
             "description": "The seat's last check-in: a hook, or the status line.",
             "title": "Active"
           },
+          "check_after": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When Prime looks at the work next.",
+            "title": "Check After"
+          },
+          "done_when": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The work's done-when.",
+            "title": "Done When"
+          },
           "missing": {
             "default": false,
             "title": "Missing",
@@ -235,6 +259,18 @@
             ],
             "description": "The outcome the work serves.",
             "title": "Outcome Label"
+          },
+          "pr": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The PR carrying the work, owner/repo#N.",
+            "title": "Pr"
           },
           "seat": {
             "title": "Seat",
@@ -262,6 +298,18 @@
               }
             ],
             "description": "The work's state."
+          },
+          "step": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "NEXT: the one next step.",
+            "title": "Step"
           },
           "task": {
             "anyOf": [
@@ -722,6 +770,27 @@
           "items"
         ],
         "title": "Changes",
+        "type": "object"
+      },
+      "ChangesAck": {
+        "additionalProperties": false,
+        "description": "POST /v1/changes: how far the caller read, so the ack never passes what it was shown.",
+        "properties": {
+          "until": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The `until` of the look the caller was shown.",
+            "title": "Until"
+          }
+        },
+        "title": "ChangesAck",
         "type": "object"
       },
       "Check": {
@@ -2260,6 +2329,30 @@
       "NeedsYou": {
         "description": "Something only Scott can move: his blocked work, a subject held for approval, a manual seat\nidle on a question, a hold of his on a seat silent for a day, a busy seat gone silent (`silent`),\nor an outsider's subject the sweep found and did not store.",
         "properties": {
+          "check_after": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When Prime looks at the work next.",
+            "title": "Check After"
+          },
+          "done_when": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The work's done-when.",
+            "title": "Done When"
+          },
           "mode": {
             "anyOf": [
               {
@@ -2269,6 +2362,30 @@
                 "type": "null"
               }
             ]
+          },
+          "outcome_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The outcome the work serves.",
+            "title": "Outcome Label"
+          },
+          "pr": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The PR carrying the work, owner/repo#N.",
+            "title": "Pr"
           },
           "seat": {
             "anyOf": [
@@ -2281,6 +2398,18 @@
             ],
             "title": "Seat"
           },
+          "since": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When the work last changed.",
+            "title": "Since"
+          },
           "state": {
             "anyOf": [
               {
@@ -2290,6 +2419,30 @@
                 "type": "null"
               }
             ]
+          },
+          "step": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "NEXT: the one next step.",
+            "title": "Step"
+          },
+          "task": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The work's task.",
+            "title": "Task"
           },
           "text": {
             "anyOf": [
@@ -4174,8 +4327,25 @@
         ]
       },
       "post": {
-        "description": "`ashigaru changes --ack`: the same look, then the caller's seen mark moves to its `until`, only\nforward, so the next look starts after it; `acked` is false when it was already there.",
+        "description": "`ashigaru changes --ack`: the same look, then the caller's seen mark moves to its `until`, only\nforward, so the next look starts after it; with `until`, no further than that event, the end of\nthe look the caller was shown. `acked` is false when it was already there.",
         "operationId": "ack_v1_changes_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/ChangesAck"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Body"
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "content": {
@@ -4196,6 +4366,16 @@
               }
             },
             "description": "Missing, unknown or revoked API key."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
           }
         },
         "security": [

@@ -142,6 +142,11 @@ the same list under CHANGED SINCE YOU LOOKED without moving the mark.
 
 ## `work`
 
+**When Scott runs `/ashigaru work`, run `ashigaru work --markdown` and reply
+with its output exactly as printed, as Markdown, not in a code block. That is
+the whole answer: no rewritten table, no commentary, no round.** The steps below are Prime's round, `ashigaru work
+--advance`, run from the loop or when Scott asks for a round.
+
 The check round in one call. Seats report on their own; this is for silence
 and for Scott. `ashigaru work --advance` returns, in order: the check table of
 open items (`--all` adds closed and cleared ones), the seats with

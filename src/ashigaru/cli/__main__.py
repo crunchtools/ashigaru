@@ -85,8 +85,9 @@ VIEWS = (
     ),
     (
         "work",
-        "the check round: open items, seats, queue and GitHub catch-up",
+        "the seat board: busy seats, NEEDS YOU, what changed; --all, --since or --advance: the round",
         (
+            ("--wide", "every column: time, PR, done-when and check time too"),
             ("--all", "include closed and cleared items"),
             ("--since", "start the catch-up here, a time (default: the sweep mark)"),
             ("--advance", "admin: then move the sweep mark to the round's end"),
@@ -201,6 +202,7 @@ def _wait_parser(
 def parser() -> argparse.ArgumentParser:
     common = argparse.ArgumentParser(add_help=False)
     common.add_argument("--json", action="store_true", help="print the Desk's JSON instead of a table")
+    common.add_argument("--markdown", action="store_true", help="print tables as Markdown, for a chat")
     top = argparse.ArgumentParser(
         prog="ashigaru",
         description="The Desk's client. The URL and key come from the environment "
@@ -273,7 +275,7 @@ def parser() -> argparse.ArgumentParser:
 
 
 def _arguments(args: argparse.Namespace) -> dict[str, Any]:
-    return {k: v for k, v in vars(args).items() if k not in ("command", "action", "json")}
+    return {k: v for k, v in vars(args).items() if k not in ("command", "action", "json", "markdown", "wide")}
 
 
 def _command(args: argparse.Namespace) -> str:
@@ -282,6 +284,8 @@ def _command(args: argparse.Namespace) -> str:
 
 
 def _show(args: argparse.Namespace, command: str, result: Any) -> None:
+    render.MARKDOWN = getattr(args, "markdown", False)
+    render.WIDE_VIEW = getattr(args, "wide", False)
     print(json.dumps(result, indent=2) if args.json else render.view(command, result))
 
 
@@ -293,6 +297,8 @@ def execute(args: argparse.Namespace, desk: Desk) -> int:
         _show(args, "get", exc.item)
         raise
     _show(args, command, result)
+    if command == "work" and isinstance(result, dict) and result.get("board"):
+        commands.seen(desk, result, render.CHANGED_SHOWN)
     if args.command == "wait" and not succeeded(result):
         return 1
     return 0

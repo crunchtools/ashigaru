@@ -301,14 +301,19 @@ def test_the_board_shows_busy_seats_in_full_and_free_ones_by_name(
             store.write_seat(conn, name, {"status": "free", "lane": "exedore-max"})
         conn.execute("UPDATE seats SET updated_at = ? WHERE name = 'Dolza 1 - Max'", (LONG_AGO,))
     task = "a task long enough that any table would have clipped it, " * 3
-    work_id = create(client, keys, task=task)["id"]
+    work_id = create(client, keys, task=task, done_when="PR open")["id"]
     assigned = client.post(f"/v1/items/{work_id}/assign", headers=keys[JOSUI], json={"seat": other})
     assert assigned.status_code == OK, assigned.text
+    patched = client.patch(
+        f"/v1/items/{work_id}", headers=keys[JOSUI], json={"pr": "crunchtools/ashigaru#9", "next": "push it"}
+    )
+    assert patched.status_code == OK, patched.text
     found = board(client, keys)
     assert [row["seat"] for row in found["busy"]] == [other]
     row = found["busy"][0]
     assert (row["mode"], row["work"], row["state"], row["task"]) == ("auto", work_id, "assigned", task)
     assert row["since"] and row["active"] and row["missing"] is False
+    assert (row["pr"], row["done_when"], row["step"]) == ("crunchtools/ashigaru#9", "PR open", "push it")
     assert (found["free"], found["missing"]) == ([SEAT], ["Dolza 1 - Max"])
     assert found["summary"] == {"up": TWO, "seats": 3, "open": 1}
 

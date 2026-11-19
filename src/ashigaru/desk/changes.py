@@ -79,8 +79,10 @@ def read(conn: sqlite3.Connection, identity: str, since: str | None = None) -> d
     }
 
 
-def ack(conn: sqlite3.Connection, identity: str) -> dict[str, Any]:
-    """A look, then the reader's mark moves to its `until`; `acked` is false when it was already
-    there or a concurrent ack moved it further."""
+def ack(conn: sqlite3.Connection, identity: str, until: int | None = None) -> dict[str, Any]:
+    """A look, then the reader's mark moves to its `until`, or no further than the `until` of the
+    look the reader was shown, so nothing written since is marked seen unread; `acked` is false when
+    it was already there or a concurrent ack moved it further."""
     found = read(conn, identity)
-    return {**found, "acked": store.advance_mark(conn, mark(identity), found["until"], identity)}
+    upto = found["until"] if until is None else min(until, found["until"])
+    return {**found, "acked": store.advance_mark(conn, mark(identity), upto, identity)}
