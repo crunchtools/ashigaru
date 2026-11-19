@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [4.0.2] - 2026-11-19
+
 ### Fixed
 - `ashigaru wait <repo> <sha>` (and `desk_wait`) no longer says `success` while
   a check the target branch requires has not reported (crunchtools/ashigaru#215).
