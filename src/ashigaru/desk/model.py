@@ -202,7 +202,7 @@ class _Fields(BaseModel):
         if value is None or not value.strip():
             return None
         key = subject_key(value)
-        if key is None or key.startswith("RT#"):
+        if key is None or key.startswith("RT#") or "/issues/" in value:
             raise ValueError("pr is a pull request: its URL or owner/repo#N")
         return key
 

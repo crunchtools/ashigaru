@@ -212,7 +212,15 @@ def test_a_blank_pr_is_none(hooked: TestClient, keys: Keys, pr: str | None) -> N
     assert get(hooked, keys, create(hooked, keys, pr=pr))["pr"] is None
 
 
-@pytest.mark.parametrize("pr", ["RT#1500", "https://rt.crunchtools.com/Ticket/Display.html?id=7", "not a pr"])
+@pytest.mark.parametrize(
+    "pr",
+    [
+        "RT#1500",
+        "https://rt.crunchtools.com/Ticket/Display.html?id=7",
+        "not a pr",
+        "https://github.com/crunchtools/ashigaru/issues/191",
+    ],
+)
 def test_a_pr_must_name_a_pull_request(hooked: TestClient, keys: Keys, pr: str) -> None:
     made = hooked.post("/v1/items", headers=keys[JOSUI], json={"task": "t", "pr": pr})
     assert made.status_code == UNPROCESSABLE_ENTITY
