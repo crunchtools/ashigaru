@@ -96,17 +96,31 @@ def test_a_hold_silent_for_a_day_needs_scott_and_is_never_closed(
     assert (store.get_item(conn, held) or {})["state"] == "working", "only Scott closes his work"
 
 
-def test_the_app_reconciles_at_startup(db: Path, conn: sqlite3.Connection) -> None:
-    seat(conn, "dead", ago(minutes=30), turn="active")
-    conn.execute("UPDATE seats SET turn_started_at = ? WHERE name = 'dead'", (ago(hours=4),))
+@pytest.mark.parametrize(("up", "ended"), [(timedelta(minutes=2), 0), (timedelta(minutes=30), 1)])
+def test_silence_counts_only_from_the_desks_start(
+    conn: sqlite3.Connection, db: Path, up: timedelta, ended: int
+) -> None:
+    seat(conn, "quiet", ago(minutes=40), turn="active")
+    conn.execute("UPDATE seats SET turn_started_at = ? WHERE name = 'quiet'", (ago(hours=4),))
+    started = datetime.now(UTC) - up
+    assert reconcile.run(str(db), reconcile.Settings(), started)["turns"] == ended
+
+
+def test_the_app_reconciles_at_startup_and_spares_turns_an_outage_silenced(
+    db: Path, conn: sqlite3.Connection
+) -> None:
+    seat(conn, "live", ago(minutes=30), turn="active")
+    conn.execute("UPDATE seats SET turn_started_at = ? WHERE name = 'live'", (ago(hours=4),))
+    seat(conn, "idle", ago(hours=25), task="old first prompt")
     app = create_app(db)
     app.state.reconciler = reconcile.Reconciler(str(db), reconcile.Settings(every=3600))
     with TestClient(app):
         for _ in range(100):
-            if row(conn, "dead")["turn"] == "idle":
+            if row(conn, "idle")["task"] is None:
                 break
             time.sleep(0.05)
-    assert row(conn, "dead")["turn"] == "idle"
+    assert row(conn, "idle")["task"] is None
+    assert row(conn, "live")["turn"] == "active", "the Desk was down, not the seat"
 
 
 def test_serve_reconciles_with_its_turn_limit(monkeypatch: pytest.MonkeyPatch, db: Path) -> None:
