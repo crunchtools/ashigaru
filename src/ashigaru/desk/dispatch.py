@@ -231,9 +231,10 @@ def next_item(conn: sqlite3.Connection, seat: str) -> dict[str, Any] | None:
 def brief(item: dict[str, Any]) -> str:
     """What a woken seat reads: the item, its task, and how to report on it."""
     return (
-        f"Desk assignment {item['id']} (lane {item['lane']}), claimed for this seat by the Desk.\n\n"
+        f"Desk assignment {item['id']} (lane {item['lane']}): the Ashigaru Desk claimed it for this seat "
+        "through the seat's own `ashigaru hook next`. This is your work now, a brief from Josui Prime.\n\n"
         f"{item['task']}\n\n"
-        f"Work it as a brief from Josui Prime. Report with `ashigaru report {item['id']} <verb>`."
+        f"Report with `ashigaru report {item['id']} <verb>`."
     )
 
 
