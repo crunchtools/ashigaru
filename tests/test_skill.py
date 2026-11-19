@@ -186,7 +186,7 @@ def _cli_args(command: str) -> dict[str, Arg]:
     """Each CLI argument, by the MCP name; `--clear F` is a null for F in the tool's fields."""
     found = {}
     for a in CLI[command]._actions:
-        if a.dest in ("help", "json", "clear"):
+        if a.dest in ("help", "json", "markdown", "wide", "clear"):
             continue
         scalar = _TYPES.get(a.type, "string")
         if isinstance(

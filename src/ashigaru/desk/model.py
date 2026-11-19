@@ -549,6 +549,10 @@ class BoardRow(BaseModel):
     task: str | None = Field(description="The work's task, else the session's first prompt; never clipped.")
     missing: bool = False
     outcome_label: str | None = Field(None, description="The outcome the work serves.")
+    pr: str | None = Field(None, description="The PR carrying the work, owner/repo#N.")
+    done_when: str | None = Field(None, description="The work's done-when.")
+    check_after: str | None = Field(None, description="When Prime looks at the work next.")
+    step: str | None = Field(None, description="NEXT: the one next step.")
 
 
 class NeedsYou(BaseModel):
@@ -562,6 +566,13 @@ class NeedsYou(BaseModel):
     mode: Mode | None
     state: State | None
     text: str | None = Field(description="The blocker, the approval asked for, or the seat's last word.")
+    task: str | None = Field(None, description="The work's task.")
+    outcome_label: str | None = Field(None, description="The outcome the work serves.")
+    since: str | None = Field(None, description="When the work last changed.")
+    pr: str | None = Field(None, description="The PR carrying the work, owner/repo#N.")
+    done_when: str | None = Field(None, description="The work's done-when.")
+    check_after: str | None = Field(None, description="When Prime looks at the work next.")
+    step: str | None = Field(None, description="NEXT: the one next step.")
 
 
 class Outsider(BaseModel):

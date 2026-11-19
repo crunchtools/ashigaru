@@ -271,7 +271,7 @@ def caught_row(id: str, **fields: Any) -> dict[str, Any]:
 def test_work_renders_the_whole_round(desk: FakeDesk, capsys: pytest.CaptureFixture[str]) -> None:
     caught = round_()["catch_up"] | {"new": [caught_row("a8"), caught_row("a9", held=True, lane=None)]}
     desk.on("GET", "/v1/work", (200, round_(catch_up=caught)))
-    assert main(["work"]) == 0
+    assert main(["work", "--all"]) == 0
     out = capsys.readouterr().out
     assert "needs a key" in out and "Max 2" in out and "missing" in out
     assert "1 of 2 up, 1 open" in out
@@ -281,17 +281,17 @@ def test_work_renders_the_whole_round(desk: FakeDesk, capsys: pytest.CaptureFixt
     assert "REOPENED" not in out
 
 
-def test_work_shows_scotts_columns_with_the_mode_inside_state(
+def test_the_round_shows_the_id_first_and_the_mode_in_its_own_column(
     desk: FakeDesk, capsys: pytest.CaptureFixture[str]
 ) -> None:
     served = round_()["items"][0] | {"outcome_label": "RT#1652", "step": "blocked: needs a key"}
     loose = served | {"id": "a4", "mode": "auto", "state": "review", "outcome_label": None, "step": None}
     desk.on("GET", "/v1/work", (200, round_(items=[served, loose])))
-    assert main(["work"]) == 0
+    assert main(["work", "--all"]) == 0
     lines = capsys.readouterr().out.splitlines()
-    assert lines[0].split() == ["WORK", "TIME", "SEAT", "STATE", "OUTCOME", "TASK", "NEXT"]
-    assert "manual · blocked" in lines[1] and "RT#1652" in lines[1] and "blocked: needs a key" in lines[1]
-    assert lines[2].split()[3:5] == ["review", "-"], "auto shows bare; no outcome shows -"
+    assert lines[0].split() == ["WORK", "TIME", "SEAT", "MODE", "STATE", "OUTCOME", "TASK", "NEXT"]
+    assert "manual  blocked" in lines[1] and "RT#1652" in lines[1] and "blocked: needs a key" in lines[1]
+    assert lines[2].split()[3:6] == ["auto", "review", "-"], "no outcome shows -"
 
 
 STEP = "blocked: Dolza 2's review wants the lease renewer to log and stop, see r4630065164"
@@ -316,7 +316,7 @@ def test_work_keeps_every_row_on_one_line(
         "step": STEP,
     }  # fmt: skip
     desk.on("GET", "/v1/work", (200, round_(items=[row])))
-    assert main(["work"]) == 0
+    assert main(["work", "--all"]) == 0
     lines = capsys.readouterr().out.split("\n\n")[0].splitlines()
     header, first = lines
     task_at, next_at = header.index("TASK"), header.index("NEXT")
@@ -347,17 +347,17 @@ def test_assign_passes_an_empty_outcome_text_on(desk: FakeDesk) -> None:
 def test_work_shows_what_reopened(desk: FakeDesk, capsys: pytest.CaptureFixture[str]) -> None:
     caught = round_()["catch_up"] | {"reopened": [caught_row("a7", state="done")]}
     desk.on("GET", "/v1/work", (200, round_(catch_up=caught)))
-    assert main(["work"]) == 0
+    assert main(["work", "--all"]) == 0
     out = capsys.readouterr().out
     assert "REOPENED" in out and "title of a7" in out
 
 
 def test_work_all_and_since_are_sent(desk: FakeDesk) -> None:
     desk.on("GET", "/v1/work", (200, round_()))
-    assert main(["work"]) == 0
+    assert main(["work", "--since", "2026-11-01T00:00:00Z"]) == 0
     assert main(["work", "--all", "--since", "2026-11-01T00:00:00Z"]) == 0
     first, second = desk.calls("GET", "/v1/work")
-    assert first.query == {}
+    assert first.query == {"since": ["2026-11-01T00:00:00Z"]}
     assert second.query == {"all": ["true"], "since": ["2026-11-01T00:00:00Z"]}
 
 
@@ -381,14 +381,14 @@ def test_work_says_when_a_list_was_cut(desk: FakeDesk, capsys: pytest.CaptureFix
     cut = round_(truncated=True)
     cut["catch_up"] = cut["catch_up"] | {"truncated": True}
     desk.on("GET", "/v1/work", (200, cut))
-    assert main(["work"]) == 0
+    assert main(["work", "--all"]) == 0
     out = capsys.readouterr().out
     assert "the first 1000" in out and "the next --advance reads on" in out
 
 
 def test_work_json_prints_the_whole_round(desk: FakeDesk, capsys: pytest.CaptureFixture[str]) -> None:
     desk.on("GET", "/v1/work", (200, round_()))
-    assert main(["work", "--json"]) == 0
+    assert main(["work", "--all", "--json"]) == 0
     assert json.loads(capsys.readouterr().out) == round_()
 
 
@@ -1449,3 +1449,65 @@ def test_table_clips_past_a_short_tail_and_never_widens_it() -> None:
     out = render.table([{"name": "n" * 50, "next": "soon"}], columns, width=NARROW_TABLE)
     assert all(len(line) <= NARROW_TABLE for line in out.splitlines())
     assert "soon" in out and "…" in out
+
+
+def board_(**fields: Any) -> dict[str, Any]:
+    busy = {
+        "seat": "Dolza 1 - Max", "mode": "auto", "work": "a7", "state": "working", "since": None,
+        "active": None, "turn": "active", "task": "Retry PyPI timeouts in the pip-audit step",
+        "outcome_label": "crunchtools/python-sdlc#66", "pr": "crunchtools/python-sdlc#67",
+        "done_when": "PR open", "check_after": None, "step": "Open the PR",
+    }  # fmt: skip
+    blocked = {
+        "why": "blocked", "work": "a9", "seat": None, "mode": "manual", "state": "blocked",
+        "text": "Scott files it", "task": "File the RHEL Jira", "outcome_label": "RT#1656",
+    }  # fmt: skip
+    held = {"why": "held", "work": "a10", "mode": "manual", "state": "queued", "text": "x"}
+    changed = {**busy, "id": "a7", "at": "2026-11-19T18:00:00Z", "by": ["Dolza 1 - Max"], "new": False}
+    return {
+        "busy": [busy], "free": ["Exedore 4 - Max"], "missing": [],
+        "summary": {"up": 12, "seats": 12, "open": 3}, "needs_you": [blocked, held],
+        "changes": {"items": [changed], "seen_at": None, "after": 0, "until": 9, "truncated": False},
+    } | fields  # fmt: skip
+
+
+def test_bare_work_is_the_seat_board_in_one_call_and_marks_what_changed_seen(
+    desk: FakeDesk, capsys: pytest.CaptureFixture[str]
+) -> None:
+    desk.on("GET", "/v1/status", (200, board_()))
+    desk.on("POST", "/v1/changes", (200, {}))
+    assert main(["work"]) == 0
+    out = capsys.readouterr().out
+    assert out.splitlines()[1].split() == ["SEAT", "MODE", "STATE", "OUTCOME", "WORK", "TASK", "NEXT"]
+    assert "python-sdlc#66" in out and "crunchtools/python-sdlc#66" not in out, "the owner is dropped"
+    assert "NEEDS YOU" in out and "Scott files it" in out
+    assert "1 PRs and issues wait for a lane label" in out, "held subjects fold into one line"
+    assert "CHANGED SINCE YOU LOOKED" in out
+    assert not desk.calls("GET", "/v1/work"), "one call"
+    assert len(desk.calls("POST", "/v1/changes")) == 1
+
+
+def test_work_markdown_links_the_outcome_and_pads_every_table_alike(
+    desk: FakeDesk, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("ASHIGARU_MD_COLUMNS", "136")
+    desk.on("GET", "/v1/status", (200, board_()))
+    desk.on("POST", "/v1/changes", (200, {}))
+    assert main(["work", "--markdown"]) == 0
+    out = capsys.readouterr().out
+    assert "[python-sdlc#66](https://github.com/crunchtools/python-sdlc/issues/66)" in out
+    assert "[RT#1656](https://rt.fatherlinux.com/Ticket/Display.html?id=1656)" in out
+    heads = [line for line in out.splitlines() if line.startswith("| SEAT")]
+    assert len(heads) == len(("seats", "needs you", "changed")), "three tables"
+    assert len(set(heads)) == 1, "the three tables share their widths"
+    assert "🟢 working" in out
+
+
+def test_work_wide_adds_the_id_time_pr_done_when_and_check(
+    desk: FakeDesk, capsys: pytest.CaptureFixture[str]
+) -> None:
+    desk.on("GET", "/v1/status", (200, board_(changes=None)))
+    assert main(["work", "--wide"]) == 0
+    head = capsys.readouterr().out.splitlines()[1]
+    for column in ("TIME", "PR", "WORK", "DONE WHEN", "CHECK"):
+        assert column in head

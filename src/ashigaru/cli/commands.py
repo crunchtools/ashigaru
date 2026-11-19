@@ -76,6 +76,8 @@ def work(desk: Desk, since: str | None = None, **flags: bool) -> dict[str, Any]:
     The MCP tool is desk_work."""
     if since and flags.get("advance"):
         raise CommandError("--since cannot go with --advance")
+    if not since and not flags.get("all") and not flags.get("advance"):
+        return _seat_board(desk)
     query = {"since": since} if since else {}
     if flags.get("all"):
         query["all"] = "true"
@@ -84,6 +86,21 @@ def work(desk: Desk, since: str | None = None, **flags: bool) -> dict[str, Any]:
         return moved
     result: dict[str, Any] = desk.get("/v1/work", **query)
     return result
+
+
+def _seat_board(desk: Desk) -> dict[str, Any]:
+    """Bare `work`, what Scott reads, in one call: each busy seat's work, the free seats, NEEDS YOU and
+    what changed since he looked, after which his seen mark moves. The full round is `work --advance`,
+    `--all` or `--since`."""
+    board: dict[str, Any] = desk.get("/v1/status")
+    for row in board["busy"]:
+        row["id"] = row["work"]
+    for need in board["needs_you"]:
+        need["id"] = need.get("work")
+        need["step"] = need.get("text") or need.get("step") or need["why"]
+    if (board.get("changes") or {}).get("items"):
+        desk.request("POST", "/v1/changes", body={})
+    return {**board, "board": True}
 
 
 def queue(desk: Desk) -> dict[str, Any]:
