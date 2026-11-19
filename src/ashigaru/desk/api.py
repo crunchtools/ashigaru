@@ -456,15 +456,18 @@ NEXT_TICK = 2.0
     responses={**errors(401, 403, 409), 204: {"description": "No work yet, or the switch is off."}},
 )
 async def next_item(
-    conn: Conn, who: Who, name: str, query: Annotated[NextWait, Query()]
+    request: Request, conn: Conn, who: Who, name: str, query: Annotated[NextWait, Query()]
 ) -> NextItem | Response:
     """The seat's `next` hook: claim the oldest queued auto item in the seat's lane whose `after` items
-    are done, waiting up to `wait` seconds for one. 204 when none came or the `autodispatch` mark is
-    not `on`; 409 when the seat cannot take work (busy, held, unseen or laneless), so the hook stops."""
+    are done, waiting up to `wait` seconds for one while the seat is idle. 204 when none came, the
+    `autodispatch` mark is not `on`, or the client went away (nothing is claimed for a seat no longer
+    listening); 409 when the seat cannot take work (busy, held, unseen or laneless), so the hook stops."""
     own_seat(who, name)
     loop = asyncio.get_running_loop()
     until = loop.time() + query.wait
     while True:
+        if await request.is_disconnected():
+            return Response(status_code=status.HTTP_204_NO_CONTENT)
         try:
             item = await run_in_threadpool(dispatch.next_item, conn, name)
         except store.Conflict as error:

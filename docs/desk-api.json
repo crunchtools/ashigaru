@@ -6512,7 +6512,7 @@
     },
     "/v1/seats/{name}/next": {
       "post": {
-        "description": "The seat's `next` hook: claim the oldest queued auto item in the seat's lane whose `after` items\nare done, waiting up to `wait` seconds for one. 204 when none came or the `autodispatch` mark is\nnot `on`; 409 when the seat cannot take work (busy, held, unseen or laneless), so the hook stops.",
+        "description": "The seat's `next` hook: claim the oldest queued auto item in the seat's lane whose `after` items\nare done, waiting up to `wait` seconds for one while the seat is idle. 204 when none came, the\n`autodispatch` mark is not `on`, or the client went away (nothing is claimed for a seat no longer\nlistening); 409 when the seat cannot take work (busy, held, unseen or laneless), so the hook stops.",
         "operationId": "next_item_v1_seats__name__next_post",
         "parameters": [
           {

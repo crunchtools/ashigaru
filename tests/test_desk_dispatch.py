@@ -1,16 +1,19 @@
 """Assign with seat-pick, desk_claim, usage and spend, and the outcomes rollup."""
 
+import asyncio
 import sqlite3
 import time
 from http.client import CONFLICT, FORBIDDEN, NO_CONTENT, NOT_FOUND, OK, UNPROCESSABLE_ENTITY
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
 from conftest import Keys
+from fastapi import Request
 from fastapi.testclient import TestClient
 
-from ashigaru.desk import api, dispatch, store
+from ashigaru.desk import api, auth, dispatch, store
+from ashigaru.desk.model import NextWait, Role
 
 MONTHLY_LIMIT = 500
 WAIT = 1
@@ -171,6 +174,51 @@ def test_next_refuses_a_seat_that_cannot_take_work(client: TestClient, keys: Key
     assert next_item(client, keys, OTHER).status_code == CONFLICT
     assert next_item(client, keys, MINE, who=OTHER).status_code == FORBIDDEN
     assert next_item(client, keys, OTHER, who=CI).status_code == FORBIDDEN
+
+
+def test_next_never_hands_a_mid_turn_seat_a_second_brief(client: TestClient, keys: Keys) -> None:
+    seat(client, keys, MINE)
+    switch(client, keys, "on")
+    work = item(client, keys, lane="exedore-max")
+    client.patch(f"/v1/seats/{MINE}", headers=keys[MINE], json={"turn": "active"})
+    assert next_item(client, keys, MINE).status_code == NO_CONTENT
+    client.patch(f"/v1/seats/{MINE}", headers=keys[MINE], json={"turn": "idle"})
+    assert next_item(client, keys, MINE).json()["item"]["id"] == work
+
+
+def test_next_takes_no_write_lock_to_find_nothing(
+    client: TestClient, keys: Keys, conn: sqlite3.Connection, db: Path
+) -> None:
+    seat(client, keys, MINE)
+    item(client, keys, lane="exedore-max")
+    writer = store.connect(str(db))
+    writer.execute("PRAGMA busy_timeout = 0")
+    reader = store.connect(str(db))
+    reader.execute("PRAGMA busy_timeout = 0")
+    writer.execute("BEGIN IMMEDIATE")
+    try:
+        assert dispatch.next_item(reader, MINE) is None
+    finally:
+        writer.execute("ROLLBACK")
+        writer.close()
+        reader.close()
+
+
+def test_next_claims_nothing_for_a_client_that_has_gone(
+    client: TestClient, keys: Keys, conn: sqlite3.Connection
+) -> None:
+    class Gone:
+        async def is_disconnected(self) -> bool:
+            return True
+
+    seat(client, keys, MINE)
+    switch(client, keys, "on")
+    work = item(client, keys, lane="exedore-max")
+    caller = auth.Caller(name=MINE, role=Role.SEAT, key_id="k")
+    answer = asyncio.run(api.next_item(cast(Request, Gone()), conn, caller, MINE, NextWait(wait=0)))
+    assert getattr(answer, "status_code", None) == NO_CONTENT
+    left = store.get_item(conn, work)
+    assert left is not None and left["seat"] is None
 
 
 def test_next_waits_out_its_window_when_nothing_comes(

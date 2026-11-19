@@ -52,16 +52,24 @@ from .config import load
 
 EVENTS = ("session-start", "prompt-submit", "stop", "next", "statusline")
 HOOK_SECONDS = 2.0
-# How long `next` waits for work, under the 1800 s timeout its hook entry sets.
-NEXT_SECONDS = 1750.0
+# How long `next` waits for work, under the 86400 s timeout its hook entry sets: an idle seat after
+# /clear runs no turn, so nothing would start another wait.
+NEXT_SECONDS = 86100.0
 # One long-poll to the Desk, under its MAX_WAIT.
 NEXT_WAIT = 60
 # Before the first ask: SessionStart's own hook frees the seat on a /clear, and runs alongside.
 NEXT_SETTLE = 3.0
 # How much longer than one long-poll the client waits for the Desk's answer.
 NEXT_GRACE = 15
-# After an unreachable Desk, before asking again.
-NEXT_RETRY = 30.0
+# After a Desk that is down, restarting or throttling, before asking again; doubling to NEXT_BACKOFF.
+NEXT_RETRY = 5.0
+NEXT_BACKOFF = 300.0
+# Between looks that brought nothing back, so an empty answer is never a spin.
+NEXT_PAUSE = 2.0
+# Answers that mean this seat will not get work by asking again: stop.
+NEXT_FINAL = frozenset(
+    {HTTPStatus.UNAUTHORIZED, HTTPStatus.FORBIDDEN, HTTPStatus.NOT_FOUND, HTTPStatus.CONFLICT}
+)
 # Claude Code's asyncRewake: an async hook exiting 2 wakes the idle session with its stderr.
 WAKE = 2
 TASK_LENGTH = 120
@@ -193,23 +201,46 @@ def _stop(event: dict[str, Any], desk: Desk, path: str) -> None:
     desk.request("PATCH", path, body=body)
 
 
-def _next(desk: Desk, path: str) -> str | None:
-    """The brief of the item the Desk hands this seat, or None once the seat cannot take work."""
-    time.sleep(NEXT_SETTLE)
+class _Stop(Exception):
+    """The Desk said this seat will not get work by asking again."""
+
+
+def _ask(desk: Desk, method: str, path: str, deadline: float, **params: Any) -> Any:
+    """One request, retried with backoff while the Desk is down, restarting or throttling (5xx, 429,
+    anything but NEXT_FINAL), until `deadline` on the monotonic clock. Raises _Stop on NEXT_FINAL,
+    and _Deadline when no request can finish in the time left."""
+    pause = NEXT_RETRY
     while True:
+        wait = int(min(params.get("wait", 0), deadline - time.monotonic() - NEXT_GRACE))
+        if wait < 0:
+            raise _Deadline
         try:
-            found = desk.request(
-                "POST", f"{path}/next", params={"wait": NEXT_WAIT}, timeout=NEXT_WAIT + NEXT_GRACE
+            return desk.request(
+                method, path, params={"wait": wait} if "wait" in params else None, timeout=wait + NEXT_GRACE
             )
-        except DeskError as error:
-            if error.status == HTTPStatus.CONFLICT:
-                return None
-            raise
-        except Unreachable:
-            time.sleep(NEXT_RETRY)
-            continue
-        if found:
-            return str(found["brief"])
+        except (DeskError, Unreachable) as error:
+            if isinstance(error, DeskError) and error.status in NEXT_FINAL:
+                raise _Stop from error
+        time.sleep(min(pause, max(0.0, deadline - time.monotonic())))
+        pause = min(pause * 2, NEXT_BACKOFF)
+
+
+def _next(desk: Desk, seat: str | None) -> str | None:
+    """The brief of the item the Desk hands this seat, or None once the seat cannot take work or the
+    wait runs out. Every request ends before NEXT_SECONDS, so no claim lands on a hook already gone."""
+    deadline = time.monotonic() + NEXT_SECONDS
+    time.sleep(NEXT_SETTLE)
+    try:
+        name = seat or _ask(desk, "GET", "/v1/me", deadline)["name"]
+        path = f"/v1/seats/{quote(name, safe='')}/next"
+        while True:
+            found = _ask(desk, "POST", path, deadline, wait=NEXT_WAIT)
+            brief = found.get("brief") if isinstance(found, dict) else None
+            if isinstance(brief, str) and brief.strip():
+                return brief
+            time.sleep(NEXT_PAUSE)
+    except (_Stop, _Deadline):
+        return None
 
 
 def usage_state(session: str, env: Mapping[str, str]) -> Path:
@@ -324,11 +355,10 @@ def _report(name: str, stdin: TextIO, env: Mapping[str, str] | None, transport: 
     config = load(env)
     desk = Desk(config, timeout=HOOK_SECONDS, transport=transport)
     try:
-        seat = config.seat or desk.get("/v1/me")["name"]
-        path = f"/v1/seats/{quote(seat, safe='')}"
         if name == "next":
-            return _next(desk, path)
-        HANDLERS[name](event, desk, path)
+            return _next(desk, config.seat)
+        seat = config.seat or desk.get("/v1/me")["name"]
+        HANDLERS[name](event, desk, f"/v1/seats/{quote(seat, safe='')}")
     finally:
         desk.close()
     return None
@@ -341,7 +371,7 @@ def run(
     transport: httpx.BaseTransport | None = None,
 ) -> int:
     """Run one hook; 0, or WAKE once `next` has printed a brief on stderr."""
-    bound = NEXT_SECONDS if name == "next" else HOOK_SECONDS
+    bound = NEXT_SECONDS + NEXT_GRACE if name == "next" else HOOK_SECONDS
     previous = signal.signal(signal.SIGALRM, _alarm)
     signal.setitimer(signal.ITIMER_REAL, bound)
     try:

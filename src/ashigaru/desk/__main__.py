@@ -29,7 +29,7 @@ SETTINGS = {
     "ASHIGARU_TURN_MAX": "seconds a silent seat turn may stay active before seat reconcile ends it (serve); "
     "10800 by default",
     "ASHIGARU_SILENT_AFTER": "seconds a busy seat may go without a write before seat reconcile flags it "
-    "silent (serve); 900 by default",
+    "silent (serve); 3600 by default",
     "ASHIGARU_TRUSTED_PROXIES": (
         "comma-separated proxy addresses or CIDRs whose X-Forwarded-For and X-Forwarded-Proto are"
         " believed; none by default, so a direct client cannot forge its address or scheme"
@@ -116,7 +116,7 @@ def sweeper(db: str) -> sweep.Sweeper | None:
 def reconciler(db: str) -> reconcile.Reconciler:
     """Seat reconcile, which needs no forge: it ends a turn active past ASHIGARU_TURN_MAX seconds
     (default 3 hours) that no write has touched for 10 minutes, and flags a busy seat with no write for
-    ASHIGARU_SILENT_AFTER seconds (default 15 minutes)."""
+    ASHIGARU_SILENT_AFTER seconds (default an hour)."""
     turn_max = float(setting("ASHIGARU_TURN_MAX", str(reconcile.TURN_MAX.total_seconds())))
     silent = float(setting("ASHIGARU_SILENT_AFTER", str(reconcile.SILENT.total_seconds())))
     return reconcile.Reconciler(

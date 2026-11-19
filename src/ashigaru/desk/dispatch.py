@@ -212,22 +212,33 @@ def autodispatch(conn: sqlite3.Connection) -> bool:
     return mark is not None and mark["value"] == "on"
 
 
+def _waiting_seat(conn: sqlite3.Connection, seat: str) -> sqlite3.Row | None:
+    """The item a free seat would claim now, or None to keep waiting: the switch is off, the seat is
+    mid-turn (a brief it is reading arrived another way), or nothing in its lane is ready. Raises
+    Conflict when the seat cannot take work at all (busy, held, unseen or laneless)."""
+    row = _free(store.get_seat(conn, seat), seat)
+    if row["lane"] is None:
+        raise store.Conflict(f"seat {seat!r} has no lane; Josui sets it before it can claim")
+    if row["turn"] != Turn.IDLE or not autodispatch(conn):
+        return None
+    found: sqlite3.Row | None = conn.execute(NEXT_READY, {"lane": row["lane"]}).fetchone()
+    return found
+
+
 def next_item(conn: sqlite3.Connection, seat: str) -> dict[str, Any] | None:
-    """`POST /seats/{name}/next`: the free seat claims the oldest queued auto item in its lane whose
-    `after` items are done, or None when there is none or the switch is off. Raises Conflict when the
-    seat cannot take work at all (busy, held, unseen or laneless), so its hook stops asking."""
+    """`POST /seats/{name}/next`: the free, idle seat claims the oldest queued auto item in its lane
+    whose `after` items are done, or None to keep waiting. Raises Conflict when the seat cannot take
+    work at all, so its hook stops asking. Reads first and takes the write lock only to claim, so a
+    waiting seat's looks cost no lock while the switch is off or the lane is empty."""
+    if _waiting_seat(conn, seat) is None:
+        return None
     with store.transaction(conn):
-        row = _free(store.get_seat(conn, seat), seat)
-        if row["lane"] is None:
-            raise store.Conflict(f"seat {seat!r} has no lane; Josui sets it before it can claim")
-        if not autodispatch(conn):
-            return None
-        found = conn.execute(NEXT_READY, {"lane": row["lane"]}).fetchone()
+        found = _waiting_seat(conn, seat)
         if found is None:
             return None
         item = store.decode(found)
         _ready(conn, item)
-        _take(conn, item, row, seat)
+        _take(conn, item, _free(store.get_seat(conn, seat), seat), seat)
         return store.get_item(conn, item["id"])
 
 

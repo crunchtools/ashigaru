@@ -39,7 +39,7 @@ TURN_MAX = timedelta(hours=3)
 """How long a turn may stay active before a silent one is ended; ASHIGARU_TURN_MAX, in seconds."""
 HEARTBEAT = timedelta(minutes=10)
 """How long a seat with a live turn can go without a write: its statusline posts every 30 seconds."""
-SILENT = timedelta(minutes=15)
+SILENT = timedelta(minutes=60)
 """How long a busy seat may go without a write before it is flagged; ASHIGARU_SILENT_AFTER, in seconds."""
 LOG = logging.getLogger(__name__)
 

@@ -999,6 +999,7 @@ NEXT = "/v1/seats/Max%201/next"
 def waking(seat: FakeDesk, monkeypatch: pytest.MonkeyPatch) -> FakeDesk:
     monkeypatch.setattr(hooks, "NEXT_SETTLE", 0)
     monkeypatch.setattr(hooks, "NEXT_RETRY", 0)
+    monkeypatch.setattr(hooks, "NEXT_PAUSE", 0)
     return seat
 
 
@@ -1014,12 +1015,42 @@ def test_next_wakes_the_seat_with_the_brief_on_stderr(
     assert len(asks) == len(["204", "204", "200"]) and asks[0].query == {"wait": [str(hooks.NEXT_WAIT)]}
 
 
-def test_next_stops_quietly_when_the_seat_cannot_take_work(
-    waking: FakeDesk, capsys: pytest.CaptureFixture[str]
+@pytest.mark.parametrize("final", [401, 403, 404, 409])
+def test_next_stops_quietly_when_the_seat_will_not_get_work(
+    waking: FakeDesk, capsys: pytest.CaptureFixture[str], final: int
 ) -> None:
-    waking.on("POST", NEXT, (409, {"detail": "seat 'Max 1' is busy with a3"}))
+    waking.on("POST", NEXT, (final, {"detail": "seat 'Max 1' is busy with a3"}))
     assert hook("next", {}) == 0
     assert capsys.readouterr().out == "" and len(waking.calls("POST", NEXT)) == 1
+
+
+@pytest.mark.parametrize("passing", [500, 502, 503, 504, 429])
+def test_next_rides_out_a_desk_that_is_restarting(waking: FakeDesk, passing: int) -> None:
+    answers = iter([(passing, {"detail": "later"}), (passing, {"detail": "later"}), (200, {"brief": "b"})])
+    waking.on("POST", NEXT, lambda seen: next(answers))
+    assert hook("next", {}) == hooks.WAKE
+
+
+def test_next_never_wakes_on_an_empty_answer(waking: FakeDesk) -> None:
+    given: list[tuple[int, Any]] = [
+        (200, None),
+        (200, {"brief": ""}),
+        (200, {"item": {}}),
+        (200, {"brief": "b"}),
+    ]
+    answers = iter(given)
+    waking.on("POST", NEXT, lambda seen: next(answers))
+    assert hook("next", {}) == hooks.WAKE and len(waking.calls("POST", NEXT)) == len(given)
+
+
+def test_next_finds_its_seat_through_a_restart(desk: FakeDesk, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(hooks, "NEXT_SETTLE", 0)
+    monkeypatch.setattr(hooks, "NEXT_RETRY", 0)
+    monkeypatch.delenv("ASHIGARU_SEAT", raising=False)
+    answers = iter([(503, {"detail": "starting"}), (200, {"name": "Max 1", "role": "seat", "key_id": "k"})])
+    desk.on("GET", "/v1/me", lambda seen: next(answers))
+    desk.on("POST", NEXT, (200, {"brief": "b"}))
+    assert hook("next", {}) == hooks.WAKE
 
 
 def test_next_gives_up_at_its_deadline(waking: FakeDesk, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1030,17 +1061,30 @@ def test_next_gives_up_at_its_deadline(waking: FakeDesk, monkeypatch: pytest.Mon
     assert time.monotonic() - started < 1.0
 
 
-def test_next_asks_again_after_an_unreachable_desk(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+def test_next_asks_again_after_an_unreachable_desk(waking: FakeDesk, monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = iter([hooks.Unreachable("refused"), hooks.Unreachable("refused")])
+
+    def flaky(self: Any, *args: Any, **kwargs: Any) -> Any:
+        error = next(calls, None)
+        if error is not None:
+            raise error
+        return original(self, *args, **kwargs)
+
+    original = hooks.Desk.request
+    monkeypatch.setattr(hooks.Desk, "request", flaky)
+    waking.on("POST", NEXT, (200, {"brief": "b"}))
+    assert hook("next", {}) == hooks.WAKE and len(waking.calls("POST", NEXT)) == 1
+
+
+def test_next_asks_only_for_waits_that_end_before_its_deadline(
+    waking: FakeDesk, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(hooks, "NEXT_SETTLE", 0)
-    monkeypatch.setattr(hooks, "NEXT_SECONDS", 0.3)
-    monkeypatch.setattr(hooks, "NEXT_RETRY", 0.05)
-    monkeypatch.setenv("ASHIGARU_URL", "http://127.0.0.1:9")
-    monkeypatch.setenv("ASHIGARU_API_KEY", KEY)
-    monkeypatch.setenv("ASHIGARU_SEAT", "Max 1")
+    monkeypatch.setattr(hooks, "NEXT_SECONDS", 3.0)
+    monkeypatch.setattr(hooks, "NEXT_GRACE", 1)
+    waking.on("POST", NEXT, (204, None))
     assert hook("next", {}) == 0
-    assert "no answer" in capsys.readouterr().err
+    asks = [int(seen.query["wait"][0]) for seen in waking.calls("POST", NEXT)]
+    assert asks and max(asks) < hooks.NEXT_WAIT and all(ask + 1 <= hooks.NEXT_SECONDS for ask in asks)
 
 
 def statusline(session: str = "s1", **fields: Any) -> dict[str, Any]:

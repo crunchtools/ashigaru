@@ -144,11 +144,11 @@ def test_serve_reconciles_with_its_turn_limit(monkeypatch: pytest.MonkeyPatch, d
 def test_a_busy_seat_quiet_past_silent_is_flagged_without_touching_updated_at(
     conn: sqlite3.Connection, db: Path
 ) -> None:
-    seat(conn, "quiet", ago(minutes=20), status="busy", item="w1")
+    seat(conn, "quiet", ago(minutes=80), status="busy", item="w1")
     seat(conn, "heard", ago(minutes=5), status="busy", item="w2")
     assert reconciling(db)["silent"] == 1
     assert row(conn, "quiet")["silent_since"] and row(conn, "heard")["silent_since"] is None
-    assert row(conn, "quiet")["updated_at"] == ago(minutes=20)
+    assert row(conn, "quiet")["updated_at"] == ago(minutes=80)
     assert reconciling(db)["silent"] == 0, "flagged once"
 
 
@@ -157,17 +157,17 @@ def test_a_free_seat_is_never_flagged_silent(conn: sqlite3.Connection, db: Path)
     assert reconciling(db)["silent"] == 0 and row(conn, "free")["silent_since"] is None
 
 
-@pytest.mark.parametrize(("up", "flagged"), [(timedelta(minutes=5), 0), (timedelta(minutes=30), 1)])
+@pytest.mark.parametrize(("up", "flagged"), [(timedelta(minutes=5), 0), (timedelta(minutes=90), 1)])
 def test_silence_is_flagged_only_once_the_desk_has_been_up_for_silent(
     conn: sqlite3.Connection, db: Path, up: timedelta, flagged: int
 ) -> None:
-    seat(conn, "quiet", ago(minutes=40), status="busy", item="w1")
+    seat(conn, "quiet", ago(minutes=100), status="busy", item="w1")
     started = datetime.now(UTC) - up
     assert reconcile.run(str(db), reconcile.Settings(), started)["silent"] == flagged
 
 
 def test_a_write_clears_silent_since_unless_it_sets_it(conn: sqlite3.Connection, db: Path) -> None:
-    seat(conn, "quiet", ago(minutes=20), status="busy", item="w1")
+    seat(conn, "quiet", ago(minutes=80), status="busy", item="w1")
     reconciling(db)
     assert row(conn, "quiet")["silent_since"]
     with store.transaction(conn):
@@ -183,7 +183,7 @@ def test_a_silent_busy_seat_needs_scott_once(
         work = store.insert_item(
             conn, {"task": "Build it", "mode": "auto", "state": "working"}, JOSUI, source="test"
         )
-    seat(conn, SEAT, ago(minutes=20), status="busy", item=work)
+    seat(conn, SEAT, ago(minutes=80), status="busy", item=work)
     reconciling(db)
     board = client.get("/v1/status", headers=keys[JOSUI]).json()
     silent = [need for need in board["needs_you"] if need["why"] == "silent"]
