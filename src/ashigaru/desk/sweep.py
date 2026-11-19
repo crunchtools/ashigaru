@@ -33,6 +33,7 @@ import logging
 import re
 import sqlite3
 import urllib.error
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 from typing import Any, Protocol
 
@@ -50,6 +51,10 @@ FIRST = timedelta(days=1)
 """How far back the very first search reaches."""
 OVERLAP = timedelta(minutes=10)
 """How far each search reaches back past the mark: the search index lags the forge."""
+FETCHERS = 8
+"""Subjects read from the forge at once."""
+KEPT = timedelta(days=30)
+"""How long a run's row is kept."""
 LOCK = "sweep-lock"
 """Held by the run under way, as its start time; abandoned after twice the interval."""
 WRITERS = frozenset({"OWNER", "MEMBER"})
@@ -73,11 +78,13 @@ LAST = "SELECT * FROM sweeps ORDER BY id DESC LIMIT 1"
 
 
 class Reader(Protocol):
-    """What a sweep asks of a forge adapter (forges.Forge has both)."""
+    """What a sweep asks of a forge adapter (forges.Forge has all three)."""
 
     def subject(self, repo: str, number: int, token: str) -> IntakeItem: ...
 
     def updated(self, org: str, since: str, token: str) -> Search: ...
+
+    def may_write(self, repo: str, account: str, token: str) -> bool: ...
 
 
 @dataclasses.dataclass(frozen=True)
@@ -138,26 +145,34 @@ def _why(error: Exception) -> str:
 
 
 def _found(conn: sqlite3.Connection, settings: Settings, hit: Found, counts: Counts) -> None:
-    """A search hit. A writer's new subject is queued, and a writer's PR becomes the `pr` of each open
-    item its title or body names that has none; anyone else's is listed, never stored. A subject
-    with an item is recorded and settled."""
+    """A search hit. A member's or trusted author's new subject is queued: claimable only when the
+    forge says its author may write to the repo (org membership is not write access), else held;
+    anyone else's is listed, never stored. A writer's PR becomes the `pr` of each open item its title
+    or body names that has none. A subject with an item is recorded and settled."""
     item = hit.item
-    writes = hit.association in WRITERS or item.author in settings.authors
-    if not writes and store.item_by_subject(conn, item.subject_key) is None:
+    member = hit.association in WRITERS or item.author in settings.authors
+    known = store.item_by_subject(conn, item.subject_key) is not None
+    if not member and not known:
         outsider = {"subject_key": item.subject_key, "ref": item.ref, "author": item.author}
         counts.outsiders += [outsider] if outsider not in counts.outsiders else []
         return
-    named = LINK.findall(f"{item.title}\n{hit.body}") if writes and item.kind == Kind.STORY else []
+    named = LINK.findall(f"{item.title}\n{hit.body}") if member and item.kind == Kind.STORY else []
+    asks = member and (named or not known) and item.author not in settings.authors
+    writes = item.author in settings.authors or bool(
+        asks
+        and item.repo
+        and item.author
+        and settings.forge.may_write(item.repo, item.author, settings.token)
+    )
     with store.transaction(conn):
         if store.item_by_subject(conn, item.subject_key) is None:
-            counts.new += (
-                intake.upsert(conn, dataclasses.replace(item, author_writes=True, judged_at=0)) is not None
-            )
-        for work in named:
+            judged = dataclasses.replace(item, author_writes=writes, judged_at=0)
+            counts.new += intake.upsert(conn, judged) is not None
+        for work in named if writes else []:
             found = store.get_item(conn, work)
             if found and not found["pr"] and found["state"] not in CLOSED and found["wrap"] != Wrap.CLEARED:
                 store.update_item(conn, work, {"pr": item.subject_key}, ACTOR, SOURCE)
-        if store.item_by_subject(conn, item.subject_key) is not None or named:
+        if store.item_by_subject(conn, item.subject_key) is not None or (named and writes):
             subjects.record(conn, item, SOURCE)
             counts.closed += len(subjects.settle(conn, item.subject_key))
         counts.subjects += 1
@@ -185,19 +200,24 @@ def _locked(conn: sqlite3.Connection, settings: Settings, started: datetime) -> 
 
 
 def _read(conn: sqlite3.Connection, settings: Settings, keys: list[str], counts: Counts) -> None:
-    """Each open item's subject, read back: recorded and settled; one it cannot read is an error."""
-    for key in keys:
-        try:
-            if not (found := _number(key)):
+    """Each open item's subject, read back FETCHERS at a time, then recorded and settled in key order;
+    one it cannot read is an error."""
+    wanted = {key: found for key in keys if (found := _number(key))}
+    with ThreadPoolExecutor(FETCHERS) as pool:
+        reads = {
+            key: pool.submit(settings.forge.subject, *found, settings.token) for key, found in wanted.items()
+        }
+        for key, read in reads.items():
+            try:
+                item = read.result()
+            except UNREADABLE as failed:
+                counts.errors.append(f"{key}: {_why(failed)}")
+                LOG.warning("sweep could not read %s: %s", key, counts.errors[-1], exc_info=failed)
                 continue
-            item = settings.forge.subject(*found, settings.token)
             with store.transaction(conn):
                 if subjects.record(conn, item, SOURCE):
                     counts.closed += len(subjects.settle(conn, item.subject_key))
                 counts.subjects += 1
-        except UNREADABLE as failed:
-            counts.errors.append(f"{key}: {_why(failed)}")
-            LOG.warning("sweep could not read %s: %s", key, counts.errors[-1], exc_info=failed)
 
 
 def _search(
@@ -252,6 +272,7 @@ def run(db_path: str, settings: Settings, trigger: str) -> dict[str, Any] | None
             )
             conn.execute(FINISH, finish)
             conn.execute("DELETE FROM marks WHERE name = ?", (LOCK,))
+            conn.execute("DELETE FROM sweeps WHERE started_at < ?", (_stamp(started - KEPT),))
         return last(conn)
     finally:
         conn.close()

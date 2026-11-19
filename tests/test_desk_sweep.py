@@ -23,6 +23,7 @@ from ashigaru.desk.model import Kind
 JOSUI, SEAT = "Josui Prime", "Exedore 1 - Max"
 ORG = "crunchtools"
 HOUR = 3600.0
+LONG_AGO = "2020-01-01T00:00:00Z"
 WRITERS = 2
 """Of the four authors the search found, two are queued: the member and the app's bot."""
 
@@ -49,6 +50,7 @@ class FakeForge:
     searched: list[str] = dataclasses.field(default_factory=list)
     refuse: dict[int, Exception] = dataclasses.field(default_factory=dict)
     complete: bool = True
+    writers: frozenset[str] = frozenset({"fatherlinux"})
 
     def subject(self, repo: str, number: int, token: str) -> IntakeItem:
         if number in self.refuse:
@@ -58,6 +60,9 @@ class FakeForge:
     def updated(self, org: str, since: str, token: str) -> Search:
         self.searched.append(since)
         return Search(self.hits, self.complete)
+
+    def may_write(self, repo: str, account: str, token: str) -> bool:
+        return account in self.writers
 
 
 def sweeping(db: Path, forge: FakeForge, authors: frozenset[str] = frozenset()) -> dict[str, Any]:
@@ -224,3 +229,28 @@ def test_a_search_cut_at_the_cap_moves_the_mark_only_to_its_last_hit(
     run = sweeping(db, FakeForge(hits=hits, complete=False))
     assert run["error"].startswith("search: cut at the forge's cap")
     assert (store.get_mark(conn, sweep.MARK) or {})["value"] == "2026-11-19T07:00:00Z"
+
+
+def test_a_member_who_cannot_write_to_the_repo_is_recorded_but_held(
+    conn: sqlite3.Connection, db: Path
+) -> None:
+    hits = [
+        Found(subject(1, author="reader"), "MEMBER", "Names (a1)"),
+        Found(subject(2, author="fatherlinux"), "MEMBER", ""),
+    ]
+    run = sweeping(db, FakeForge(hits=hits))
+    rows = {row["subject_key"]: row for row in store.list_items(conn)}
+    held, writer = rows["crunchtools/x#1"], rows["crunchtools/x#2"]
+    assert run["new"] == WRITERS and run["outsiders"] == []
+    assert (held["mode"], held["lane"], held["extra"]["trusted"]) == ("manual", None, False)
+    assert (writer["mode"], writer["extra"]["trusted"]) == ("auto", True)
+    assert held["pr"] is None, "a PR from someone who cannot write links nothing"
+
+
+def test_old_runs_are_pruned(conn: sqlite3.Connection, db: Path) -> None:
+    conn.execute(
+        "INSERT INTO sweeps (trigger, started_at, finished_at) VALUES ('timer', ?, ?)", (LONG_AGO, LONG_AGO)
+    )
+    sweeping(db, FakeForge())
+    assert [row[0] for row in conn.execute("SELECT started_at FROM sweeps")] != [LONG_AGO]
+    assert conn.execute("SELECT count(*) FROM sweeps WHERE started_at = ?", (LONG_AGO,)).fetchone()[0] == 0

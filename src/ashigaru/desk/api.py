@@ -356,7 +356,14 @@ def sweep_state(request: Request, conn: Conn, who: Who) -> Sweep:
     return sweep_view(request.app.state.sweeper, conn)
 
 
-@router.post("/v1/sweep", tags=["views"], responses=errors(401, 403, 409))
+@router.post(
+    "/v1/sweep",
+    tags=["views"],
+    responses={
+        **errors(401, 403),
+        409: {"model": Problem, "description": "No sweep runs here: the forge's token or org is not set."},
+    },
+)
 async def sweep_now(request: Request, conn: Conn, who: Admin) -> Sweep:
     """`ashigaru sweep --run`, admin: wake the timer for a run now, and return at once; the run's
     counts land in `last` when it finishes. 409 when no timer runs (no forge token or org)."""

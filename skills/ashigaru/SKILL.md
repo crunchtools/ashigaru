@@ -195,7 +195,7 @@ sweep that used to run here is `work`'s catch-up.
 `ashigaru sweep`: the Desk's own sweep of GitHub, when it has an org and a
 token. It re-reads every open item's subject and PR, searches the org for
 issues and PRs updated since the `sweep-search` mark (queuing a member's or a
-trusted author's; anyone else's, other bots included, is only listed under NEEDS
+trusted author's, held unless the author writes to that repo; anyone else's, other bots included, is only listed under NEEDS
 YOU as `outsider`, never stored: create it by hand if it is work), links a
 writer's PR that names `(a676)` as that item's `pr`, and settles everything. It
 runs at startup, every 10 minutes and on request, and never writes to GitHub.

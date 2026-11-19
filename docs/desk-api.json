@@ -6317,7 +6317,7 @@
                 }
               }
             },
-            "description": "A taken id or subject_key (the detail names the item holding it), an existing identity, a second child in one assignment, or an item or seat not in a state to assign, claim or wrap."
+            "description": "No sweep runs here: the forge's token or org is not set."
           }
         },
         "security": [

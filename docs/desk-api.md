@@ -157,7 +157,9 @@ set, `serve` runs a sweep at startup, every `ASHIGARU_SWEEP_EVERY` seconds and
 on `POST /sweep`. A run re-reads every open item's subject and PR and settles
 them as a delivery does; searches the org for subjects updated since the
 `sweep-search` mark less 10 minutes (the search index lags), queuing only an
-OWNER's, MEMBER's or trusted author's new subject and listing anyone else's in
+OWNER's, MEMBER's or trusted author's new subject (claimable when the forge says
+its author writes to that repo, else held: org membership is not write access;
+a PR links to an item only from such a writer) and listing anyone else's in
 the run's `outsiders` (shown under NEEDS YOU for a day) without storing it;
 links a writer's PR whose title or body names `(a676)` as that item's `pr`; then
 settles everything. The mark moves to the run's start once the search was read

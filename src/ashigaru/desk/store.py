@@ -223,6 +223,7 @@ MIGRATIONS: tuple[str, ...] = (
         error TEXT,
         outsiders TEXT NOT NULL DEFAULT '[]'
     );
+    CREATE INDEX sweeps_finished ON sweeps(finished_at);
     """,
 )
 
