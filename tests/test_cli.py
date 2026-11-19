@@ -338,6 +338,14 @@ def test_assign_sets_an_items_outcome_before_assigning_it(desk: FakeDesk) -> Non
     assert assigned.body == {"seat": "Vertex 1"}
 
 
+def test_assign_passes_an_empty_outcome_text_on(desk: FakeDesk) -> None:
+    desk.on("PATCH", "/v1/items/a1", (200, item()))
+    desk.on("POST", "/v1/items/a1/assign", (200, item(seat="Vertex 1", state="assigned")))
+    assert main(["assign", "a1", "--seat", "Vertex 1", "--outcome-text", ""]) == 0
+    patch, _ = desk.seen
+    assert patch.body == {"outcome_text": ""}
+
+
 def test_work_shows_what_reopened(desk: FakeDesk, capsys: pytest.CaptureFixture[str]) -> None:
     caught = round_()["catch_up"] | {"reopened": [caught_row("a7", state="done")]}
     desk.on("GET", "/v1/work", (200, round_(catch_up=caught)))

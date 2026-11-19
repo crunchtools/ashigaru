@@ -57,7 +57,7 @@ can return.
 | `GET /ci/wait` | `desk_wait`: `repo` (owner/name), full `sha` and optional `branch` (default the repo's); the commit's CI result as soon as it is not `pending`, which needs every check that branch requires to have a conclusion (see CI below), else as it stands after `timeout` seconds (default and most 90; 0 reads now). A client waits again on `pending` |
 | `GET /work` | `ashigaru work`, the whole check round: `items`, the check table (id, seat, mode, task, state, wrap, result or blocker, next, `since` the state was entered, `outcome` and its `outcome_label`, `step`: the one next step, and `needs_you`) of open items, never outcomes (an auto outcome closes once its stories all have), grouped by outcome: groups holding `needs_you` work first, then by newest, then work serving none; an item's outcome is its parent, else that of the story whose `pr` is its subject (a review), else that of the story it was filed under; with `?all=true` adding done, wontdo, abandoned and cleared ones, at most 1000 (`truncated`); `seats` as `GET /seats`; `summary` (`up`: seats not missing, `seats`, `open` items); `queue` as `GET /queue`; and `catch_up`, the issues and PRs intake recorded from the org webhook after a cursor: `new`, first seen, with title, `filed_by` (the author), lane, mode and `held`, and `reopened`, the delivery that took the source from closed to open while the item is closed, each item once. The cursor is an event seq (`after`): the `sweep` mark, or with `?since=` (or a mark that is a time) the event before the first stamped then; with neither, a day back; 422 for a time that is not one. `until` is the last event covered: the last committed when the round began, or the 1000th read when `truncated`. Events are numbered in commit order, so nothing is lost or repeated between rounds. It leaves the mark alone, though like `GET /queue` it abandons proposed children past their expiry |
 | `POST /work` | admin: the same round, then the `sweep` mark becomes its `until` (`advanced` is true), so the next round reads on from there. Only forward: when it is already there, or a concurrent round moved it further, it stays and `advanced` is false. `?since=` is 422 here, since a round read from a time could move the mark past events it never read |
-| `GET /status` | `ashigaru status` (`desk_status`), the `Board`: `busy` seats (seat, mode, item, `since`, last check-in, whole task, `outcome_label`), `free` and `missing` seat names, `summary` (`up`, `seats`, `open`), `needs_you`: manual seats idle with their `waiting_on`, Scott's blocked manual items, subjects intake holds for approval, and `outsider` subjects the sweep listed in the last day without storing them (at most 50); and `sweep`, the last run, for the board's last line |
+| `GET /status` | `ashigaru status` (`desk_status`), the `Board`: `busy` seats (seat, mode, item, `since`, last check-in, whole task, `outcome_label`), `free` and `missing` seat names, `summary` (`up`, `seats`, `open`), `needs_you`: manual seats idle with their `waiting_on`, Scott's holds on seats silent for a day (`stale`), Scott's blocked manual items, subjects intake holds for approval, and `outsider` subjects the sweep listed in the last day without storing them (at most 50); and `sweep`, the last run, for the board's last line |
 | `GET /sweep` | `ashigaru sweep` (`desk_sweep`), anyone: `configured`, `every` (seconds), `running`, and `last`, the latest run with `trigger`, `started_at`, `finished_at`, `subjects`, `new`, `closed` and `error` |
 | `POST /sweep` | admin, `ashigaru sweep --run` (`desk_sweep` with `run`): wakes the timer and returns at once; 409 when the sweep is not configured |
 | `GET /subjects/{key}` | a `Subject`: the forge's own state of one issue or PR (`owner/repo#N`, `#` URL-encoded as `%23`): open, closed or merged, head, draft, review, title, labels, source and `source_updated_at`; 404 if no delivery has named it (migration 8) |
@@ -151,6 +151,15 @@ keeps (labeled `ashigaru-inbox`, `ashigaru-releases`, `ashigaru-red` or
 never queued, and one queued before is held on its next delivery. A subject
 authored by a bot that is not in that list (dependabot, say) is not queued,
 by webhook or sweep; it used to be held.
+
+**Seat reconcile.** `serve` runs it at startup and every 5 minutes; it needs no
+forge. A seat turn active longer than `ASHIGARU_TURN_MAX` (3 hours) whose row
+has had no write for 10 minutes (the `statusline` hook posts every 30 seconds)
+goes `idle` with `turn_reconciled_at` set: its `stop` hook never arrived. A
+seat idle for a day with no hold of Scott's loses its `task`, as a `/clear`
+would. Both update the row without moving `updated_at`, so a dead seat still
+goes `missing`. It never closes an item: a hold of Scott's on a seat silent for
+a day shows under NEEDS YOU as `stale` (migration 10 adds the column).
 
 **Sweep.** With `ASHIGARU_FORGE_TOKEN_GITHUB` and `ASHIGARU_FORGE_ORG_GITHUB`
 set, `serve` runs a sweep at startup, every `ASHIGARU_SWEEP_EVERY` seconds and
@@ -296,6 +305,7 @@ Settings are flags on `ashigaru-desk serve`, else these environment variables:
 | `ASHIGARU_FORGE_AUTHORS_GITHUB` | comma-separated accounts, such as the app's bot, whose own issues and PRs are trusted as a writer's, so a lane label on one makes it auto-claimable; each forge has its own `ASHIGARU_FORGE_AUTHORS_<FORGE>` | none; the image sets `ashigaru-crunchtools[bot]` |
 | `ASHIGARU_FORGE_ORG_GITHUB` | the GitHub org the sweep searches; the sweep runs only with this and the token | none: no sweep |
 | `ASHIGARU_SWEEP_EVERY` | seconds between sweeps | `600` |
+| `ASHIGARU_TURN_MAX` | seconds a seat turn may stay active, with no write to its row for 10 minutes, before seat reconcile ends it | `10800` |
 | `ASHIGARU_WEBHOOK_SECRET` | GitHub's secret under the bare name the first deploy used; added to `_GITHUB` | none |
 | `ASHIGARU_WEBHOOK_SECRET_FILE` | the same, as a file | none |
 

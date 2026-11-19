@@ -226,6 +226,10 @@ MIGRATIONS: tuple[str, ...] = (
     );
     CREATE INDEX sweeps_finished ON sweeps(finished_at);
     """,
+    # When seat reconcile, not the seat's own hook, last ended its turn.
+    """
+    ALTER TABLE seats ADD COLUMN turn_reconciled_at TEXT;
+    """,
 )
 
 ITEM_DEFAULTS: dict[str, Any] = {
@@ -294,11 +298,11 @@ UPSERT_SEAT = """
     INSERT INTO seats (
         name, lane, status, owner, turn, task, item, since, updated_at, model, billing, context_used,
         context_window, session_id, session_tokens, session_cost_usd, session_booked_usd, turn_started_at,
-        waiting_on
+        waiting_on, turn_reconciled_at
     ) VALUES (
         :name, :lane, :status, :owner, :turn, :task, :item, :since, :updated_at, :model, :billing,
         :context_used, :context_window, :session_id, :session_tokens, :session_cost_usd, :session_booked_usd,
-        :turn_started_at, :waiting_on
+        :turn_started_at, :waiting_on, :turn_reconciled_at
     )
     ON CONFLICT (name) DO UPDATE SET
         lane = excluded.lane, status = excluded.status, owner = excluded.owner, turn = excluded.turn,
@@ -307,14 +311,14 @@ UPSERT_SEAT = """
         context_window = excluded.context_window, session_id = excluded.session_id,
         session_tokens = excluded.session_tokens, session_cost_usd = excluded.session_cost_usd,
         session_booked_usd = excluded.session_booked_usd, turn_started_at = excluded.turn_started_at,
-        waiting_on = excluded.waiting_on
+        waiting_on = excluded.waiting_on, turn_reconciled_at = excluded.turn_reconciled_at
 """
 
 SEAT_DEFAULTS: dict[str, Any] = {
     "lane": None, "status": "free", "owner": None, "turn": "idle", "task": None, "item": None,
     "model": None, "billing": None, "context_used": None, "context_window": None, "session_id": None,
     "session_tokens": None, "session_cost_usd": 0.0, "session_booked_usd": 0.0, "turn_started_at": None,
-    "waiting_on": None,
+    "waiting_on": None, "turn_reconciled_at": None,
 }  # fmt: skip
 
 RELEASE_SEAT = """
@@ -640,9 +644,11 @@ def write_seat(conn: sqlite3.Connection, name: str, fields: dict[str, Any]) -> d
         stamps["since"] = at
     if fields.get("turn") == "active" and current["turn"] != "active":
         stamps["turn_started_at"] = at
-    fresh = fields.get("turn") == "active" or ("task" in fields and fields["task"] is None)
+    active = fields.get("turn") == "active"
+    fresh = active or ("task" in fields and fields["task"] is None)
     seat = {
-        **SEAT_DEFAULTS, **current, **({"waiting_on": None} if fresh else {}), **fields, **stamps,
+        **SEAT_DEFAULTS, **current, **({"waiting_on": None} if fresh else {}),
+        **({"turn_reconciled_at": None} if active else {}), **fields, **stamps,
         "name": name, "updated_at": at,
     }  # fmt: skip
     seat["status"] = seat["status"] or SEAT_DEFAULTS["status"]

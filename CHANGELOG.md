@@ -7,6 +7,13 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- Seat reconcile (migration 10): at startup and every 5 minutes, `serve` ends a
+  seat turn active past `ASHIGARU_TURN_MAX` (3 hours) with no write for 10
+  minutes (counted from no earlier than the Desk's own start, so a restart after
+  an outage spares live turns), marking `turn_reconciled_at`, and drops the task
+  of a seat idle a day
+  with no hold of Scott's. A hold of Scott's on a seat silent for a day shows
+  under NEEDS YOU as `stale`; it is never closed for him.
 - Outcomes: `create`, `update` and `assign` take `--outcome <id, RT#N or issue>`
   (found or recorded as an outcome) or `--outcome-text "<instruction>"` for
   Scott's one-off instruction with no ticket (MCP and REST: `outcome`,

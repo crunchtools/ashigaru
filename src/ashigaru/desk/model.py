@@ -399,6 +399,11 @@ class Seat(BaseModel):
     session_tokens: int | None = Field(None, description="Tokens used this session.")
     session_cost_usd: float = 0.0
     turn_started_at: str | None = Field(None, description="When the turn last went active.")
+    turn_reconciled_at: str | None = Field(
+        None,
+        description="When seat reconcile ended a turn no hook did (active past ASHIGARU_TURN_MAX with no "
+        "write for 10 minutes); null once a turn starts.",
+    )
     waiting_on: str | None = Field(
         None, description="The seat's last message before it went idle, trimmed; null once a turn starts."
     )
@@ -511,9 +516,10 @@ class BoardRow(BaseModel):
 
 class NeedsYou(BaseModel):
     """Something only Scott can move: his blocked work, a subject held for approval, a manual seat
-    idle on a question, or an outsider's subject the sweep found and did not store."""
+    idle on a question, a hold of his on a seat silent for a day, or an outsider's subject the sweep
+    found and did not store."""
 
-    why: Literal["blocked", "held", "waiting", "outsider"]
+    why: Literal["blocked", "held", "waiting", "outsider", "stale"]
     work: str | None
     seat: str | None = None
     mode: Mode | None

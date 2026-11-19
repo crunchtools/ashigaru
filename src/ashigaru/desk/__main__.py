@@ -14,9 +14,10 @@ import os
 import sqlite3
 import sys
 import urllib.request
+from datetime import timedelta
 from http import HTTPStatus
 
-from . import auth, importer, store, sweep
+from . import auth, importer, reconcile, store, sweep
 from .forges import DEFAULT, FORGES
 from .model import Role
 
@@ -25,6 +26,8 @@ SETTINGS = {
     "ASHIGARU_BIND": "the address serve listens on; 127.0.0.1 by default, 0.0.0.0 in the image",
     "ASHIGARU_PORT": "the port serve listens on; 8080 by default",
     "ASHIGARU_SWEEP_EVERY": "seconds between sweeps of the forge (serve); 600 by default",
+    "ASHIGARU_TURN_MAX": "seconds a silent seat turn may stay active before seat reconcile ends it (serve); "
+    "10800 by default",
     "ASHIGARU_TRUSTED_PROXIES": (
         "comma-separated proxy addresses or CIDRs whose X-Forwarded-For and X-Forwarded-Proto are"
         " believed; none by default, so a direct client cannot forge its address or scheme"
@@ -108,6 +111,13 @@ def sweeper(db: str) -> sweep.Sweeper | None:
     return sweep.Sweeper(db, sweep.Settings(FORGES[DEFAULT], token, org, authors, every))
 
 
+def reconciler(db: str) -> reconcile.Reconciler:
+    """Seat reconcile, which needs no forge: it ends a turn active past ASHIGARU_TURN_MAX seconds
+    (default 3 hours) that no write has touched for 10 minutes."""
+    turn_max = float(setting("ASHIGARU_TURN_MAX", str(reconcile.TURN_MAX.total_seconds())))
+    return reconcile.Reconciler(db, reconcile.Settings(turn_max=timedelta(seconds=turn_max)))
+
+
 def _open(path: str) -> sqlite3.Connection:
     conn = store.connect(path)
     store.migrate(conn)
@@ -127,6 +137,7 @@ def serve(args: argparse.Namespace) -> int:
         forge_authors=forge_authors(),
     )
     app.state.sweeper = sweeper(args.db)
+    app.state.reconciler = reconciler(args.db)
     # The app applies the proxy headers itself, and only from trusted_proxies; uvicorn's own
     # handling would trust 127.0.0.1 by default.
     uvicorn.run(app, host=args.host, port=args.port, proxy_headers=False, server_header=False)
