@@ -1,0 +1,137 @@
+"""What each piece of work serves: its outcome, the OUTCOME column of `work` and `status`.
+
+An outcome is an item of kind outcome: an RT ticket or a forge issue (its
+subject_key names it), or Scott's one-off instruction with no ticket (a short
+name as its task, the instruction as its note). A story names it as `parent`.
+Work recorded for a story's PR, such as its review or a fix-up, has no parent of
+its own and inherits the story's: an item whose subject_key is another's `pr`
+serves that item's outcome, as does a child filed under a story.
+
+The work view groups its rows by outcome: groups holding something only Scott
+can move first, then the rest, newest first, then the work that serves none,
+shown as `-` so the gap is seen.
+"""
+
+import json
+import sqlite3
+from datetime import UTC, datetime
+from typing import Any
+
+from . import store
+from .model import CLOSED, Kind, Mode, State, Verdict, subject_key
+
+LABEL = 40
+"""The longest one-off outcome name drawn from its instruction."""
+
+OUTCOMES = "SELECT id, subject_key, task FROM items WHERE kind = 'outcome'"
+STORIES = "SELECT pr, parent FROM items WHERE pr IS NOT NULL AND parent IS NOT NULL ORDER BY updated_at"
+FILED = "SELECT id, parent FROM items WHERE parent IS NOT NULL AND id IN (SELECT value FROM json_each(:ids))"
+RED = f"""
+    SELECT s.subject_key FROM subjects s
+    JOIN ci_checks c ON c.repo = lower(s.repo) AND c.sha = lower(s.head_sha) AND c.received_at >= :since
+    WHERE s.subject_key IN (SELECT value FROM json_each(:prs))
+    GROUP BY s.subject_key
+    HAVING sum(c.verdict = '{Verdict.PENDING}') = 0
+       AND sum(c.verdict IN ('{Verdict.FAILURE}', '{Verdict.CANCELLED}')) > 0
+"""
+"""The PRs among :prs whose head's CI ended failed, as ci.status_of says: nothing pending, one failed."""
+
+
+class Unknown(ValueError):
+    """An outcome named neither by an id, a ref, nor with the text a new one-off outcome needs."""
+
+
+def label(outcome: dict[str, Any]) -> str:
+    """How the OUTCOME column names an outcome: its RT#N or owner/repo#N, else its short name."""
+    return str(outcome["subject_key"] or outcome["task"][:LABEL])
+
+
+def resolve(conn: sqlite3.Connection, name: str | None, text: str | None, actor: str) -> str:
+    """The id of the outcome `name` means, recording it if new; the caller holds the transaction.
+    `name` is an outcome's id, or a ref (RT#N, an issue's URL or owner/repo#N) for an outcome that
+    is found or recorded; with `text`, anything else is the short name of a new one-off outcome, and
+    with `text` alone the name is its start. Raises Unknown otherwise."""
+    name = (name or "").strip()
+    if name and (found := store.get_item(conn, name)) and found["kind"] == Kind.OUTCOME:
+        return str(found["id"])
+    key = subject_key(name)
+    if key is not None:
+        found = store.item_by_subject(conn, key)
+        if found is not None:
+            return str(found["id"])
+        fields = {"kind": Kind.OUTCOME, "subject_key": key, "task": key, "mode": Mode.MANUAL}
+        return store.insert_item(conn, {**fields, "state": State.WORKING}, actor)
+    if not text:
+        raise Unknown(f"no outcome {name!r}: name an outcome's id or ref, or give its instruction text")
+    one_off = {"kind": Kind.OUTCOME, "task": name or " ".join(text.split())[:LABEL], "note": text}
+    return store.insert_item(conn, {**one_off, "mode": Mode.MANUAL, "state": State.WORKING}, actor)
+
+
+def attach(conn: sqlite3.Connection, rows: list[dict[str, Any]]) -> None:
+    """Give each row its `outcome` and `outcome_label`: its own id for an outcome, else its parent,
+    else the outcome of the story whose PR it is, else that of the story it was filed under."""
+    names = {row["id"]: label(dict(row)) for row in conn.execute(OUTCOMES)}
+    by_pr = {row["pr"]: row["parent"] for row in conn.execute(STORIES)}
+    under = sorted({row["filed_under"] for row in rows if row.get("filed_under")})
+    filed = {row["id"]: row["parent"] for row in conn.execute(FILED, {"ids": json.dumps(under)})}
+    for row in rows:
+        if row.get("kind") == Kind.OUTCOME:
+            found = row["id"]
+        else:
+            found = (
+                row.get("parent") or by_pr.get(row.get("subject_key")) or filed.get(row.get("filed_under"))
+            )
+        row["outcome"] = found
+        row["outcome_label"] = names.get(found) if found else None
+
+
+def _clock(stamp: str) -> str:
+    """HH:MM of a Desk time."""
+    return stamp[11:16]
+
+
+def step(row: dict[str, Any], now: str, red: frozenset[str] = frozenset()) -> str | None:
+    """NEXT: the one next step. A blocker, else a landed PR to wrap, else an overdue check, else a PR
+    in `red` (its CI failed), else the item's own next, else its result."""
+    if row["state"] == State.BLOCKED:
+        return f"blocked: {row['blocked_reason']}" if row.get("blocked_reason") else "blocked"
+    if row.get("landed_at") and row["state"] not in CLOSED:
+        return "landed: wrap it"
+    after = row.get("check_after")
+    if after and after < now and row["state"] in (State.ASSIGNED, State.WORKING):
+        return f"overdue since {_clock(after)}"
+    if row.get("pr") in red:
+        return f"{row['pr']} CI red"
+    return row.get("next") or row.get("result")
+
+
+def needs_you(row: dict[str, Any]) -> bool:
+    """Only Scott can move it: his blocked work, or a subject held for his approval."""
+    blocked = row["mode"] == Mode.MANUAL and row["state"] == State.BLOCKED
+    held = (
+        row["state"] == State.QUEUED and not row.get("seat") and row.get("extra", {}).get("trusted") is False
+    )
+    return blocked or held
+
+
+def arrange(conn: sqlite3.Connection, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The rows with their outcome, NEXT and needs-you flag, grouped by outcome: groups holding
+    needs-you work first, then by their newest row; work serving no outcome last. Within a group,
+    needs-you rows, then blocked, then newest, as the check table came."""
+    attach(conn, rows)
+    now = datetime.now(UTC)
+    prs = json.dumps(sorted({row["pr"] for row in rows if row.get("pr")}))
+    since = (now - store.CI_TTL).strftime("%Y-%m-%dT%H:%M:%SZ")
+    red = frozenset(row[0] for row in conn.execute(RED, {"prs": prs, "since": since}))
+    for row in rows:
+        row["step"] = step(row, now.strftime("%Y-%m-%dT%H:%M:%SZ"), red)
+        row["needs_you"] = needs_you(row)
+    groups: dict[str | None, list[dict[str, Any]]] = {}
+    for row in rows:
+        groups.setdefault(row["outcome"], []).append(row)
+    for members in groups.values():
+        members.sort(key=lambda row: not row["needs_you"])
+
+    order = sorted(groups, key=lambda key: max(row["updated_at"] for row in groups[key]), reverse=True)
+    order.sort(key=lambda key: (key is None, not any(row["needs_you"] for row in groups[key])))
+    return [row for key in order for row in groups[key]]

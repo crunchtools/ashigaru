@@ -10,6 +10,7 @@ import sqlite3
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+from . import outcomes as served
 from . import store, subjects, sweep
 from .model import CLOSED, SEAT_ROW_FIELDS, STALE_SEAT, Billing, Lane, Role, SeatStatus, State, Turn, Wrap
 
@@ -424,9 +425,9 @@ def _needs(item: dict[str, Any]) -> dict[str, Any]:
     return {"why": why, "work": item["id"], "mode": item["mode"], "state": item["state"], "text": text}
 
 
-def _busy(conn: sqlite3.Connection, seat: dict[str, Any]) -> dict[str, Any]:
-    """A busy seat as a board row: Scott's hold is manual, else the work's mode."""
-    work = (store.get_item(conn, seat["item"]) if seat["item"] else None) or {}
+def _busy(seat: dict[str, Any], work: dict[str, Any]) -> dict[str, Any]:
+    """A busy seat as a board row, with its work item (`{}` for none) and that work's outcome: Scott's
+    hold is manual, else the work's mode."""
     return {
         "seat": seat["name"],
         "mode": "manual" if seat["owner"] else work.get("mode", "auto"),
@@ -437,6 +438,7 @@ def _busy(conn: sqlite3.Connection, seat: dict[str, Any]) -> dict[str, Any]:
         "turn": seat["turn"],
         "task": work.get("task") or seat["task"],
         "missing": seat["missing"],
+        "outcome_label": work.get("outcome_label"),
     }
 
 
@@ -446,7 +448,12 @@ def status(conn: sqlite3.Connection) -> dict[str, Any]:
     Scott's blocked work, then subjects held for his approval."""
     subjects.hygiene(conn)
     roster = seats(conn)
-    busy = [_busy(conn, row) for row in roster if row["status"] == SeatStatus.BUSY]
+    working = [row for row in roster if row["status"] == SeatStatus.BUSY]
+    items = {
+        row["item"]: found for row in working if row["item"] and (found := store.get_item(conn, row["item"]))
+    }
+    served.attach(conn, list(items.values()))
+    busy = [_busy(row, items.get(row["item"], {})) for row in working]
     idle = [row for row in roster if row["status"] != SeatStatus.BUSY]
     held = {row["work"]: row["state"] for row in busy}
     needs = [
@@ -491,7 +498,7 @@ def work(conn: sqlite3.Connection, show_all: bool = False, since: str | None = N
     items = store.check(conn, show_all, limit=QUEUE_LIMIT + 1)
     roster = seats(conn)
     return {
-        "items": items[:QUEUE_LIMIT],
+        "items": served.arrange(conn, items[:QUEUE_LIMIT]),
         "truncated": len(items) > QUEUE_LIMIT,
         "seats": roster,
         "summary": summary(conn, roster),

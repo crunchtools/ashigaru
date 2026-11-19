@@ -7,6 +7,16 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- Outcomes: `create`, `update` and `assign` take `--outcome <id, RT#N or issue>`
+  (found or recorded as an outcome) or `--outcome-text "<instruction>"` for
+  Scott's one-off instruction with no ticket (MCP and REST: `outcome`,
+  `outcome_text`); either sets `parent`. A review or fix-up of a story's PR
+  inherits the story's outcome.
+- `ashigaru work` shows exactly WORK, TIME, SEAT, STATE, OUTCOME, TASK, NEXT,
+  grouped by outcome with groups needing Scott first and work serving none
+  (`-`) last. STATE carries the mode (`manual · blocked`; auto bare); NEXT is the
+  one next step, folding in the blocker, `landed: wrap it`, `overdue since
+  HH:MM` and a PR's red CI. `ashigaru status` leads with OUTCOME, then MODE.
 
 - Server-side sweep: with `ASHIGARU_FORGE_TOKEN_GITHUB` and
   `ASHIGARU_FORGE_ORG_GITHUB`, `serve` re-reads every open item's subject and

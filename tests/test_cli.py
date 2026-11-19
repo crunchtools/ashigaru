@@ -280,6 +280,28 @@ def test_work_renders_the_whole_round(desk: FakeDesk, capsys: pytest.CaptureFixt
     assert "REOPENED" not in out
 
 
+def test_work_shows_scotts_columns_with_the_mode_inside_state(
+    desk: FakeDesk, capsys: pytest.CaptureFixture[str]
+) -> None:
+    served = round_()["items"][0] | {"outcome_label": "RT#1652", "step": "blocked: needs a key"}
+    loose = served | {"id": "a4", "mode": "auto", "state": "review", "outcome_label": None, "step": None}
+    desk.on("GET", "/v1/work", (200, round_(items=[served, loose])))
+    assert main(["work"]) == 0
+    lines = capsys.readouterr().out.splitlines()
+    assert lines[0].split() == ["WORK", "TIME", "SEAT", "STATE", "OUTCOME", "TASK", "NEXT"]
+    assert "manual · blocked" in lines[1] and "RT#1652" in lines[1] and "blocked: needs a key" in lines[1]
+    assert lines[2].split()[3:5] == ["review", "-"], "auto shows bare; no outcome shows -"
+
+
+def test_assign_sets_an_items_outcome_before_assigning_it(desk: FakeDesk) -> None:
+    desk.on("PATCH", "/v1/items/a1", (200, item(parent="a9")))
+    desk.on("POST", "/v1/items/a1/assign", (200, item(seat="Vertex 1", state="assigned")))
+    assert main(["assign", "a1", "--seat", "Vertex 1", "--outcome", "board", "--outcome-text", "do it"]) == 0
+    patch, assigned = desk.seen
+    assert patch.body == {"outcome": "board", "outcome_text": "do it"}
+    assert assigned.body == {"seat": "Vertex 1"}
+
+
 def test_work_shows_what_reopened(desk: FakeDesk, capsys: pytest.CaptureFixture[str]) -> None:
     caught = round_()["catch_up"] | {"reopened": [caught_row("a7", state="done")]}
     desk.on("GET", "/v1/work", (200, round_(catch_up=caught)))
@@ -1186,7 +1208,7 @@ def test_status_renders_the_board(desk: FakeDesk, capsys: pytest.CaptureFixture[
     desk.on("GET", "/v1/status", (200, board))
     assert main(["status"]) == 0
     lines = capsys.readouterr().out.splitlines()
-    assert lines[0].split() == ["SEAT", "MODE", "WORK", "TIME", "ACTIVE", "TASK"]
+    assert lines[0].split() == ["OUTCOME", "MODE", "SEAT", "WORK", "TIME", "ACTIVE", "TASK"]
     assert lines[1].endswith(task)
     assert "4 free: Dolza 1/2/4 - Max, Dolza 1 - Vertex" in lines[3]
     assert "1 missing: Exedore 4 - Max" in lines[3] and "11 of 12 up, 9 open" in lines[3]

@@ -197,13 +197,16 @@ def assign(
     """Assign an item to a seat: `seat` names one, else the Desk picks the seat in `lane` (default:
     the item's) free longest and not held by Scott. With a `task` in `record` (and optionally
     done_when, ref, repo, after, mode, subject_key), the item is recorded first, in `lane`; if the
-    subject_key is taken, or the assign is refused, Refused carries the item so its id is not lost."""
+    subject_key is taken, or the assign is refused, Refused carries the item so its id is not lost.
+    An `outcome` (or `outcome_text`) without a task is set on the item before it is assigned."""
     if seat and lane:
         raise CommandError("name a seat or a lane, not both")
     if record.get("task"):
         item = create(desk, id=item, lane=lane, **record)["id"]
     elif not item:
         raise CommandError("name an item, or give --task to record a new one")
+    elif serves := {key: record[key] for key in ("outcome", "outcome_text") if record.get(key)}:
+        update(desk, item, (), **serves)
     body = {"seat": seat} if seat else {"lane": lane} if lane else {}
     try:
         result: dict[str, Any] = desk.post(f"{_item(item)}/assign", body)

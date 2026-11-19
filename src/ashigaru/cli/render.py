@@ -148,6 +148,12 @@ def queue(lists: dict[str, Any]) -> str:
     return f"{table(lists['queued'], QUEUED)}\n\n{table(lists['proposed'], PROPOSED)}"
 
 
+def state(row: dict[str, Any]) -> str:
+    """STATE: `review`, `manual · blocked`; auto, the default, shows bare; a wrap stage follows."""
+    shown = row["state"] + (f"/{row['wrap']}" if row.get("wrap") else "")
+    return f"manual · {shown}" if row.get("mode") == "manual" else shown
+
+
 def work(round_: dict[str, Any]) -> str:
     """The check table, the seats and their tally, the queue, then what the forge brought in."""
     caught = round_["catch_up"]
@@ -228,8 +234,9 @@ AGENTS: list[Column] = [
     ("TASK", lambda s: Whole(s.get("task") or "")),
 ]
 BOARD: list[Column] = [
-    ("SEAT", lambda r: r["seat"]),
+    ("OUTCOME", lambda r: r.get("outcome_label") or "-"),
     ("MODE", lambda r: r["mode"]),
+    ("SEAT", lambda r: r["seat"]),
     ("WORK", lambda r: r.get("work")),
     ("TIME", lambda r: age(r.get("since"))),
     ("ACTIVE", lambda r: "missing" if r.get("missing") else seen(r.get("active"))),
@@ -242,14 +249,15 @@ NEEDS: list[Column] = [
     ("TEXT", lambda n: Whole(f"{n['seat']}: {n['text']}" if n.get("seat") else n.get("text") or "")),
 ]
 WORK: list[Column] = [
-    ("ID", lambda r: r["id"]),
+    ("WORK", lambda r: r["id"]),
+    ("TIME", lambda r: age(r.get("since") or r.get("updated_at"))),
     ("SEAT", lambda r: r.get("seat")),
-    ("MODE", lambda r: r["mode"]),
-    ("STATE", lambda r: r["state"] + (f"/{r['wrap']}" if r.get("wrap") else "")),
+    ("STATE", lambda r: state(r)),
+    ("OUTCOME", lambda r: r.get("outcome_label") or "-"),
     ("TASK", lambda r: Whole(r["task"])),
-    ("RESULT OR BLOCKER", lambda r: clip(r.get("result_or_blocker"), NARROW)),
-    ("NEXT", lambda r: clip(r.get("next"), NARROWER)),
+    ("NEXT", lambda r: clip(r.get("step") or r.get("next") or r.get("result_or_blocker"), NARROW)),
 ]
+"""Scott's `work` columns: the mode shows inside STATE, and NEXT is the one next step."""
 QUEUED: list[Column] = [
     ("QUEUED", lambda i: i["id"]),
     ("LANE", lambda i: i.get("lane")),

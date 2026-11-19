@@ -40,6 +40,15 @@ FIELDS = (
     ("--note", None),
     ("--filed-by", "admin: the identity that filed it"),
     ("--pr", "the PR carrying the work, owner/repo#N or its URL"),
+    *(
+        OUTCOME := (
+            (
+                "--outcome",
+                "the outcome it serves: its id, RT#N or issue, or with --outcome-text a short name",
+            ),
+            ("--outcome-text", "Scott's instruction with no ticket, kept on a new one-off outcome"),
+        )
+    ),
 )
 """Item fields `create` and `update` both take."""
 UPDATE_ONLY = (
@@ -211,6 +220,7 @@ def parser() -> argparse.ArgumentParser:
     assign.add_argument("--after", action="append", help="an item this one waits on (repeatable)")
     assign.add_argument("--mode", choices=CHOICES["--mode"])
     assign.add_argument("--subject-key", dest="subject_key", help="with --task: the new item's dedup key")
+    _fields(assign, OUTCOME)
 
     for name, text in (("auto", "hand an item to Josui"), ("manual", "hand an item to Scott")):
         sub.add_parser(name, parents=[common], help=text).add_argument("item")

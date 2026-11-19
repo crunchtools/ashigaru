@@ -213,6 +213,18 @@
             "$ref": "#/components/schemas/Mode",
             "description": "manual for Scott's hold, else the work's mode."
           },
+          "outcome_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The outcome the work serves.",
+            "title": "Outcome Label"
+          },
           "seat": {
             "title": "Seat",
             "type": "string"
@@ -565,7 +577,7 @@
         "type": "object"
       },
       "CheckRow": {
-        "description": "One row of the /agents check table.",
+        "description": "One row of the check table: WORK, TIME, SEAT, STATE, OUTCOME, TASK, NEXT.",
         "properties": {
           "id": {
             "title": "Id",
@@ -573,6 +585,12 @@
           },
           "mode": {
             "$ref": "#/components/schemas/Mode"
+          },
+          "needs_you": {
+            "default": false,
+            "description": "Scott's to move: his blocked work, or a subject held for him.",
+            "title": "Needs You",
+            "type": "boolean"
           },
           "next": {
             "anyOf": [
@@ -584,6 +602,30 @@
               }
             ],
             "title": "Next"
+          },
+          "outcome": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The outcome it serves: its parent, or its PR's story's.",
+            "title": "Outcome"
+          },
+          "outcome_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "RT#N, owner/repo#N, or a one-off outcome's name.",
+            "title": "Outcome Label"
           },
           "result_or_blocker": {
             "anyOf": [
@@ -607,8 +649,32 @@
             ],
             "title": "Seat"
           },
+          "since": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When the item entered its state.",
+            "title": "Since"
+          },
           "state": {
             "$ref": "#/components/schemas/State"
+          },
+          "step": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "NEXT: its blocker, a landed or overdue flag, a red PR, else its next or result.",
+            "title": "Step"
           },
           "task": {
             "title": "Task",
@@ -1264,6 +1330,30 @@
             ],
             "title": "Note"
           },
+          "outcome": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The outcome it serves: an outcome's id, RT#N or an issue (recorded as an outcome if new), or with outcome_text a short name for a new one-off outcome. Sets `parent`.",
+            "title": "Outcome"
+          },
+          "outcome_text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Scott's instruction with no ticket: kept as a new one-off outcome's note.",
+            "title": "Outcome Text"
+          },
           "parent": {
             "anyOf": [
               {
@@ -1529,6 +1619,30 @@
               }
             ],
             "title": "Note"
+          },
+          "outcome": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The outcome it serves: an outcome's id, RT#N or an issue (recorded as an outcome if new), or with outcome_text a short name for a new one-off outcome. Sets `parent`.",
+            "title": "Outcome"
+          },
+          "outcome_text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Scott's instruction with no ticket: kept as a new one-off outcome's note.",
+            "title": "Outcome Text"
           },
           "parent": {
             "anyOf": [

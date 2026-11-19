@@ -18,6 +18,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 
 from . import auth, dispatch, store, subjects, sweep
+from . import outcomes as served
 from .model import (
     CLOSED,
     MARK_NAME,
@@ -152,7 +153,7 @@ def _patch_item(conn: sqlite3.Connection, item_id: str, fields: dict[str, Any], 
         writable_item(conn, item_id, who)
         seat_may(who, fields)
         try:
-            store.update_item(conn, item_id, fields, who.name)
+            store.update_item(conn, item_id, with_outcome(conn, fields, who.name), who.name)
         except store.Conflict as error:
             raise _conflict(error) from error
     return Item.model_validate(store.get_item(conn, item_id))
@@ -195,13 +196,26 @@ def list_items(conn: Conn, who: Who, filters: Annotated[ItemFilter, Query()]) ->
     return [Item.model_validate(row) for row in store.list_items(conn, **filters.model_dump())]
 
 
+def with_outcome(conn: sqlite3.Connection, fields: dict[str, Any], actor: str) -> dict[str, Any]:
+    """The fields with `outcome`/`outcome_text` turned into the `parent` they name (served.resolve);
+    422 for an outcome that is neither found nor given the text a new one needs."""
+    name, text = fields.pop("outcome", None), fields.pop("outcome_text", None)
+    if name is None and text is None:
+        return fields
+    try:
+        return {**fields, "parent": served.resolve(conn, name, text, actor)}
+    except served.Unknown as error:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(error)) from error
+
+
 @router.post(
     "/v1/items", tags=["items"], status_code=status.HTTP_201_CREATED, responses=errors(401, 403, 409)
 )
 def create_item(conn: Conn, who: Admin, body: ItemCreate) -> Item:
     with store.transaction(conn):
         try:
-            item_id = store.insert_item(conn, body.model_dump(exclude_unset=True), who.name)
+            fields = with_outcome(conn, body.model_dump(exclude_unset=True), who.name)
+            item_id = store.insert_item(conn, fields, who.name)
         except store.Conflict as error:
             raise _conflict(error) from error
     return Item.model_validate(store.get_item(conn, item_id))
