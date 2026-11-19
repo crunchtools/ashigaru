@@ -20,6 +20,7 @@ from ashigaru.cli.wait import CIWaiter, PollWaiter
 
 KEY = "ash_k1_secret"
 USAGE_ERROR = 2
+NARROW_TABLE = 40
 
 
 def item(**fields: Any) -> dict[str, Any]:
@@ -1348,3 +1349,10 @@ def test_status_lists_what_changed_since_you_looked(
 def test_a_first_look_renders_as_the_last_day() -> None:
     first = changed() | {"seen_at": None, "items": []}
     assert render.changes(first).startswith("0 changed in the last day")
+
+
+def test_table_clips_past_a_short_tail_and_never_widens_it() -> None:
+    columns = [("NAME", lambda row: row["name"]), ("NEXT", lambda row: render.Tail(row["next"]))]
+    out = render.table([{"name": "n" * 50, "next": "soon"}], columns, width=NARROW_TABLE)
+    assert all(len(line) <= NARROW_TABLE for line in out.splitlines())
+    assert "soon" in out and "…" in out

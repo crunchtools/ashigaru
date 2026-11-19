@@ -366,7 +366,10 @@ def _search(
         except UNREADABLE as failed:
             counts.errors.append(f"{hit.item.subject_key}: {_why(failed)}")
             deferred.append(hit.item.updated_at or "")
-    reached = _stamp(started) if search.complete or not search.hits else search.hits[-1].item.updated_at
+    if search.complete or not search.hits:
+        reached: str | None = _stamp(started)
+    else:
+        reached = search.reached or search.hits[-1].item.updated_at
     if not search.complete:
         counts.errors.insert(0, "search: cut at the forge's cap; the next run reads on")
     oldest = _stamp(started - DEFERRED_FOR)

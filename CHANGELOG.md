@@ -11,8 +11,14 @@ All notable changes to this project are documented here. The format follows
   seat turn active past `ASHIGARU_TURN_MAX` (3 hours) with no write for 10
   minutes (counted from no earlier than the Desk's own start, so a restart after
   an outage spares live turns), marking `turn_reconciled_at`, and drops the task
-  of a seat idle a day with no hold of Scott's. A hold of Scott's on a seat silent for a day shows
-  under NEEDS YOU as `stale`; it is never closed for him.
+  of a seat idle a day with no hold of Scott's. A hold of Scott's on a seat
+  silent for a day shows under NEEDS YOU as `stale`; it is never closed for him.
+- `ashigaru changes [--since T] [--ack]` (`GET`/`POST /v1/changes`,
+  `desk_changes`): what others changed since you last looked, each item once,
+  last changed first, with who wrote it, the fields that moved and its NEXT.
+  Each identity keeps its own `seen:<identity>` mark; `--ack` moves it, only
+  forward. `status` lists the same under CHANGED SINCE YOU LOOKED without
+  moving it.
 - Outcomes: `create`, `update` and `assign` take `--outcome <id, RT#N or issue>`
   (found or recorded as an outcome) or `--outcome-text "<instruction>"` for
   Scott's one-off instruction with no ticket (MCP and REST: `outcome`,
@@ -82,6 +88,10 @@ All notable changes to this project are documented here. The format follows
   moves `v4` on every release, `container.yml` ran on it, and promote refused
   it with "tag 'v4' is not vX.Y.Z" (most recently run 44427128848). The push
   trigger is now `v*.*.*`, which the major tag does not match.
+- Every timed sweep failed with HTTP 422: GitHub's issue search refuses a query
+  without `is:issue` or `is:pull-request`. The sweep now searches `is:issue`
+  and `is:pr` separately, merges the hits, and when either is cut at the cap
+  moves the mark only to the lower point the two reached.
 
 ## [4.0.2] - 2026-11-19
 
@@ -193,12 +203,6 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
-- `ashigaru changes [--since T] [--ack]` (`GET`/`POST /v1/changes`,
-  `desk_changes`): what others changed since you last looked, each item once,
-  last changed first, with who wrote it, the fields that moved and its NEXT.
-  Each identity keeps its own `seen:<identity>` mark; `--ack` moves it, only
-  forward. `status` lists the same under CHANGED SINCE YOU LOOKED without
-  moving it.
 - The `/ashigaru` Claude Code skill (a261) moves here from josui-skills, rewritten for the 3.1.0 CLI: the stopgaps for its old gaps are now `create`, `update`, `report`, `get`, `list` and `mark` calls, and it has a section for every CLI command, `hook` included. The `ashigaru` RPM installs it at `/usr/share/ashigaru/skills/ashigaru/SKILL.md`, and a user links that directory into `~/.claude/skills` (`docs/desk-cli.md`); `packaging/smoke.sh` checks it is installed. `tests/test_skill.py` fails if the skill's commands (headings, argument-hint, description, mcp actions) differ from the CLI's in either direction, or if any command line in the skill does not parse.
 
 ## [3.1.0] - 2026-11-18
