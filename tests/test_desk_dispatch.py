@@ -446,3 +446,48 @@ def test_an_item_with_no_lane_is_assigned_never_claimed(client: TestClient, keys
     assert client.get(f"/v1/items/{target}", headers=keys[CI]).json()["seat"] is None
     given = client.post(f"/v1/items/{target}/assign", headers=keys[JOSUI], json={"seat": MINE})
     assert given.status_code == OK and given.json()["seat"] == MINE
+
+
+def test_brief_carries_each_field_that_is_set_after_the_task() -> None:
+    work = {"id": "7", "lane": "exedore-max", "task": "Do it"}
+    plain = dispatch.brief(work)
+    assert "Done when" not in plain and "Ref:" not in plain and "Repo:" not in plain and "Note:" not in plain
+    assert plain.endswith("Do it\n\nReport with `ashigaru report 7 <verb>`.")
+    some = dispatch.brief({**work, "repo": "crunchtools/x", "ref": "", "note": None})
+    assert some.endswith("Do it\n\nRepo: crunchtools/x\n\nReport with `ashigaru report 7 <verb>`.")
+    full = dispatch.brief({**work, "note": "n", "repo": "r", "ref": "f", "done_when": "d"})
+    said = "Done when: d\nRef: f\nRepo: r\nNote: n\n"
+    assert full.endswith(f"Do it\n\n{said}\nReport with `ashigaru report 7 <verb>`.")
+
+
+def typed(conn: sqlite3.Connection) -> dict[str, Any]:
+    return dispatch.report_seat(conn, MINE, {"turn": "active", "task": "typed prompt"}, MINE)
+
+
+def test_a_typed_prompt_takes_back_the_open_manual_item_naming_the_seat(
+    client: TestClient, keys: Keys, conn: sqlite3.Connection
+) -> None:
+    seat(client, keys, MINE)
+    with store.transaction(conn):
+        kept = store.insert_item(
+            conn, {"task": "imported", "mode": "manual", "state": "blocked", "seat": MINE}, JOSUI
+        )
+    before = store.count_open(conn)
+    held = typed(conn)
+    assert store.count_open(conn) == before
+    assert (held["status"], held["owner"], held["item"]) == ("busy", "Scott", kept)
+    reused = store.get_item(conn, kept) or {}
+    assert (reused["state"], reused["task"]) == ("blocked", "imported")
+
+
+@pytest.mark.parametrize(("mode", "state"), [("manual", "done"), ("auto", "working")])
+def test_a_typed_prompt_ignores_a_closed_manual_or_an_auto_item_on_the_seat(
+    client: TestClient, keys: Keys, conn: sqlite3.Connection, mode: str, state: str
+) -> None:
+    seat(client, keys, MINE)
+    with store.transaction(conn):
+        old = store.insert_item(conn, {"task": "old", "mode": mode, "state": state, "seat": MINE}, JOSUI)
+    held = typed(conn)
+    assert held["item"] != old and (held["status"], held["owner"]) == ("busy", "Scott")
+    fresh = store.get_item(conn, held["item"]) or {}
+    assert (fresh["mode"], fresh["state"], fresh["task"]) == ("manual", "working", "typed prompt")

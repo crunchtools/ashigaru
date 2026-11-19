@@ -82,14 +82,26 @@ def test_a_seat_or_scott_keeps_the_item_and_only_hears_it_landed(
         store.write_seat(conn, SEAT, {"status": "free", "lane": "exedore-max"})
     held = create(hooked, keys, subject_key=PR)
     assert hooked.post(f"/v1/items/{held}/assign", headers=keys[JOSUI], json={"seat": SEAT}).status_code == OK
-    manual = create(hooked, keys, subject_key="crunchtools/ashigaru#192", mode="manual")
+    manual = create(hooked, keys, subject_key="crunchtools/ashigaru#192", mode="manual", state="blocked")
     pull(hooked, "closed", "d-close", number=192, state="closed")
-    assert get(hooked, keys, manual)["state"] == "queued" and get(hooked, keys, manual)["landed_at"] is None
+    assert get(hooked, keys, manual)["state"] == "blocked" and get(hooked, keys, manual)["landed_at"] is None
     merge(hooked)
     merge(hooked, "d-merge-192", number=192)
-    for item, state in ((held, "assigned"), (manual, "queued")):
+    for item, state in ((held, "assigned"), (manual, "blocked")):
         found = get(hooked, keys, item)
         assert (found["state"], found["verified_by"]) == (state, None) and found["landed_at"]
+
+
+def test_a_queued_manual_item_nobody_started_closes_with_its_subject(hooked: TestClient, keys: Keys) -> None:
+    merged = create(hooked, keys, subject_key=PR, mode="manual")
+    closed = create(hooked, keys, subject_key="crunchtools/ashigaru#192", mode="manual")
+    linked = create(hooked, keys, mode="manual", pr="crunchtools/ashigaru#193")
+    merge(hooked)
+    pull(hooked, "closed", "d-close", number=192, state="closed")
+    merge(hooked, "d-merge-193", number=193)
+    for item, state in ((merged, "done"), (closed, "wontdo"), (linked, "done")):
+        found = get(hooked, keys, item)
+        assert (found["state"], found["verified_by"]) == (state, "desk")
 
 
 def test_an_older_delivery_never_moves_a_subject_back_and_merged_stays_merged(

@@ -358,6 +358,7 @@ def _item(thing: Mapping[str, Any], repo: str, kind: Kind, what: str, *, merged_
         merged=merged,
         draft=_draft(thing) if kind is Kind.STORY else None,
         updated_at=updated if isinstance(updated := thing.get("updated_at"), str) else None,
+        opened_at=opened if isinstance(opened := thing.get("created_at"), str) else None,
         head=head.lower() if isinstance(head := payload_get(thing, "head", "sha"), str) else None,
     )
 

@@ -47,6 +47,11 @@ def issue(number: int = 7, **extra: Any) -> dict[str, Any]:
     }
 
 
+def test_opened_at_comes_from_created_at(monkeypatch: pytest.MonkeyPatch) -> None:
+    install(monkeypatch, lambda url: issue(created_at="2026-11-18T09:00:00Z"))
+    assert github.FORGE.subject(REPO, 7, "token").opened_at == "2026-11-18T09:00:00Z"
+
+
 def test_subject_issue(monkeypatch: pytest.MonkeyPatch) -> None:
     asked = install(monkeypatch, lambda url: issue())
     item = github.FORGE.subject(REPO, 7, "token")

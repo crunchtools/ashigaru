@@ -1101,7 +1101,8 @@ def test_later_deliveries_leave_josuis_fields_alone(hooked: TestClient, conn: sq
     edited = payload("issues", title="Renamed", state="closed")
     deliver(hooked, "issues", {**edited, "action": "closed"}, "d-2")
     after = store.item_by_subject(conn, f"{REPO}#190") or {}
-    assert (after["task"], after["lane"], after["state"]) == ("Josui's words", "vertex", "queued")
+    assert (after["task"], after["lane"]) == ("Josui's words", "vertex")
+    assert (after["state"], after["verified_by"]) == ("done", "desk"), "settled, as nobody had started it"
     assert after["extra"]["title"] == "Renamed" and after["extra"]["source_state"] == "closed"
 
 

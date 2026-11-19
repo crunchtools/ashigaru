@@ -6,6 +6,27 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+- The sweep no longer lists Dependabot PRs under NEEDS YOU as outsiders. It
+  records them as subjects, reads them back every run while open, and queues
+  one still open `ASHIGARU_DEPENDABOT_AFTER` seconds (a day) after it was
+  opened as an `auto` exedore-max item: "Land or close Dependabot <key>". Old
+  runs' Dependabot outsiders are read back once and dropped from NEEDS YOU.
+- A brief handed to a seat carries the item's `done_when`, `ref`, `repo` and
+  `note` when set, not only its task.
+
+### Fixed
+- A seatless item nobody has started (`manual` and still `queued` or
+  `proposed`, such as a held PR) now closes when its subject or PR merges or
+  closes, as a seatless `auto` one did; before, it stayed queued.
+- A typed prompt on a free seat that still carries an open `manual` item (an
+  imported one, or one left `blocked`) takes that item back instead of opening
+  a second one.
+- The prompt-submit hook no longer takes a scheduled task's prompt (CronCreate,
+  `/loop`, a routine) for the session's first typed prompt. Claude Code submits
+  those bare, so the hook looks for the `scheduled_task_fire` entry it writes
+  to the transcript.
+
 ## [4.2.0] - 2026-11-19
 
 ### Added

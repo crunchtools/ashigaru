@@ -255,24 +255,41 @@ def unclaim(conn: sqlite3.Connection, item_id: str, seat: str) -> None:
             store.write_seat(conn, seat, {"status": "free", "item": None})
 
 
+BRIEF_FIELDS = (("done_when", "Done when"), ("ref", "Ref"), ("repo", "Repo"), ("note", "Note"))
+"""The item's fields a brief carries after its task, each only when set."""
+
+
 def brief(item: dict[str, Any]) -> str:
-    """What a woken seat reads: the item, its task, and how to report on it."""
+    """What a woken seat reads: the item, its task, what else it says (BRIEF_FIELDS), and how to
+    report on it."""
+    said = "".join(f"{label}: {item[key]}\n" for key, label in BRIEF_FIELDS if item.get(key))
+    said = f"{said}\n" if said else ""
     return (
         f"Desk assignment {item['id']} (lane {item['lane']}): the Ashigaru Desk claimed it for this seat "
         "through the seat's own `ashigaru hook next`. This is your work now, a brief from Josui Prime.\n\n"
         f"{item['task']}\n\n"
+        f"{said}"
         f"Report with `ashigaru report {item['id']} <verb>`."
     )
+
+
+SEAT_MANUAL = f"""
+    SELECT id FROM items WHERE seat = :seat AND mode = 'manual' AND {store.OPEN}
+    ORDER BY updated_at DESC, id DESC LIMIT 1
+"""
+"""The open manual item a free seat already carries, which its next typed prompt takes back."""
 
 
 def report_seat(conn: sqlite3.Connection, name: str, fields: dict[str, Any], actor: str) -> dict[str, Any]:
     """PATCH /seats/{name}, and how the Desk sees Scott's hand on a seat, which no seat can claim or drop.
 
-    A seat's report of its session's first typed prompt (turn active with a task) while it holds no
-    item makes it busy and manual, holding a new manual item with that task, the way /agents ledgered
-    untracked manual work. A /clear (task back to null) clears that item, which frees the seat; a wrap
-    does the same. A seat holding an item stays on it. Turn changes without a task (Claude Code's own
-    turns: an assignment arriving, a background task's result) never start a hold.
+    A seat's report of its session's first typed prompt (turn active with a task) while it holds no item
+    makes it busy and manual, holding a new manual item with that task, the way /agents ledgered
+    untracked manual work, unless an open manual item already names the seat (one imported, or one left
+    blocked), in any state: the seat takes that one back as it stands. A /clear (task back to null)
+    clears that item, which frees the seat; a wrap does the same. A seat holding an item stays on it.
+    Turn changes without a task (Claude Code's own turns: an assignment arriving, a background task's
+    result) never start a hold.
     """
     with store.transaction(conn):
         before = store.get_seat(conn, name)
@@ -283,8 +300,12 @@ def report_seat(conn: sqlite3.Connection, name: str, fields: dict[str, Any], act
         if held and "task" in fields and fields["task"] is None:
             store.update_item(conn, held, {"wrap": Wrap.CLEARED}, actor, source="clear")
         elif fields.get("turn") == Turn.ACTIVE and fields.get("task") and seat["status"] == SeatStatus.FREE:
-            work = {"task": fields["task"], "mode": "manual", "state": State.WORKING, "seat": name}
-            item_id = store.insert_item(conn, {**work, "lane": seat["lane"]}, actor, source="prompt")
+            kept = conn.execute(SEAT_MANUAL, {"seat": name}).fetchone()
+            if kept:
+                item_id = kept[0]
+            else:
+                work = {"task": fields["task"], "mode": "manual", "state": State.WORKING, "seat": name}
+                item_id = store.insert_item(conn, {**work, "lane": seat["lane"]}, actor, source="prompt")
             store.write_seat(
                 conn, name, {"status": SeatStatus.BUSY, "owner": store.MANUAL_OWNER, "item": item_id}
             )
