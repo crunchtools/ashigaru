@@ -47,7 +47,7 @@ CLOSED_HERE = """(
     SELECT e.actor || ' ' || e.source FROM events e
     WHERE e.item_id = i.id AND json_type(e.patch, '$.state') IS NOT NULL
     ORDER BY e.seq DESC LIMIT 1
-) = 'desk subject'"""
+) = :actor || ' ' || :source"""
 """The item's state was last set by settling, not by anyone who can also write `verified_by`."""
 DUE = f"""
     SELECT i.*, s.subject_key AS due_subject, s.kind AS due_kind, s.state AS due_state,
@@ -64,12 +64,13 @@ DUE = f"""
                   SELECT 1 FROM subjects o WHERE o.subject_key IN (i.subject_key, i.pr) AND o.state != 'open'
               )
       )
-    ORDER BY i.id
+    ORDER BY i.id, s.state = 'merged' DESC, s.subject_key
 """
 """Exactly the items a subject's state moves, so a read that finds none writes nothing: a seat's or
 Scott's open item whose subject or PR merged and is not yet marked landed; a seatless auto item whose
 subject or PR merged, or whose own subject closed; and one settling closed whose own subject is open
-again while nothing else it names is closed or merged."""
+again while nothing else it names is closed or merged. An item with two subjects due comes once per
+subject, its merged one first, and settles by that one."""
 
 
 def get(conn: sqlite3.Connection, key: str) -> dict[str, Any] | None:
@@ -133,19 +134,19 @@ def transition(due: dict[str, Any]) -> dict[str, Any]:
 def settle(conn: sqlite3.Connection, key: str | None = None) -> list[str]:
     """Apply each due transition, for one subject or all, once per item; the caller holds the
     transaction. Returns the ids that changed."""
-    moved: list[str] = []
-    for row in conn.execute(DUE, {"key": key}).fetchall():
+    moved: dict[str, None] = {}
+    for row in conn.execute(DUE, {"key": key, "actor": ACTOR, "source": SOURCE}).fetchall():
         if row["id"] not in moved:
             store.update_item(conn, row["id"], transition(store.decode(row)), ACTOR, SOURCE)
-            moved.append(row["id"])
-    return moved
+            moved[row["id"]] = None
+    return list(moved)
 
 
 def hygiene(conn: sqlite3.Connection) -> list[str]:
     """Settle every subject, from a read, as `expire_proposed` does: one lookup, then a transaction
     only when something is due. It catches a transition a webhook could not make (a rule added later,
     or an item linked to its PR after the merge)."""
-    if conn.execute(DUE, {"key": None}).fetchone() is None:
+    if conn.execute(DUE, {"key": None, "actor": ACTOR, "source": SOURCE}).fetchone() is None:
         return []
     with store.transaction(conn):
         return settle(conn)

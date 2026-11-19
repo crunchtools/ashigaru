@@ -1,15 +1,19 @@
 """Subjects: the forge's state of each issue and PR, from the webhook, and the items it settles."""
 
+import dataclasses
 import sqlite3
-from http.client import CREATED, NOT_FOUND, OK
+from http.client import CREATED, FORBIDDEN, NOT_FOUND, OK, UNPROCESSABLE_ENTITY
 from typing import Any
 from urllib.parse import quote
 
+import pytest
 from conftest import Keys
 from fastapi.testclient import TestClient
 from test_desk_webhooks import deliver, hooked, payload
 
 from ashigaru.desk import store, subjects
+from ashigaru.desk.forges import IntakeItem
+from ashigaru.desk.model import Kind
 
 __all__ = ["hooked"]
 
@@ -148,7 +152,8 @@ def test_a_read_with_nothing_due_writes_nothing(
     hooked.get("/v1/work", headers=keys[SEAT])
     hooked.get("/v1/status", headers=keys[SEAT])
     assert events(conn) == quiet
-    assert conn.execute(subjects.DUE, {"key": None}).fetchone() is None, "hygiene would take the write lock"
+    due = {"key": None, "actor": subjects.ACTOR, "source": subjects.SOURCE}
+    assert conn.execute(subjects.DUE, due).fetchone() is None, "hygiene would take the write lock"
 
 
 def test_only_settling_reopens_what_settling_closed(hooked: TestClient, keys: Keys) -> None:
@@ -192,3 +197,52 @@ def test_a_delivery_in_the_same_second_lands(hooked: TestClient, keys: Keys) -> 
     pull(hooked, "edited", "d-2", state="open", title="same second")
     subject = hooked.get(f"/v1/subjects/{quote(PR, safe='')}", headers=keys[SEAT]).json()
     assert subject["title"] == "same second"
+
+
+def test_a_work_read_settles_too(hooked: TestClient, keys: Keys) -> None:
+    merge(hooked)
+    story = create(hooked, keys)
+    hooked.patch(f"/v1/items/{story}", headers=keys[JOSUI], json={"pr": PR})
+    assert hooked.get("/v1/work", headers=keys[SEAT]).status_code == OK
+    assert get(hooked, keys, story)["state"] == "done"
+
+
+@pytest.mark.parametrize("pr", ["", "  ", None])
+def test_a_blank_pr_is_none(hooked: TestClient, keys: Keys, pr: str | None) -> None:
+    assert get(hooked, keys, create(hooked, keys, pr=pr))["pr"] is None
+
+
+@pytest.mark.parametrize("pr", ["RT#1500", "https://rt.crunchtools.com/Ticket/Display.html?id=7", "not a pr"])
+def test_a_pr_must_name_a_pull_request(hooked: TestClient, keys: Keys, pr: str) -> None:
+    made = hooked.post("/v1/items", headers=keys[JOSUI], json={"task": "t", "pr": pr})
+    assert made.status_code == UNPROCESSABLE_ENTITY
+
+
+def test_a_seat_sets_the_pr_of_its_own_item_only(
+    hooked: TestClient, keys: Keys, conn: sqlite3.Connection
+) -> None:
+    other = "Exedore 2 - Max"
+    with store.transaction(conn):
+        for name in (SEAT, other):
+            store.write_seat(conn, name, {"status": "free", "lane": "exedore-max"})
+    mine, theirs = create(hooked, keys), create(hooked, keys)
+    hooked.post(f"/v1/items/{mine}/assign", headers=keys[JOSUI], json={"seat": SEAT})
+    hooked.post(f"/v1/items/{theirs}/assign", headers=keys[JOSUI], json={"seat": other})
+    assert hooked.patch(f"/v1/items/{mine}", headers=keys[SEAT], json={"pr": PR}).json()["pr"] == PR
+    assert hooked.patch(f"/v1/items/{theirs}", headers=keys[SEAT], json={"pr": PR}).status_code == FORBIDDEN
+
+
+def test_an_item_with_two_closed_subjects_settles_by_the_merged_one(
+    hooked: TestClient, keys: Keys, conn: sqlite3.Connection
+) -> None:
+    story = create(hooked, keys, subject_key="crunchtools/ashigaru#193", pr="crunchtools/ashigaru#194")
+    closed = IntakeItem(
+        "crunchtools/ashigaru#193", "t", "u", "github", "crunchtools/ashigaru", Kind.STORY, closed=True
+    )
+    merged = dataclasses.replace(closed, subject_key="crunchtools/ashigaru#194", merged=True, head=HEAD)
+    with store.transaction(conn):
+        subjects.record(conn, closed, "webhook")
+        subjects.record(conn, merged, "webhook")
+    assert subjects.hygiene(conn) == [story]
+    found = get(hooked, keys, story)
+    assert (found["state"], found["result"]) == ("done", f"merged at {HEAD[:12]}")
