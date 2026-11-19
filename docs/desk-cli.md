@@ -32,8 +32,9 @@ Every view and action prints a table, or the Desk's JSON with `--json`.
 | Command | Does |
 |---|---|
 | `usage` | per seat: model, context, session tokens and cost, turn and time in it; spend by billing source today and this month against limits |
-| `agents` | per seat: `free`, `busy-auto` or `busy-manual` (Scott's hold), item, how long, turn, task, last seen. A seat identity that never checked in, or whose seat row has not changed in 24 hours, shows as `missing` |
-| `work [--all] [--since T] [--advance]` | the whole check round, from `GET /v1/work`: open items blocked first, then newest (`--all` adds closed and cleared); every seat and `N of M up, K items open`; the queue with `waits_on`; and the catch-up, the issues and PRs the org webhook brought in after the `sweep` mark (or from `--since`, a time), as `new` (queued, or `held` for a maintainer) and `reopened` (open again while the item is closed). `--advance` (admin, `POST /v1/work`) then moves the mark to the last event the round covered; a round cut at 1000 events reads on from there next time, losing and repeating nothing |
+| `agents` | per seat: `free`, `busy-auto` or `busy-manual` (Scott's hold), `WORK` (the item), `TIME` held, turn, last check-in (`SEEN`) and the whole task, last and never clipped; ends `N of M up`. A seat identity that never checked in, or whose seat row has not changed in 24 hours, shows as `missing` |
+| `status` | the board, from `GET /v1/status` (`desk_status`): each busy seat with seat, mode, `WORK`, `TIME`, `ACTIVE` and its whole task; one line of free and missing seats with `X of Y up, Z open`; then NEEDS YOU: manual seats idle with the question they last asked (`waiting_on`), Scott's blocked manual work, and subjects intake holds for approval |
+| `work [--all] [--since T] [--advance]` | the whole check round, from `GET /v1/work`: open items blocked first, then newest (`--all` adds closed and cleared); every seat (task never clipped) and `N of M up, K open`; the queue with `waits_on`; and the catch-up, the issues and PRs the org webhook brought in after the `sweep` mark (or from `--since`, a time), as `new` (queued, or `held` for a maintainer) and `reopened` (open again while the item is closed). `--advance` (admin, `POST /v1/work`) then moves the mark to the last event the round covered; a round cut at 1000 events reads on from there next time, losing and repeating nothing |
 | `queue` | queued items and the state of each item they wait on; `proposed` children and their expiry |
 | `outcomes` | each outcome's stories: done of total, blocked, open |
 | `list [--state S]... [--seat] [--lane] [--kind] [--mode] [--parent] [--subject-key K] [--ref URL] [--[no-]learned] [--[no-]memorized] [--limit N] [--offset N]` | items, newest first; `--state` repeats for any of several; `--learned` means a Learned line other than `none` is recorded |
@@ -90,7 +91,7 @@ command line in the skill with the CLI's parser.
 `seat-state.json` hooks, with their rules: a typed prompt (not a
 `<cross-session-message>` or `<task-notification>`) that is the session's first
 becomes the seat's task; `stop` (also for StopFailure and the `idle_prompt`
-Notification) ends the turn; `/clear` drops the task; compact changes nothing.
+Notification) ends the turn and records the final assistant message as the seat's `waiting_on` (a new turn drops it); `/clear` drops the task; compact changes nothing.
 Each run is bounded at 2 seconds, prints nothing on stdout, and exits 0 on
 every failure, so a hook never blocks Claude.
 

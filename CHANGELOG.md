@@ -6,6 +6,17 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- `ashigaru status` (`GET /v1/status`, MCP `desk_status`): the board a person
+  reads. Busy seats with their whole task, free and missing seats, `X of Y up,
+  Z open`, and NEEDS YOU: idle manual seats with their question, Scott's
+  blocked manual work and subjects held for approval.
+- Seats carry `waiting_on`, the last thing they asked, captured by the `stop`
+  hook and dropped on a new turn or `/clear` (migration 7; a seat may PATCH it).
+- In `agents` and `work`, ITEM is now WORK and FOR is now TIME, TASK is never
+  clipped, and the tally reads `N of M up, K open`.
+
 ### Changed
 
 - Promote signs the image with the fleet cosign key (`sign: true`), because

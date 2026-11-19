@@ -1,5 +1,6 @@
 """Human tables for the views and actions. `--json` bypasses all of this."""
 
+import re
 from collections.abc import Callable, Sequence
 from datetime import UTC, datetime
 from typing import Any
@@ -12,9 +13,17 @@ NARROWER = 30
 HOURS_A_DAY = 24
 
 
+SEAT_NAME = re.compile(r"^(.*\S) (\d+) - (.+)$")
+"""A seat's name, `Dolza 2 - Vertex`: host, number, lane."""
+
+
+class Whole(str):
+    """A cell table() never clips: a task is read in full."""
+
+
 def clip(value: Any, width: int = TEXT_WIDTH) -> str:
     text = "" if value is None else " ".join(str(value).split())
-    return text if len(text) <= width else text[: width - 1] + "…"
+    return text if isinstance(value, Whole) or len(text) <= width else text[: width - 1] + "…"
 
 
 def age(stamp: str | None, now: datetime | None = None) -> str:
@@ -38,6 +47,26 @@ def duration(span: Any) -> str:
     if not hours:
         return f"{minutes}m"
     return f"{days}d{hour:02d}h" if days else f"{hours}h{minute:02d}m"
+
+
+def seen(stamp: str | None) -> str:
+    """How long ago a check-in was: `now` inside a minute, else `12m ago`; `never` without one."""
+    if not stamp:
+        return "never"
+    ago = age(stamp)
+    return "now" if ago.endswith("s") and ago[:-1].isdigit() else f"{ago} ago"
+
+
+def seat_names(names: Sequence[str]) -> str:
+    """Seats by name, those on one host in one lane run together: `Dolza 1/2/4 - Max`."""
+    groups: dict[tuple[str, str], list[str]] = {}
+    for name in names:
+        parts = SEAT_NAME.match(name)
+        host, number, lane = parts.groups() if parts else (name, "", "")
+        groups.setdefault((host, lane), []).append(number)
+    return ", ".join(
+        f"{host} {'/'.join(numbers)} - {lane}" if lane else host for (host, lane), numbers in groups.items()
+    )
 
 
 def money(value: float | None) -> str:
@@ -64,13 +93,39 @@ def usage(report: dict[str, Any]) -> str:
     return f"{table(report['seats'], USAGE)}\n\n{table(report['spend'], SPEND)}"
 
 
+def tally(summary: dict[str, Any]) -> str:
+    return f"{summary['up']} of {summary['seats']} up, {summary['open']} open"
+
+
+def agents(roster: list[dict[str, Any]]) -> str:
+    """The seats, then how many are up."""
+    up = sum(not seat.get("missing") for seat in roster)
+    return f"{table(roster, AGENTS)}\n\n{up} of {len(roster)} up"
+
+
+def _rows(rows: Sequence[dict[str, Any]], columns: Sequence[Column]) -> str:
+    """A table without its header line."""
+    return table(rows, columns).partition("\n")[2]
+
+
+def status(board: dict[str, Any]) -> str:
+    """The busy seats, one line for the free and missing ones and the tally, then NEEDS YOU."""
+    seats = [f"{len(board['free'])} free" + (f": {seat_names(board['free'])}" if board["free"] else "")]
+    if board["missing"]:
+        seats.append(f"{len(board['missing'])} missing: {seat_names(board['missing'])}")
+    seats.append(tally(board["summary"]))
+    parts = [table(board["busy"], BOARD) if board["busy"] else "no seat is busy", "   ".join(seats)]
+    if board["needs_you"]:
+        parts.append(f"NEEDS YOU\n{_rows(board['needs_you'], NEEDS)}")
+    return "\n\n".join(parts)
+
+
 def queue(lists: dict[str, Any]) -> str:
     return f"{table(lists['queued'], QUEUED)}\n\n{table(lists['proposed'], PROPOSED)}"
 
 
 def work(round_: dict[str, Any]) -> str:
     """The check table, the seats and their tally, the queue, then what the forge brought in."""
-    tally = round_["summary"]
     caught = round_["catch_up"]
     window = f"events {caught['after']} to {caught['until']}"
     if caught.get("truncated"):
@@ -81,7 +136,7 @@ def work(round_: dict[str, Any]) -> str:
     parts = [
         table(round_["items"], WORK) + cut,
         table(round_["seats"], AGENTS),
-        f"{tally['up']} of {tally['seats']} up, {tally['open']} items open",
+        tally(round_["summary"]),
         queue(round_["queue"]),
         f"{table(caught['new'], NEW)}\n{window}",
     ]
@@ -142,18 +197,32 @@ SPEND: list[Column] = [
 AGENTS: list[Column] = [
     ("SEAT", lambda s: s["name"]),
     ("STATUS", lambda s: "missing" if s.get("missing") else s.get("hold") or s["status"]),
-    ("ITEM", lambda s: s.get("item")),
-    ("FOR", lambda s: age(s.get("since"))),
+    ("WORK", lambda s: s.get("item")),
+    ("TIME", lambda s: age(s.get("since"))),
     ("TURN", lambda s: s["turn"]),
-    ("TASK", lambda s: s.get("task")),
     ("SEEN", lambda s: age(s.get("updated_at")) or "never"),
+    ("TASK", lambda s: Whole(s.get("task") or "")),
+]
+BOARD: list[Column] = [
+    ("SEAT", lambda r: r["seat"]),
+    ("MODE", lambda r: r["mode"]),
+    ("WORK", lambda r: r.get("work")),
+    ("TIME", lambda r: age(r.get("since"))),
+    ("ACTIVE", lambda r: "missing" if r.get("missing") else seen(r.get("active"))),
+    ("TASK", lambda r: Whole(r.get("task") or "")),
+]
+NEEDS: list[Column] = [
+    ("WORK", lambda n: n.get("work")),
+    ("MODE", lambda n: n["mode"]),
+    ("WHY", lambda n: n["why"] if n["why"] != "blocked" else n["state"]),
+    ("TEXT", lambda n: Whole(f"{n['seat']}: {n['text']}" if n.get("seat") else n.get("text") or "")),
 ]
 WORK: list[Column] = [
     ("ID", lambda r: r["id"]),
     ("SEAT", lambda r: r.get("seat")),
     ("MODE", lambda r: r["mode"]),
     ("STATE", lambda r: r["state"] + (f"/{r['wrap']}" if r.get("wrap") else "")),
-    ("TASK", lambda r: clip(r["task"], NARROW)),
+    ("TASK", lambda r: Whole(r["task"])),
     ("RESULT OR BLOCKER", lambda r: clip(r.get("result_or_blocker"), NARROW)),
     ("NEXT", lambda r: clip(r.get("next"), NARROWER)),
 ]
@@ -212,12 +281,14 @@ MARK: list[Column] = [
     ("UPDATED", lambda m: m["updated_at"]),
     ("BY", lambda m: m["updated_by"]),
 ]
-LISTS = {"agents": AGENTS, "outcomes": OUTCOMES, "mcp_list": CODES}
+LISTS = {"outcomes": OUTCOMES, "mcp_list": CODES}
 VIEWS: dict[str, Callable[[Any], str]] = {
     "list": lambda items: table([_row(item) for item in items], WORK),
     "wait": waited,
     "mark": lambda m: table([m], MARK),
     "usage": usage,
+    "agents": agents,
+    "status": status,
     "queue": queue,
     "work": work,
     "mcp_mint": minted,

@@ -157,7 +157,10 @@ def parser() -> argparse.ArgumentParser:
     top.add_argument("--version", action="version", version=__version__)
     sub = top.add_subparsers(dest="command", required=True, metavar="command")
     sub.add_parser("usage", parents=[common], help="context, tokens, turn and spend per seat")
-    sub.add_parser("agents", parents=[common], help="each seat: free or busy, its item, how long")
+    sub.add_parser("agents", parents=[common], help="each seat: free or busy, its work, how long")
+    sub.add_parser(
+        "status", parents=[common], help="the board: busy seats and their work, free seats, NEEDS YOU"
+    )
     work = sub.add_parser(
         "work", parents=[common], help="the check round: open items, seats, queue and GitHub catch-up"
     )

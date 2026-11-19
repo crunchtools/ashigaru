@@ -131,6 +131,145 @@
         "title": "BillingLimits",
         "type": "object"
       },
+      "Board": {
+        "description": "`ashigaru status`: the busy seats in full, the free ones, the tally, and what needs Scott.",
+        "properties": {
+          "busy": {
+            "items": {
+              "$ref": "#/components/schemas/BoardRow"
+            },
+            "title": "Busy",
+            "type": "array"
+          },
+          "free": {
+            "description": "Free seats that are up, by name.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Free",
+            "type": "array"
+          },
+          "missing": {
+            "description": "Free seats that never checked in or went quiet for a day.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Missing",
+            "type": "array"
+          },
+          "needs_you": {
+            "items": {
+              "$ref": "#/components/schemas/NeedsYou"
+            },
+            "title": "Needs You",
+            "type": "array"
+          },
+          "summary": {
+            "$ref": "#/components/schemas/SeatSummary"
+          }
+        },
+        "required": [
+          "busy",
+          "free",
+          "missing",
+          "summary",
+          "needs_you"
+        ],
+        "title": "Board",
+        "type": "object"
+      },
+      "BoardRow": {
+        "description": "One busy seat on the board: who holds it, the work, how long, its last word, the whole task.",
+        "properties": {
+          "active": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The seat's last check-in: a hook, or the status line.",
+            "title": "Active"
+          },
+          "missing": {
+            "default": false,
+            "title": "Missing",
+            "type": "boolean"
+          },
+          "mode": {
+            "$ref": "#/components/schemas/Mode",
+            "description": "manual for Scott's hold, else the work's mode."
+          },
+          "seat": {
+            "title": "Seat",
+            "type": "string"
+          },
+          "since": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When the seat went busy.",
+            "title": "Since"
+          },
+          "state": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/State"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The work's state."
+          },
+          "task": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The work's task, else the session's first prompt; never clipped.",
+            "title": "Task"
+          },
+          "turn": {
+            "$ref": "#/components/schemas/Turn"
+          },
+          "work": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The id of the work item the seat holds.",
+            "title": "Work"
+          }
+        },
+        "required": [
+          "seat",
+          "mode",
+          "work",
+          "state",
+          "since",
+          "active",
+          "turn",
+          "task"
+        ],
+        "title": "BoardRow",
+        "type": "object"
+      },
       "CIResult": {
         "description": "The normalized CI result for one commit: what `desk_wait` and `ashigaru wait` read.",
         "properties": {
@@ -1765,6 +1904,76 @@
         "title": "Mode",
         "type": "string"
       },
+      "NeedsYou": {
+        "description": "Something only Scott can move: his blocked work, a subject held for approval, or a manual seat\nidle on a question.",
+        "properties": {
+          "mode": {
+            "$ref": "#/components/schemas/Mode"
+          },
+          "seat": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Seat"
+          },
+          "state": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/State"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The blocker, the approval asked for, or the seat's last word.",
+            "title": "Text"
+          },
+          "why": {
+            "enum": [
+              "blocked",
+              "held",
+              "waiting"
+            ],
+            "title": "Why",
+            "type": "string"
+          },
+          "work": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Work"
+          }
+        },
+        "required": [
+          "why",
+          "work",
+          "mode",
+          "state",
+          "text"
+        ],
+        "title": "NeedsYou",
+        "type": "object"
+      },
       "OutcomeRow": {
         "description": "One row of `ashigaru outcomes`: an outcome and the state of its stories.",
         "properties": {
@@ -2471,6 +2680,18 @@
             ],
             "description": "Its last check-in; null if it never checked in.",
             "title": "Updated At"
+          },
+          "waiting_on": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The seat's last message before it went idle, trimmed; null once a turn starts.",
+            "title": "Waiting On"
           }
         },
         "required": [
@@ -2546,6 +2767,18 @@
                 "type": "null"
               }
             ]
+          },
+          "waiting_on": {
+            "anyOf": [
+              {
+                "maxLength": 2000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Waiting On"
           }
         },
         "title": "SeatPatch",
@@ -5512,6 +5745,43 @@
         "summary": "Report Usage",
         "tags": [
           "seats"
+        ]
+      }
+    },
+    "/v1/status": {
+      "get": {
+        "description": "`ashigaru status`, the board a person reads: each busy seat with its work, how long it has held\nit, its last check-in and its whole task; the free and missing seats by name; how many seats are\nup and items open; and NEEDS YOU: each manual seat idle on what it last said, Scott's blocked work,\nand subjects held for his approval.",
+        "operationId": "board_v1_status_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Board"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Missing, unknown or revoked API key."
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Board",
+        "tags": [
+          "views"
         ]
       }
     },

@@ -366,6 +366,9 @@ class Seat(BaseModel):
     session_tokens: int | None = Field(None, description="Tokens used this session.")
     session_cost_usd: float = 0.0
     turn_started_at: str | None = Field(None, description="When the turn last went active.")
+    waiting_on: str | None = Field(
+        None, description="The seat's last message before it went idle, trimmed; null once a turn starts."
+    )
     missing: bool = Field(
         False,
         description="In `GET /seats`: a seat identity that never checked in, or whose row has not "
@@ -376,6 +379,10 @@ class Seat(BaseModel):
     def hold(self) -> Literal["free", "busy-auto", "busy-manual"]:
         busy: Literal["busy-auto", "busy-manual"] = "busy-manual" if self.owner else "busy-auto"
         return busy if self.status == SeatStatus.BUSY else "free"
+
+
+WAITING_LENGTH = 2000
+"""The longest `waiting_on` a seat may send; its stop hook trims well under it."""
 
 
 class SeatPatch(BaseModel):
@@ -390,12 +397,13 @@ class SeatPatch(BaseModel):
     turn: Turn | None = None
     task: str | None = None
     item: str | None = None
+    waiting_on: str | None = Field(None, max_length=WAITING_LENGTH)
 
 
 STALE_SEAT = timedelta(hours=24)
 """A seat whose row has not changed for this long is shown as missing."""
 
-SEAT_ROW_FIELDS = frozenset({"turn", "task"})
+SEAT_ROW_FIELDS = frozenset({"turn", "task", "waiting_on"})
 """`since` is in neither: the Desk stamps it when status changes, so no one can jump the pick queue."""
 
 
@@ -451,6 +459,42 @@ class Round(BaseModel):
     summary: SeatSummary
     queue: Queue
     catch_up: CatchUp
+
+
+class BoardRow(BaseModel):
+    """One busy seat on the board: who holds it, the work, how long, its last word, the whole task."""
+
+    seat: str
+    mode: Mode = Field(description="manual for Scott's hold, else the work's mode.")
+    work: str | None = Field(description="The id of the work item the seat holds.")
+    state: State | None = Field(description="The work's state.")
+    since: str | None = Field(description="When the seat went busy.")
+    active: str | None = Field(description="The seat's last check-in: a hook, or the status line.")
+    turn: Turn
+    task: str | None = Field(description="The work's task, else the session's first prompt; never clipped.")
+    missing: bool = False
+
+
+class NeedsYou(BaseModel):
+    """Something only Scott can move: his blocked work, a subject held for approval, or a manual seat
+    idle on a question."""
+
+    why: Literal["blocked", "held", "waiting"]
+    work: str | None
+    seat: str | None = None
+    mode: Mode
+    state: State | None
+    text: str | None = Field(description="The blocker, the approval asked for, or the seat's last word.")
+
+
+class Board(BaseModel):
+    """`ashigaru status`: the busy seats in full, the free ones, the tally, and what needs Scott."""
+
+    busy: list[BoardRow]
+    free: list[str] = Field(description="Free seats that are up, by name.")
+    missing: list[str] = Field(description="Free seats that never checked in or went quiet for a day.")
+    summary: SeatSummary
+    needs_you: list[NeedsYou]
 
 
 class Usage(BaseModel):

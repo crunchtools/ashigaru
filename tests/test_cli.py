@@ -171,7 +171,7 @@ def test_agents(desk: FakeDesk, capsys: pytest.CaptureFixture[str]) -> None:
     desk.on("GET", "/v1/seats", (200, [SEAT, SEAT | {"name": "Max 2", "status": "free", "item": None}]))
     assert main(["agents"]) == 0
     lines = capsys.readouterr().out.splitlines()
-    assert lines[0].split() == ["SEAT", "STATUS", "ITEM", "FOR", "TURN", "TASK", "SEEN"]
+    assert lines[0].split() == ["SEAT", "STATUS", "WORK", "TIME", "TURN", "SEEN", "TASK"]
     assert lines[1].startswith("Vertex 1") and "a1" in lines[1]
 
 
@@ -179,8 +179,10 @@ def test_agents_shows_missing_seats(desk: FakeDesk, capsys: pytest.CaptureFixtur
     never = {"name": "Max 4", "status": "free", "turn": "idle", "updated_at": None, "missing": True}
     desk.on("GET", "/v1/seats", (200, [SEAT | {"updated_at": "2026-11-17T10:00:00Z"}, never]))
     assert main(["agents"]) == 0
-    last = capsys.readouterr().out.splitlines()[-1].split()
+    lines = capsys.readouterr().out.splitlines()
+    last = lines[-3].split()
     assert last[:3] == ["Max", "4", "missing"] and last[-1] == "never"
+    assert lines[-1] == "1 of 2 up"
 
 
 def test_agents_shows_the_hold(desk: FakeDesk, capsys: pytest.CaptureFixture[str]) -> None:
@@ -271,7 +273,7 @@ def test_work_renders_the_whole_round(desk: FakeDesk, capsys: pytest.CaptureFixt
     assert main(["work"]) == 0
     out = capsys.readouterr().out
     assert "needs a key" in out and "Max 2" in out and "missing" in out
-    assert "1 of 2 up, 1 items open" in out
+    assert "1 of 2 up, 1 open" in out
     assert "a3" in out and "vertex" in out
     assert "NEW" in out and "title of a8" in out and "fatherlinux" in out
     assert "held" in out and "events 40 to 57" in out
@@ -803,6 +805,66 @@ def test_stop(seat: FakeDesk) -> None:
     assert patches(seat) == [{"turn": "idle"}]
 
 
+def entry(*blocks: dict[str, Any]) -> str:
+    return json.dumps({"type": "assistant", "message": {"content": list(blocks)}}) + "\n"
+
+
+def text(words: str) -> dict[str, Any]:
+    return {"type": "text", "text": words}
+
+
+def test_stop_reports_the_final_message_as_waiting_on(seat: FakeDesk) -> None:
+    hook("stop", {"hook_event_name": "Stop", "last_assistant_message": "  Merge it?\n"})
+    hook("stop", {"last_assistant_message": "ok"})
+    assert patches(seat) == [
+        {"turn": "idle", "waiting_on": "Merge it?"},
+        {"turn": "idle", "waiting_on": "ok"},
+    ]
+
+
+def test_stop_falls_back_to_the_last_text_in_the_transcript(seat: FakeDesk, tmp_path: Path) -> None:
+    transcript = tmp_path / "s1.jsonl"
+    transcript.write_text(
+        entry(text("old"))
+        + "not json\n"
+        + entry(text("Ship it?"), {"type": "tool_use", "name": "Bash"}, text("Yes or no?"))
+        + entry({"type": "tool_use", "name": "Bash"})
+        + entry({"type": "thinking", "thinking": "hm"})
+    )
+    hook("stop", {"hook_event_name": "Stop", "transcript_path": str(transcript)})
+    assert patches(seat) == [{"turn": "idle", "waiting_on": "Ship it?\n\nYes or no?"}]
+
+
+def test_stop_reads_only_the_tail_of_a_transcript(seat: FakeDesk, tmp_path: Path) -> None:
+    transcript = tmp_path / "s1.jsonl"
+    transcript.write_text(entry(text("first")) + entry(text("x" * hooks.WAITING_TAIL)))
+    hook("stop", {"transcript_path": str(transcript)})
+    assert patches(seat) == [{"turn": "idle"}]
+
+
+def test_stop_keeps_the_end_of_a_long_message(seat: FakeDesk) -> None:
+    hook("stop", {"hook_event_name": "Stop", "last_assistant_message": "a" * 600 + "\nQuestion?"})
+    waiting = patches(seat)[0]["waiting_on"]
+    assert waiting == "…" + "a" * 489 + "\nQuestion?"
+    assert len(waiting) == hooks.WAITING_LENGTH
+
+
+@pytest.mark.parametrize("kind", ["StopFailure", "Notification"])
+def test_stop_failure_and_idle_prompt_send_no_waiting_on(seat: FakeDesk, kind: str) -> None:
+    seat.on(
+        "GET",
+        "/v1/seats/Max%201",
+        (200, SEAT | {"turn": "active", "turn_started_at": "2020-01-01T00:00:00Z"}),
+    )
+    hook("stop", {"hook_event_name": kind, "last_assistant_message": "Merge it?"})
+    assert patches(seat) == [{"turn": "idle"}]
+
+
+def test_stop_without_a_transcript_sends_only_idle(seat: FakeDesk, tmp_path: Path) -> None:
+    hook("stop", {"hook_event_name": "Stop", "transcript_path": str(tmp_path / "gone.jsonl")})
+    assert patches(seat) == [{"turn": "idle"}]
+
+
 @pytest.mark.parametrize(("started", "sent"), [(10, []), (120, [{"turn": "idle"}])])
 def test_idle_prompt_skips_a_turn_that_just_started(seat: FakeDesk, started: int, sent: list[Any]) -> None:
     stamp = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() - started))
@@ -1086,3 +1148,36 @@ def test_mcp_mint_says_when_the_rollback_fails_too(
     out = tmp_path / "vertex1.mcp"
     assert main(["mcp", "mint", "Vertex 1", "--out", str(out)]) == 1
     assert "ashigaru mcp revoke c0de01" in capsys.readouterr().err and not out.exists()
+
+
+def test_status_renders_the_board(desk: FakeDesk, capsys: pytest.CaptureFixture[str]) -> None:
+    task = "Constitution: fleet rule for build-artifact images, written out in full so nothing clips it"
+    busy = {
+        "seat": "Exedore 2 - Max", "mode": "auto", "work": "a676", "state": "working", "turn": "active",
+        "since": "2026-11-19T10:00:00Z", "active": "2026-11-19T10:01:00Z", "task": task, "missing": False,
+    }  # fmt: skip
+    board = {
+        "busy": [busy],
+        "free": ["Dolza 1 - Max", "Dolza 2 - Max", "Dolza 4 - Max", "Dolza 1 - Vertex"],
+        "missing": ["Exedore 4 - Max"],
+        "summary": {"up": 11, "seats": 12, "open": 9},
+        "needs_you": [
+            {"why": "waiting", "work": "a351", "seat": "Dolza 2 - Vertex", "mode": "manual",
+             "state": "working", "text": "Keep slide 4?"},
+            {"why": "blocked", "work": "a191", "seat": None, "mode": "manual", "state": "blocked",
+             "text": "which deck is canonical?"},
+        ],
+    }  # fmt: skip
+    desk.on("GET", "/v1/status", (200, board))
+    assert main(["status"]) == 0
+    lines = capsys.readouterr().out.splitlines()
+    assert lines[0].split() == ["SEAT", "MODE", "WORK", "TIME", "ACTIVE", "TASK"]
+    assert lines[1].endswith(task)
+    assert "4 free: Dolza 1/2/4 - Max, Dolza 1 - Vertex" in lines[3]
+    assert "1 missing: Exedore 4 - Max" in lines[3] and "11 of 12 up, 9 open" in lines[3]
+    assert lines[5] == "NEEDS YOU"
+    assert (
+        lines[6].split()[:3] == ["a351", "manual", "waiting"]
+        and "Dolza 2 - Vertex: Keep slide 4?" in lines[6]
+    )
+    assert lines[7].split()[:3] == ["a191", "manual", "blocked"]

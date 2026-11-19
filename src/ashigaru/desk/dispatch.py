@@ -75,6 +75,15 @@ late but committed early is read again rather than skipped."""
 SWEEP = "sweep"
 CATCH_UP_DEFAULT = timedelta(days=1)
 
+NEEDS_YOU = f"""
+    SELECT * FROM items
+    WHERE {store.OPEN} AND seat IS NULL AND state = 'queued' AND json_extract(extra, '$.trusted') = 0
+       OR {store.OPEN} AND mode = 'manual' AND state = 'blocked'
+    ORDER BY state = 'blocked' DESC, updated_at DESC, id DESC
+    LIMIT :limit
+"""
+"""Scott's blocked work, then the subjects intake holds for a maintainer's approval."""
+
 UNSEEN_SEATS = """
     SELECT name FROM identities
     WHERE role = :role AND disabled_at IS NULL AND name NOT IN (SELECT name FROM seats)
@@ -395,6 +404,72 @@ def catch_up(conn: sqlite3.Connection, since: str | None = None) -> dict[str, An
     }
 
 
+def summary(conn: sqlite3.Connection, roster: list[dict[str, Any]]) -> dict[str, int]:
+    """How many seats are up, of how many, and how many items are open."""
+    return {
+        "up": sum(not seat["missing"] for seat in roster),
+        "seats": len(roster),
+        "open": store.count_open(conn),
+    }
+
+
+def _needs(item: dict[str, Any]) -> dict[str, Any]:
+    if item["state"] == State.BLOCKED:
+        why, text = "blocked", item["blocked_reason"]
+    else:
+        subject = item["subject_key"] or item["ref"] or item["task"]
+        author = item["extra"].get("author")
+        by = f" by {author}" if author else ""
+        why, text = "held", f"{subject}{by}: approve with a lane label or close"
+    return {"why": why, "work": item["id"], "mode": item["mode"], "state": item["state"], "text": text}
+
+
+def _busy(conn: sqlite3.Connection, seat: dict[str, Any]) -> dict[str, Any]:
+    """A busy seat as a board row: Scott's hold is manual, else the work's mode."""
+    work = (store.get_item(conn, seat["item"]) if seat["item"] else None) or {}
+    return {
+        "seat": seat["name"],
+        "mode": "manual" if seat["owner"] else work.get("mode", "auto"),
+        "work": seat["item"],
+        "state": work.get("state"),
+        "since": seat["since"],
+        "active": seat["updated_at"],
+        "turn": seat["turn"],
+        "task": work.get("task") or seat["task"],
+        "missing": seat["missing"],
+    }
+
+
+def status(conn: sqlite3.Connection) -> dict[str, Any]:
+    """`ashigaru status`, the board a person reads: each busy seat with its work in full, the free and
+    missing seats by name, the tally, and NEEDS YOU: each manual seat idle on what it last said, then
+    Scott's blocked work, then subjects held for his approval."""
+    roster = seats(conn)
+    busy = [_busy(conn, row) for row in roster if row["status"] == SeatStatus.BUSY]
+    idle = [row for row in roster if row["status"] != SeatStatus.BUSY]
+    held = {row["work"]: row["state"] for row in busy}
+    needs = [
+        {
+            "why": "waiting",
+            "work": row["item"],
+            "seat": row["name"],
+            "mode": "manual",
+            "state": held.get(row["item"]),
+            "text": row["waiting_on"],
+        }
+        for row in roster
+        if row["owner"] and row["turn"] == Turn.IDLE and row["waiting_on"]
+    ]
+    needs += [_needs(store.decode(item)) for item in conn.execute(NEEDS_YOU, {"limit": QUEUE_LIMIT})]
+    return {
+        "busy": busy,
+        "free": [row["name"] for row in idle if not row["missing"]],
+        "missing": [row["name"] for row in idle if row["missing"]],
+        "summary": summary(conn, roster),
+        "needs_you": needs,
+    }
+
+
 def work(conn: sqlite3.Connection, show_all: bool = False, since: str | None = None) -> dict[str, Any]:
     """`ashigaru work`, the whole check round: the check table, the seats with how many are up and how
     many items are open, the queue, and the catch-up. The check table stops at QUEUE_LIMIT rows
@@ -405,11 +480,7 @@ def work(conn: sqlite3.Connection, show_all: bool = False, since: str | None = N
         "items": items[:QUEUE_LIMIT],
         "truncated": len(items) > QUEUE_LIMIT,
         "seats": roster,
-        "summary": {
-            "up": sum(not seat["missing"] for seat in roster),
-            "seats": len(roster),
-            "open": store.count_open(conn),
-        },
+        "summary": summary(conn, roster),
         "queue": queue(conn),
         "catch_up": catch_up(conn, since),
     }

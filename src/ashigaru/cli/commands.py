@@ -47,6 +47,13 @@ def agents(desk: Desk) -> list[dict[str, Any]]:
     return result
 
 
+def status(desk: Desk) -> dict[str, Any]:
+    """The board a person reads: each busy seat with its work in full, the free and missing seats, how
+    many are up and how many items open, and NEEDS YOU. The MCP tool is desk_status."""
+    result: dict[str, Any] = desk.get("/v1/status")
+    return result
+
+
 def work(desk: Desk, since: str | None = None, **flags: bool) -> dict[str, Any]:
     """The whole check round: open items blocked first then newest, the seats with how many are up
     and how many items are open, the queue, and the forge catch-up from `since` (default the sweep
@@ -321,7 +328,7 @@ def mcp_revoke(desk: Desk, code_id: str, identity: str | None = None) -> dict[st
 COMMANDS: dict[str, Callable[..., Any]] = {
     command.__name__: command
     for command in (
-        *(usage, agents, work, queue, outcomes, get, mark),
+        *(usage, agents, status, work, queue, outcomes, get, mark),
         *(create, update, report, assign, auto, manual, wait, wrap, claim, file),
         *(mcp_mint, mcp_list, mcp_revoke),
     )

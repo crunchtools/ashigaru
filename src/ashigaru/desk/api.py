@@ -26,6 +26,7 @@ from .model import (
     Assign,
     Billing,
     BillingLimits,
+    Board,
     CheckRow,
     Event,
     FileChild,
@@ -292,6 +293,15 @@ def advance(
     found = _round(conn, show_all, since)
     moved = store.advance_mark(conn, dispatch.SWEEP, found.catch_up.until, who.name)
     return found.model_copy(update={"catch_up": found.catch_up.model_copy(update={"advanced": moved})})
+
+
+@router.get("/v1/status", tags=["views"], responses=errors(401))
+def board(conn: Conn, who: Who) -> Board:
+    """`ashigaru status`, the board a person reads: each busy seat with its work, how long it has held
+    it, its last check-in and its whole task; the free and missing seats by name; how many seats are
+    up and items open; and NEEDS YOU: each manual seat idle on what it last said, Scott's blocked work,
+    and subjects held for his approval."""
+    return Board.model_validate(dispatch.status(conn))
 
 
 @router.get("/v1/queue", tags=["views"], responses=errors(401))

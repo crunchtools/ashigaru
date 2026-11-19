@@ -34,6 +34,7 @@ from ..model import (
     MARK_NAME,
     MAX_WAIT,
     Assign,
+    Board,
     CIResult,
     CIWait,
     FileChild,
@@ -107,6 +108,15 @@ def desk_agents() -> list[Seat]:
     """`ashigaru agents`: every seat, free or busy, the item it holds, and since when."""
     with desk() as (conn, who):
         return api.list_seats(conn, who)
+
+
+@mcp.tool
+def desk_status() -> Board:
+    """`ashigaru status`: the board a person reads: busy seats with their work in full, free and
+    missing seats, the tally, and NEEDS YOU (manual seats idle on a question, Scott's blocked work,
+    subjects held for approval)."""
+    with desk() as (conn, who):
+        return api.board(conn, who)
 
 
 @mcp.tool
