@@ -828,3 +828,17 @@ def test_no_usage_report_writes_the_session_of_a_registered_seat(
     report = {"session_id": "s2", "cost_usd": 2.0, "billing": "max"}
     assert client.post(path, headers=keys[JOSUI], json=report).status_code == OK
     assert seat_row(client, keys, MINE)["session_id"] == "s2"
+
+
+def test_a_seats_usage_report_from_one_session_for_another_is_refused(
+    client: TestClient, keys: Keys, conn: sqlite3.Connection
+) -> None:
+    up(client, keys, MINE)
+    session(client, keys, MINE, "s0", "startup")
+    session(client, keys, MINE, "s1", "clear")
+    soon = ago(minutes=-1)
+    conn.execute("UPDATE seats SET lease_until = ? WHERE name = ?", (soon, MINE))
+    report = {"session_id": "s1", "cost_usd": 1.0}
+    answer = client.post(f"/v1/seats/{MINE}/usage", headers=only(keys, MINE, "s0"), json=report)
+    assert refused(answer) and answer.json()["session"] == "s1"
+    assert seat_row(client, keys, MINE)["lease_until"] == soon
