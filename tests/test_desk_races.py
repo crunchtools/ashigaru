@@ -4,7 +4,7 @@ claims acknowledged by the seat's next turn, and writes that can name the versio
 
 import sqlite3
 from datetime import UTC, datetime, timedelta
-from http.client import CONFLICT, NO_CONTENT, OK, PRECONDITION_FAILED
+from http.client import CONFLICT, NO_CONTENT, OK, PRECONDITION_FAILED, UNPROCESSABLE_ENTITY
 from pathlib import Path
 from typing import Any
 
@@ -434,3 +434,21 @@ def test_the_migration_leaves_one_open_item_per_seat_and_rows_that_agree(
     assert [row[0] for row in moved] == ["a1", "a3"]
     assert old.execute("SELECT lease_until > updated_at FROM seats WHERE name = ?", (MINE,)).fetchone()[0]
     old.close()
+
+
+@pytest.mark.parametrize("tag", ["{v}", '"{v}"', 'W/"{v}"'])
+def test_r12_if_match_takes_a_version_bare_or_as_an_etag(client: TestClient, keys: Keys, tag: str) -> None:
+    work = item(client, keys)
+    version = get(client, keys, work)["version"]
+    stale = {**keys[JOSUI], "If-Match": tag.format(v=version - 1)}
+    assert (
+        client.patch(f"/v1/items/{work}", headers=stale, json={"note": "x"}).status_code
+        == PRECONDITION_FAILED
+    )
+    fresh = {**keys[JOSUI], "If-Match": tag.format(v=version)}
+    assert client.patch(f"/v1/items/{work}", headers=fresh, json={"note": "x"}).status_code == OK
+    junk = {**keys[JOSUI], "If-Match": "v1"}
+    assert (
+        client.patch(f"/v1/items/{work}", headers=junk, json={"note": "x"}).status_code
+        == UNPROCESSABLE_ENTITY
+    )

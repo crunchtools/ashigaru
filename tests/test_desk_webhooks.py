@@ -1349,6 +1349,17 @@ def test_the_apps_own_pr_is_queued_while_a_seat_works_the_repo(
     assert intake.unlinked(conn) == []
 
 
+def test_unlinked_lists_at_most_the_limit_oldest_first(conn: sqlite3.Connection) -> None:
+    for number, at in ((3, "2026-01-03T00:00:00Z"), (1, "2026-01-01T00:00:00Z"), (2, "2026-01-02T00:00:00Z")):
+        conn.execute(
+            "INSERT INTO subjects (subject_key, repo, kind, state, source, seen_at, unlinked_at)"
+            " VALUES (?, ?, 'story', 'open', 'webhook', ?, ?)",
+            (f"{REPO}#{number}", REPO, at, at),
+        )
+    assert [row["subject_key"] for row in intake.unlinked(conn, 2)] == [f"{REPO}#1", f"{REPO}#2"]
+    assert [row["subject_key"] for row in intake.unlinked(conn)][2:] == [f"{REPO}#3"]
+
+
 def test_a_merged_unlinked_pr_is_not_listed(trusting: TestClient, conn: sqlite3.Connection) -> None:
     seated(conn)
     deliver(trusting, "pull_request", seat_pr())

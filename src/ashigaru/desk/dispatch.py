@@ -850,7 +850,7 @@ def status(conn: sqlite3.Connection) -> dict[str, Any]:
             "task": found["title"],
             "since": found["since"],
         }
-        for found in intake.unlinked(conn)
+        for found in intake.unlinked(conn, QUEUE_LIMIT)
     ]
     return {
         "busy": busy,

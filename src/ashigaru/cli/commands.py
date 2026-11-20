@@ -4,7 +4,7 @@ arguments. Each returns plain data; rendering is the caller's."""
 import os
 from collections.abc import Callable, Sequence
 from http import HTTPStatus
-from typing import Any
+from typing import Any, TypedDict, Unpack
 from urllib.parse import quote
 
 from .client import Desk, DeskError, Send, Unreachable
@@ -320,10 +320,17 @@ def claim(desk: Desk, item: str, if_version: int | None = None) -> dict[str, Any
     return result
 
 
+class ChildLines(TypedDict, total=False):
+    """What a filed child says beside its task."""
+
+    done_when: str | None
+    note: str | None
+
+
 def file(
-    desk: Desk, item: str, task: str, if_version: int | None = None, **lines: str | None
+    desk: Desk, item: str, task: str, *, if_version: int | None = None, **lines: Unpack[ChildLines]
 ) -> dict[str, Any]:
-    """File one proposed child of this story, under its outcome; one per assignment. `lines` are
+    """File one proposed child of this story, under its outcome; one per assignment, with its
     done_when and note; with `if_version`, only if the story is still at that version. The MCP tool is
     desk_file."""
     body = {"task": task, **{k: v for k, v in lines.items() if v is not None}}

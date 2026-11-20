@@ -61,6 +61,7 @@ UNLINKED = """
         SELECT 1 FROM items i WHERE s.subject_key IN (i.subject_key, i.pr)
     )
     ORDER BY s.unlinked_at, s.subject_key
+    LIMIT :limit
 """
 """Open subjects a writer's seat may have opened that no item names: NEEDS YOU's to link."""
 
@@ -155,9 +156,10 @@ def link(conn: sqlite3.Connection, item: IntakeItem) -> str | None:
     return None
 
 
-def unlinked(conn: sqlite3.Connection) -> list[dict[str, Any]]:
-    """The open subjects a seat may have opened that no item names, oldest first."""
-    return [dict(row) for row in conn.execute(UNLINKED)]
+def unlinked(conn: sqlite3.Connection, limit: int = -1) -> list[dict[str, Any]]:
+    """The open subjects a seat may have opened that no item names, oldest first, at most `limit`
+    (-1: all)."""
+    return [dict(row) for row in conn.execute(UNLINKED, {"limit": limit})]
 
 
 def _awaiting(conn: sqlite3.Connection, item: IntakeItem) -> bool:
