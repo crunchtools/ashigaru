@@ -6,7 +6,7 @@ import threading
 import time
 from collections.abc import Iterator
 from contextlib import contextmanager
-from http.client import CONFLICT, CREATED, FORBIDDEN, NOT_FOUND, OK, UNPROCESSABLE_ENTITY
+from http.client import CONFLICT, CREATED, FORBIDDEN, NOT_FOUND, OK, PRECONDITION_FAILED, UNPROCESSABLE_ENTITY
 from pathlib import Path
 from typing import Any
 
@@ -456,3 +456,31 @@ def test_desk_sweep_reads_for_anyone_and_starts_only_for_an_admin(
     assert not read["isError"] and read["structuredContent"]["configured"] is False
     assert mcp_status(call(client, urls[SEAT], "desk_sweep", {"run": True})) == FORBIDDEN
     assert mcp_status(call(client, urls[JOSUI], "desk_sweep", {"run": True})) == CONFLICT
+
+
+TOOL_GUARDS = [
+    ("desk_claim", SEAT, {}, False),
+    ("desk_report", SEAT, {"fields": {"verb": "WORKING", "text": "x"}}, True),
+    ("desk_wrap", JOSUI, {"fields": {"stage": "wrapping"}}, True),
+]
+"""A tool of each wrapper shape: who calls it, its arguments, and whether the item is SEAT's already."""
+
+
+@pytest.mark.parametrize("case", TOOL_GUARDS, ids=[case[0] for case in TOOL_GUARDS])
+def test_a_tools_if_version_refuses_an_old_version_and_changes_nothing(
+    client: TestClient,
+    conn: sqlite3.Connection,
+    access: tuple[Keys, dict[str, str]],
+    case: tuple[str, str, dict[str, Any], bool],
+) -> None:
+    tool, who, arguments, seated = case
+    keys, urls = access
+    up_seat(conn, SEAT, lane="exedore-max")
+    fields = {"id": "a1", "task": "t", "lane": "exedore-max", "state": "queued"}
+    store.insert_item(conn, {**fields, **({"seat": SEAT, "state": "working"} if seated else {})}, JOSUI)
+    read = client.get("/v1/items/a1", headers=keys[JOSUI]).json()["version"]
+    client.patch("/v1/items/a1", headers=keys[JOSUI], json={"note": "moved"})
+    moved = client.get("/v1/items/a1", headers=keys[JOSUI]).json()
+    result = call(client, urls[who], tool, {"item_id": "a1", "if_version": read, **arguments})
+    assert mcp_status(result) == PRECONDITION_FAILED, result
+    assert client.get("/v1/items/a1", headers=keys[JOSUI]).json() == moved

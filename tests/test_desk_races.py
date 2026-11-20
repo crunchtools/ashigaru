@@ -461,3 +461,29 @@ def test_r12_if_match_takes_a_version_bare_or_as_an_etag(client: TestClient, key
         client.patch(f"/v1/items/{work}", headers=junk, json={"note": "x"}).status_code
         == UNPROCESSABLE_ENTITY
     )
+
+
+GUARDED = [
+    ("report", MINE, {"verb": "WORKING", "text": "x"}, True),
+    ("file", MINE, {"task": "child"}, True),
+    ("assign", JOSUI, {"seat": MINE}, False),
+    ("claim", MINE, None, False),
+]  # fmt: skip
+"""Each guarded write route: who sends it, its body, and whether the item is the seat's already."""
+
+
+@pytest.mark.parametrize("case", GUARDED, ids=[case[0] for case in GUARDED])
+def test_r12_every_guarded_route_refuses_an_old_version_and_changes_nothing(
+    client: TestClient, keys: Keys, case: tuple[str, str, dict[str, Any] | None, bool]
+) -> None:
+    route, who, body, seated = case
+    up(client, keys, MINE)
+    work = item(client, keys, lane="exedore-max")
+    if seated:
+        assign(client, keys, work, seat=MINE)
+    read = get(client, keys, work)["version"]
+    client.patch(f"/v1/items/{work}", headers=keys[JOSUI], json={"note": "moved"})
+    moved = get(client, keys, work)
+    late = client.post(f"/v1/items/{work}/{route}", headers={**keys[who], "If-Match": str(read)}, json=body)
+    assert late.status_code == PRECONDITION_FAILED and late.json()["code"] == "version"
+    assert get(client, keys, work) == moved
