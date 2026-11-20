@@ -276,7 +276,9 @@ def desk_wrap(
     CC-DONE (or a `learned`) and an idle turn, unless `force`; then clears the wrap and closes the
     item in `state`, which frees the seat."""
     with desk() as (conn, who):
-        return api.wrap(conn, api.admin(who), item_id, fields or WrapUp(), api.Guard(version=if_version))
+        return api.wrap(
+            conn, api.admin(who), item_id, fields or WrapUp.model_validate({}), api.Guard(version=if_version)
+        )
 
 
 @mcp.tool

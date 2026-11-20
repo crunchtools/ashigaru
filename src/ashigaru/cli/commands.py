@@ -208,7 +208,7 @@ def create(desk: Desk, **fields: Any) -> dict[str, Any]:
 
 
 def update(
-    desk: Desk, item: str, clear: Sequence[str] = (), if_version: int | None = None, **fields: Any
+    desk: Desk, item: str, clear: Sequence[str] = (), *, if_version: int | None = None, **fields: Any
 ) -> dict[str, Any]:
     """Set the fields given; each name in `clear` is set to null; with `if_version`, only if the item
     is still at that version (else the Desk answers 412). A seat may set only state
@@ -258,7 +258,7 @@ def assign(
     elif not item:
         raise CommandError("name an item, or give --task to record a new one")
     elif serves := {key: record[key] for key in ("outcome", "outcome_text") if record.get(key) is not None}:
-        update(desk, item, (), **serves)
+        desk.request("PATCH", _item(item), body=serves)
     body = {"seat": seat} if seat else {"lane": lane} if lane else {}
     try:
         result: dict[str, Any] = desk.post(f"{_item(item)}/assign", body, _match(if_version))
