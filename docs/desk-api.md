@@ -40,9 +40,12 @@ can return. A 409 or 412 body also carries a `code`: `stale-session`, `busy`,
 `held`, `unseen`, `no-lane`, `missing`, `derived`, `not-ready` (a wrap before
 CC-DONE or mid-turn) or `version`.
 
-A seat's requests carry `X-Ashigaru-Epoch`, the epoch its session registered.
-One that is not the seat's current epoch is 409 `stale-session` and changes
-nothing. A request without the header (a 4.x client) is accepted.
+A seat's requests carry `X-Ashigaru-Epoch`, the epoch its session registered,
+and its hooks `X-Ashigaru-Session`, their Claude Code session id. One that is
+not the seat's current epoch, or names another session, is 409 `stale-session`
+and changes nothing. A REST request without the epoch is accepted only from a
+seat that never registered a session (epoch 0, a 4.x client); MCP tool calls
+name neither and are not fenced.
 
 Writes to an item take `If-Match: <version>`, where `version` is the item's last
 event's seq. When the item has moved since, the write is 412 `version` and
@@ -80,7 +83,7 @@ changes nothing. Without the header the write applies as before.
 | `GET /queue` | `ashigaru queue`: the newest 1000 `queued` items, each with `waits_on` (every `after` id and its state, `unknown` for no such item), and the newest 1000 `proposed` children; `truncated` is true when either list was cut |
 | `GET /seats`, `GET /seats/{name}` | seat state: free/busy, owner, `hold` (`free`, `busy-auto` or `busy-manual`), turn, task, item, since, and the last usage report. `missing` is true for a seat whose lease is not live, with its `epoch` and `lease_until`; the list ends with each seat identity that never checked in, `missing` with a null `updated_at` |
 | `PATCH /seats/{name}` | created on first call; a seat sends `turn`, `task` and `waiting_on` (what it last asked before going idle; the `stop` hook sets it, best effort, a new turn or `/clear` clears it; migration 7 adds the column). Only an admin and the seat itself read `waiting_on`: every other caller gets null from `GET /seats`, `GET /seats/{name}` and `GET /work`, and no `waiting` rows in `GET /status`. `since` is server-set when `status` changes, `turn_started_at` when the turn goes active. The Desk infers Scott's hold (below). Any request a seat makes for itself (this PATCH, `usage`, `next`) renews its lease. An admin PATCH that would change `status`, `item` or `owner` is 409 `derived`; `lane` stays Josui's |
-| `POST /seats/{name}/session` | the seat or an admin: `{session_id, source}` (`startup`, `resume` or `clear`) returns `{epoch, seat}`. `startup` and `clear` take the next epoch and end the previous session (see Seats). `resume` keeps the epoch only for the seat's current session while its lease is live, else 409 `stale-session`; a resume of the current session whose lease lapsed ends it first |
+| `POST /seats/{name}/session` | the seat or an admin: `{session_id, source}` (`startup`, `resume` or `clear`) returns `{epoch, seat}`. `startup` and `clear` take the next epoch and end the previous session (see Seats). `resume` keeps the epoch and the session's work for the seat's current session, however long it was idle, unless the Desk ended it, which is 409 `stale-session`; a seat that never registered a session (epoch 0) adopts the resuming one at epoch 1, its work untouched |
 | `POST /seats/{name}/next?wait=S` | the seat or an admin, for `ashigaru hook next`: when the `autodispatch` mark is `on`, claim the oldest queued auto item in the seat's lane whose `after` items are done, as `desk_claim` would, and return `{item, brief}` (the brief: the task, then `done_when`, `ref`, `repo` and `note` when set, then the standing limits a hand brief ends with: no merge, tag, release or deploy, no messaging other seats, the report contract, /cc seat, Gatehouse replies); waits up to `wait` seconds (at most 90) for one, then 204. Claims only while the seat's turn is idle, and never once the client has gone. 204 also while the switch is off, and while the seat is busy only with an item at wrap stage `wrapping` (the /clear that starts the hook comes before `wrap` closes it); 409 when the seat is otherwise busy (`busy`), held (`held`), unseen (`unseen`) or has no lane (`no-lane`), or the epoch is stale. An item handed to a seat that is still `assigned` after 10 minutes (`ACK_AFTER`) goes back to the queue; an item Josui assigned is never handed back |
 | `POST /seats/{name}/usage` | the seat or an admin: `session_id`, `model`, `billing` (max / vertex / openrouter; else the seat's lane's, else what the row had; from a seat key the lane's comes first), `context_used`, `context_window`, `session_tokens`, `cost_usd` (the session's running total; what of it is not yet booked goes to today's spend, held until billing is known) |
 | `GET /usage` | `ashigaru usage`: per seat model, context, session tokens and cost, turn and seconds in it; spend by billing source today and this month (UTC) with limits |
@@ -144,16 +147,19 @@ manual item of Scott's is wrap-cleared on `clear` and left open and seatless on
 
 A lease is `lease_until`, renewed by any request the seat makes for itself:
 `LEASE` (10 minutes) while idle, `LEASE_ACTIVE` (60 minutes) mid-turn. A seat is
-`missing` when its lease is not live. Seat reconcile ends the session of a seat
-whose lease ran out (the epoch moves on and the lease clears): Josui's
+`missing` when its lease is not live: never picked or assigned, its session and
+work kept. Seat reconcile ends the session of a seat whose lease ran out
+`STALE_SEAT` (24 hours) ago (the epoch moves on and the lease clears): Josui's
 `assigned` and `working` items go back to `queued` with the note "seat lease
 lapsed: its session ended", other `auto` items leave the seat as they stand, and
-`wrapping` and `manual` items stay. It waits until the Desk has been up as long
-as the lease, so an outage lapses nothing. Migration 12 adds `seats.epoch`,
+`wrapping` and `manual` items stay. It counts no silence from before the Desk
+came up, so an outage lapses nothing. Migration 12 adds `seats.epoch`,
 `seats.lease_until`, `items.epoch` and `subjects.unlinked_at`, drops the seat of
 queued and proposed items, keeps on a seat that held several open items the one
-its row named (else the newest) and requeues or unseats the others with an event
-from source `migration`, then recomputes every seat row.
+its row named (else the newest) and takes the others off it with an event from
+source `migration` (Josui's `assigned` or `working` items back to `queued`, any
+other `blocked` with the reason, under NEEDS YOU), then recomputes every seat
+row.
 
 ## Item
 

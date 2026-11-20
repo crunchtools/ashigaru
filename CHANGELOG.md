@@ -9,11 +9,22 @@ All notable changes to this project are documented here. The format follows
 ### BREAKING
 - Seats have sessions, epochs and leases. A seat registers each session with
   `POST /v1/seats/{name}/session`, and every request it makes carries
-  `X-Ashigaru-Epoch`; one with a stale epoch is 409 `stale-session` and changes
-  nothing. A seat is `missing` when its lease is not live (10 minutes idle, 60
-  mid-turn), where it was "no write for 24 hours". Hooks built before this
-  release send no epoch: the Desk accepts them for 5.0, but the developer
-  image's hooks must be rebuilt to get one.
+  `X-Ashigaru-Epoch`, and each hook its Claude Code session as
+  `X-Ashigaru-Session`; one from a session the Desk has ended, or another
+  session's hook on the seat, is 409 `stale-session` and changes nothing. A
+  seat is `missing` (never picked or assigned) when its lease is not live (10
+  minutes idle, 60 mid-turn), where it was "no write for 24 hours"; that alone
+  keeps its session and its work. A seat that never registered a session (a 4.x
+  seat, epoch 0) is still served without an epoch, and its first resume adopts
+  its session and keeps its work; once it has registered one, a REST request
+  without an epoch is 409 `stale-session`. MCP tool calls name no session and
+  are not fenced.
+- Rollout: the Desk and Prime's skill together, then the seat images
+  immediately; a seat on a 4.x image is refused once its first 5.0 session
+  registers. Rolling back to 4.3 keeps migration 12's unique index, so a 4.3
+  reopen or seat change onto an occupied seat is a 409; leases recorded under
+  5.0 are stale on the roll forward, so every seat is `missing` until its next
+  request.
 - Seat occupancy is derived. A seat holds at most one open item, and its row's
   `status`, `item` and `owner` are recomputed from that item on every item
   write. An admin `PATCH /v1/seats/{name}` that would change one of them is 409
@@ -23,7 +34,8 @@ All notable changes to this project are documented here. The format follows
 - Migration 12 changes stored rows: it drops the seat of queued and proposed
   items, and where a seat held several open items keeps the one its row named
   (else the newest) and requeues or unseats the others, each with an event from
-  source `migration`.
+  source `migration`: Josui's `assigned` or `working` item goes back to the
+  queue, any other goes `blocked` with the reason, under NEEDS YOU.
 
 ### Added
 - PRs are linked by construction. A brief now tells the seat to branch
@@ -59,9 +71,11 @@ All notable changes to this project are documented here. The format follows
 - Startup and `/clear` end the seat's previous session: Josui's `assigned` or
   `working` item leaves the seat `blocked`, any other state as it stands; a
   wrapping item stays for `wrap`; Scott's manual item is wrap-cleared on clear
-  and left open and seatless on startup. Reconcile ends a session whose lease
-  ran out, after the Desk has itself been up for a lease, and requeues Josui's
-  `assigned` and `working` items.
+  and left open and seatless on startup. A resume of the seat's current
+  session keeps its epoch and its work however long it was idle. Reconcile ends
+  a session whose lease ran out a day ago (`STALE_SEAT`, counting no silence
+  from before the Desk came up) and requeues Josui's `assigned` and `working`
+  items.
 - Assign never picks a missing, held, busy or mid-turn seat; naming a missing
   one is 409 `missing`. Moving an item to another seat takes that seat (409
   `busy`, 409 `unseen`) and frees the old; a move to queued or proposed frees

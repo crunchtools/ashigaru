@@ -142,11 +142,14 @@ def _conflict(error: store.Conflict) -> ProblemError:
 
 @dataclasses.dataclass(frozen=True)
 class Guard:
-    """What a write names about what it read: the seat session it comes from (X-Ashigaru-Epoch, a seat's
-    only) and the item version it was decided on (If-Match). Either may be absent."""
+    """What a write names about what it read: the seat session it comes from (X-Ashigaru-Epoch and
+    X-Ashigaru-Session, a seat's only) and the item version it was decided on (If-Match). Any may be
+    absent; `sent` is whether it came over REST, where a seat naming no epoch is a 4.x client."""
 
     epoch: int | None = None
     version: int | None = None
+    session: str | None = None
+    sent: bool = False
 
 
 def _number(value: str | None, what: str) -> int | None:
@@ -165,11 +168,15 @@ def guard(
     epoch: Annotated[
         str | None, Header(alias="X-Ashigaru-Epoch", description="The seat session's epoch, from a seat.")
     ] = None,
+    session: Annotated[
+        str | None,
+        Header(alias="X-Ashigaru-Session", description="The seat's Claude Code session id, from its hooks."),
+    ] = None,
 ) -> Guard:
     """The request's Guard. An If-Match may carry an ETag's quotes and W/; either header that is not a
     number is 422."""
     tag = None if if_match is None else if_match.strip().removeprefix("W/").strip('"')
-    return Guard(_number(epoch, "X-Ashigaru-Epoch"), _number(tag, "If-Match"))
+    return Guard(_number(epoch, "X-Ashigaru-Epoch"), _number(tag, "If-Match"), session or None, sent=True)
 
 
 Guarded = Annotated[Guard, Depends(guard)]
@@ -197,7 +204,7 @@ def writable_item(
             raise HTTPException(
                 status.HTTP_403_FORBIDDEN, f"{item_id} is closed; only an admin may change it"
             )
-        dispatch.fence(store.get_seat(conn, who.name), who.name, checked.epoch)
+        dispatch.fence(store.get_seat(conn, who.name), who.name, _own(who, who.name, checked))
         if checked.epoch is not None and item["epoch"] not in (None, checked.epoch):
             raise store.Conflict(
                 f"{item_id} was taken in session {item['epoch']}, not this one ({checked.epoch})",
@@ -533,7 +540,9 @@ OCCUPANCY = ("status", "item", "owner")
 
 def _own(who: auth.Caller, name: str, checked: Guard) -> dispatch.Own | None:
     """The request is the seat's own, from the session named, or None for an admin's."""
-    return dispatch.Own(checked.epoch) if who.role == Role.SEAT and who.name == name else None
+    if who.role != Role.SEAT or who.name != name:
+        return None
+    return dispatch.Own(checked.epoch, checked.session, checked.sent)
 
 
 @router.patch(
@@ -625,10 +634,13 @@ async def next_item(
     a session the Desk has ended. Asking renews the seat's lease. The seat's next turn acknowledges a
     claim; one not acknowledged in ACK_AFTER goes back to the queue."""
     own_seat(who, name)
-    own = _own(who, name, guard(epoch=request.headers.get("X-Ashigaru-Epoch")))
+    headers = request.headers
+    own = _own(
+        who, name, guard(epoch=headers.get("X-Ashigaru-Epoch"), session=headers.get("X-Ashigaru-Session"))
+    )
     try:
         if own:
-            await run_in_threadpool(dispatch.check_in, conn, name, own.epoch)
+            await run_in_threadpool(dispatch.check_in, conn, name, own)
     except store.Conflict as error:
         raise _conflict(error) from error
     loop = asyncio.get_running_loop()
@@ -637,7 +649,7 @@ async def next_item(
         if await request.is_disconnected():
             return Response(status_code=status.HTTP_204_NO_CONTENT)
         try:
-            item = await run_in_threadpool(dispatch.next_item, conn, name, own.epoch if own else None)
+            item = await run_in_threadpool(dispatch.next_item, conn, name, own)
         except store.Conflict as error:
             raise _conflict(error) from error
         if item is not None and await request.is_disconnected():
@@ -668,9 +680,8 @@ def report_usage(conn: Conn, who: Who, name: str, body: UsageReport, checked: Gu
     A seat's lane decides its billing over the report's, so a seat key cannot pick what it bills. A
     seat's own report renews its lease; from a session the Desk has ended it is 409 stale-session."""
     own_seat(who, name)
-    lane_first = who.role == Role.SEAT
     try:
-        found = dispatch.report_usage(conn, name, body.model_dump(), lane_first, checked.epoch)
+        found = dispatch.report_usage(conn, name, body.model_dump(), _own(who, name, checked))
     except store.Conflict as error:
         raise _conflict(error) from error
     return Seat.model_validate(found)
@@ -734,7 +745,7 @@ def claim(conn: Conn, who: Who, item_id: str, checked: Guarded = UNGUARDED) -> I
     if who.role != Role.SEAT:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "only a seat claims; an admin assigns")
     try:
-        dispatch.claim(conn, item_id, who.name, checked.epoch, checked.version)
+        dispatch.claim(conn, item_id, who.name, _own(who, who.name, checked), checked.version)
     except KeyError as error:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "no such item") from error
     except store.Conflict as error:

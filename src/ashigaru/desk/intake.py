@@ -142,13 +142,13 @@ def link(conn: sqlite3.Connection, item: IntakeItem) -> str | None:
     whose author the Desk judged a writer, never a stranger's) the first item `_named` that is open, has
     no `pr` and is in the PR's repo."""
     known = by_pr(conn, item.subject_key)
-    if known or item.kind != Kind.STORY or not item.author_writes:
+    if known or item.kind != Kind.STORY or not item.author_writes or not item.repo:
         return known
     for name in _named(item):
         found = store.get_item(conn, name)
         if (
             found
-            and _repo(found) == (item.repo or "").lower()
+            and _repo(found) == item.repo.lower()
             and not found["pr"]
             and found["state"] not in CLOSED
             and found["wrap"] != Wrap.CLEARED

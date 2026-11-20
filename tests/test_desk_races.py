@@ -145,7 +145,7 @@ def test_r4_a_stale_session_cannot_claim_report_or_keep_the_seat_up(
     assert seat_row(client, keys, MINE)["lease_until"] < ago()
 
 
-def test_r4_a_lapsed_lease_ends_the_session_and_requeues_its_auto_work(
+def test_r4_a_lease_lapsed_a_day_ends_the_session_and_requeues_its_auto_work(
     client: TestClient, keys: Keys, conn: sqlite3.Connection, db: Path
 ) -> None:
     up(client, keys, MINE)
@@ -156,27 +156,16 @@ def test_r4_a_lapsed_lease_ends_the_session_and_requeues_its_auto_work(
     manual = item(client, keys, lane="exedore-max", mode="manual")
     assign(client, keys, manual, seat=OTHER)
     conn.execute("UPDATE seats SET lease_until = ?, updated_at = ?", (ago(minutes=5), ago(minutes=70)))
-    reconcile.run(str(db), reconcile.Settings())
+    assert reconcile.run(str(db), reconcile.Settings())["lapsed"] == 0
+    assert seat_row(client, keys, MINE)["epoch"] == first
+    conn.execute("UPDATE seats SET lease_until = ?", (ago(hours=25),))
+    assert reconcile.run(str(db), reconcile.Settings())["lapsed"] == len((MINE, OTHER))
     requeued = get(client, keys, auto)
     assert (requeued["state"], requeued["seat"]) == ("queued", None) and "lease" in requeued["note"]
     assert (get(client, keys, manual)["seat"], seat_row(client, keys, OTHER)["status"]) == (OTHER, "busy")
     assert seat_row(client, keys, MINE)["epoch"] > first
     resumed = session(client, keys, MINE, "s1", "resume")
     assert resumed.status_code == CONFLICT and resumed.json()["code"] == "stale-session"
-
-
-def test_r4_a_resume_that_finds_its_own_lease_lapsed_ends_the_session(
-    client: TestClient, keys: Keys, conn: sqlite3.Connection
-) -> None:
-    up(client, keys, MINE)
-    first = session(client, keys, MINE, "s1", "startup").json()["epoch"]
-    work = item(client, keys, lane="exedore-max")
-    assign(client, keys, work, seat=MINE)
-    conn.execute("UPDATE seats SET lease_until = ? WHERE name = ?", (ago(minutes=1), MINE))
-    resumed = session(client, keys, MINE, "s1", "resume")
-    assert resumed.status_code == CONFLICT and resumed.json()["code"] == "stale-session"
-    assert seat_row(client, keys, MINE)["epoch"] == first + 1
-    assert (get(client, keys, work)["state"], get(client, keys, work)["seat"]) == ("queued", None)
 
 
 def test_r4_a_stale_usage_report_books_nothing_and_renews_nothing(
@@ -205,22 +194,23 @@ def test_r4_a_desk_just_up_lapses_and_hands_back_nothing_its_outage_silenced(
     switch_on(client, keys)
     claimed = item(client, keys, lane="exedore-max")
     client.post(f"/v1/seats/{MINE}/next?wait=0", headers=keys[MINE])
-    conn.execute("UPDATE seats SET lease_until = ?, turn = 'idle'", (ago(minutes=30),))
+    conn.execute("UPDATE seats SET lease_until = ?, turn = 'idle'", (ago(hours=26),))
     conn.execute("UPDATE items SET assigned_at = ? WHERE id = ?", (ago(minutes=30), claimed))
     just_up = datetime.now(UTC) - timedelta(minutes=2)
     assert reconcile.run(str(db), reconcile.Settings(), just_up) == {
         "turns": 0, "tasks": 0, "silent": 0, "lapsed": 0, "unacked": 0
     }  # fmt: skip
     assert get(client, keys, claimed)["seat"] == MINE
-    long_up = datetime.now(UTC) - timedelta(minutes=11)
+    long_up = datetime.now(UTC) - timedelta(hours=25)
     assert reconcile.run(str(db), reconcile.Settings(), long_up)["lapsed"] == 1
     assert get(client, keys, claimed)["seat"] is None
 
 
 def test_r4_a_new_session_leaves_scotts_item_open_and_the_seat_free(client: TestClient, keys: Keys) -> None:
     up(client, keys, MINE)
-    session(client, keys, MINE, "s1", "startup")
-    client.patch(f"/v1/seats/{MINE}", headers=keys[MINE], json={"turn": "active", "task": "Scott's own"})
+    first = session(client, keys, MINE, "s1", "startup").json()["epoch"]
+    typed = {"turn": "active", "task": "Scott's own"}
+    client.patch(f"/v1/seats/{MINE}", headers=epoch(keys, MINE, first), json=typed)
     held = seat_row(client, keys, MINE)["item"]
     session(client, keys, MINE, "s2", "startup")
     found = get(client, keys, held)
@@ -237,10 +227,9 @@ def test_r10_a_seat_mid_turn_keeps_its_session_for_the_longer_lease(
     assert lease > (datetime.now(UTC) + timedelta(minutes=50)).strftime("%Y-%m-%dT%H:%M:%SZ")
     assert reconcile.run(str(db), reconcile.Settings())["lapsed"] == 0
     conn.execute("UPDATE seats SET lease_until = ? WHERE name = ?", (ago(minutes=1), MINE))
-    just_up = datetime.now(UTC) - timedelta(minutes=30)
-    assert reconcile.run(str(db), reconcile.Settings(), just_up)["lapsed"] == 0
     long_up = datetime.now(UTC) - timedelta(minutes=61)
-    assert reconcile.run(str(db), reconcile.Settings(), long_up)["lapsed"] == 1
+    assert reconcile.run(str(db), reconcile.Settings(), long_up)["lapsed"] == 0
+    assert seat_row(client, keys, MINE)["missing"] is True
 
 
 def test_r4_a_4x_seat_resuming_across_the_upgrade_joins_with_a_first_epoch(
@@ -406,6 +395,8 @@ def test_the_migration_leaves_one_open_item_per_seat_and_rows_that_agree(
         ("a3", MINE, "assigned", "auto"),
         ("a4", OTHER, "blocked", "manual"),
         ("a5", OTHER, "done", "auto"),
+        ("a6", MINE, "review", "auto"),
+        ("a7", MINE, "working", "manual"),
     ]
     for item_id, seat, state, mode in rows:
         old.execute(
@@ -430,6 +421,8 @@ def test_the_migration_leaves_one_open_item_per_seat_and_rows_that_agree(
         "a3": (None, "queued"),
         "a4": (OTHER, "blocked"),
         "a5": (OTHER, "done"),
+        "a6": (None, "blocked"),
+        "a7": (None, "blocked"),
     }
     seats = {
         row["name"]: (row["status"], row["item"], row["owner"]) for row in old.execute("SELECT * FROM seats")
@@ -440,7 +433,16 @@ def test_the_migration_leaves_one_open_item_per_seat_and_rows_that_agree(
         "Exedore 3 - Max": ("free", None, None),
     }
     moved = old.execute("SELECT item_id FROM events WHERE source = 'migration' ORDER BY item_id").fetchall()
-    assert [row[0] for row in moved] == ["a1", "a3"]
+    assert [row[0] for row in moved] == ["a1", "a3", "a6", "a7"]
+    notes = {row[0]: row[1] for row in old.execute("SELECT id, coalesce(blocked_reason, note) FROM items")}
+    assert "waiting" in notes["a1"] and "holds a2" in notes["a6"] and "holds a2" in notes["a7"]
+    needs = [
+        row[0]
+        for row in old.execute(
+            f"SELECT id FROM items WHERE {store.OPEN} AND state = 'blocked' AND seat IS NULL"
+        )
+    ]
+    assert sorted(needs) == ["a6", "a7"]
     assert old.execute("SELECT lease_until > updated_at FROM seats WHERE name = ?", (MINE,)).fetchone()[0]
     old.close()
 
@@ -487,3 +489,94 @@ def test_r12_every_guarded_route_refuses_an_old_version_and_changes_nothing(
     late = client.post(f"/v1/items/{work}/{route}", headers={**keys[who], "If-Match": str(read)}, json=body)
     assert late.status_code == PRECONDITION_FAILED and late.json()["code"] == "version"
     assert get(client, keys, work) == moved
+
+
+# Second-seat review of #238 (a812): what 0f5c9e0 still got wrong.
+
+
+def test_review_1_a_seat_resuming_across_the_upgrade_keeps_its_work(client: TestClient, keys: Keys) -> None:
+    up(client, keys, MINE)
+    up(client, keys, OTHER)
+    auto = item(client, keys, lane="exedore-max")
+    assign(client, keys, auto, seat=MINE)
+    client.patch(f"/v1/seats/{OTHER}", headers=keys[OTHER], json={"turn": "active", "task": "Scott's own"})
+    held = seat_row(client, keys, OTHER)["item"]
+    for name, seat_item in ((MINE, auto), (OTHER, held)):
+        joined = session(client, keys, name, f"{name}-s0", "resume")
+        assert joined.status_code == OK and joined.json()["epoch"] == 1
+        assert (get(client, keys, seat_item)["seat"], seat_row(client, keys, name)["item"]) == (
+            name,
+            seat_item,
+        )
+    assert get(client, keys, auto)["state"] == "assigned"
+
+
+def test_review_2_a_seat_idle_between_turns_keeps_its_work_and_its_session(
+    client: TestClient, keys: Keys, conn: sqlite3.Connection, db: Path
+) -> None:
+    up(client, keys, MINE)
+    first = session(client, keys, MINE, "s1", "startup").json()["epoch"]
+    work = item(client, keys, lane="exedore-max")
+    assign(client, keys, work, seat=MINE)
+    client.post(f"/v1/items/{work}/report", headers=epoch(keys, MINE, first), json={"verb": "WORKING"})
+    conn.execute(
+        "UPDATE seats SET lease_until = ?, updated_at = ? WHERE name = ?",
+        (ago(minutes=11), ago(minutes=21), MINE),
+    )
+    reconcile.run(str(db), reconcile.Settings())
+    assert (get(client, keys, work)["state"], get(client, keys, work)["seat"]) == ("working", MINE)
+    assert seat_row(client, keys, MINE)["missing"] is True
+    report = client.post(f"/v1/items/{work}/report", headers=epoch(keys, MINE, first), json={"verb": "DONE"})
+    assert report.status_code == OK
+    assert session(client, keys, MINE, "s1", "resume").json()["epoch"] == first
+
+
+def headers(keys: Keys, name: str, value: int, session_id: str) -> dict[str, str]:
+    return {**epoch(keys, name, value), "X-Ashigaru-Session": session_id}
+
+
+def test_review_3a_another_sessions_hooks_on_the_seat_are_refused(client: TestClient, keys: Keys) -> None:
+    up(client, keys, MINE)
+    session(client, keys, MINE, "s1", "startup")
+    now = session(client, keys, MINE, "s2", "startup").json()["epoch"]
+    switch_on(client, keys)
+    item(client, keys, lane="exedore-max")
+    old = headers(keys, MINE, now, "s1")
+    for method, path in (("POST", f"/v1/seats/{MINE}/next?wait=0"), ("PATCH", f"/v1/seats/{MINE}")):
+        refused = client.request(
+            method, path, headers=old, json={"turn": "active"} if method == "PATCH" else None
+        )
+        assert refused.status_code == CONFLICT and refused.json()["code"] == "stale-session", path
+    assert (
+        client.post(f"/v1/seats/{MINE}/next?wait=0", headers=headers(keys, MINE, now, "s2")).status_code == OK
+    )
+
+
+def test_review_3b_only_the_current_session_reports_usage(
+    client: TestClient, keys: Keys, conn: sqlite3.Connection
+) -> None:
+    up(client, keys, MINE)
+    session(client, keys, MINE, "s1", "startup")
+    now = session(client, keys, MINE, "s2", "startup").json()["epoch"]
+    path, cost = f"/v1/seats/{MINE}/usage", 4.0
+    for _ in range(2):
+        mine = client.post(path, headers=epoch(keys, MINE, now), json={"session_id": "s2", "cost_usd": cost})
+        assert mine.status_code == OK
+        stale = client.post(path, headers=epoch(keys, MINE, now), json={"session_id": "s1", "cost_usd": cost})
+        assert stale.status_code == CONFLICT and stale.json()["code"] == "stale-session"
+    assert conn.execute("SELECT coalesce(sum(cost_usd), 0) FROM spend").fetchone()[0] == cost
+    assert seat_row(client, keys, MINE)["session_id"] == "s2"
+
+
+def test_review_3c_a_seat_with_an_epoch_refuses_a_request_without_one(client: TestClient, keys: Keys) -> None:
+    up(client, keys, MINE)
+    session(client, keys, MINE, "s1", "startup")
+    switch_on(client, keys)
+    work = item(client, keys, lane="exedore-max")
+    bare = client.post(f"/v1/items/{work}/claim", headers=keys[MINE])
+    assert bare.status_code == CONFLICT and bare.json()["code"] == "stale-session"
+    assert (
+        client.patch(f"/v1/seats/{MINE}", headers=keys[MINE], json={"turn": "idle"}).status_code == CONFLICT
+    )
+    other = client.patch(f"/v1/seats/{OTHER}", headers=keys[OTHER], json={"turn": "idle"})
+    assert other.status_code == OK, "a seat that never registered (4.x) still needs no epoch"

@@ -158,9 +158,13 @@ def _ready(conn: sqlite3.Connection, item: dict[str, Any]) -> None:
 
 @dataclasses.dataclass(frozen=True)
 class Own:
-    """A request from the seat itself, in the session that sent `epoch` (None from a 4.x client)."""
+    """A request from the seat itself: the epoch and Claude Code session it names (a hook knows its
+    session; the CLI only the seat's epoch), and whether it came over REST, where naming no epoch
+    means a 4.x client. An MCP tool call names neither and is not held to them."""
 
     epoch: int | None = None
+    session: str | None = None
+    sent: bool = False
 
 
 def live(seat: dict[str, Any]) -> bool:
@@ -174,13 +178,22 @@ def lease(turn: str | None) -> dict[str, Any]:
     return {"lease_until": stamp(datetime.now(UTC) + span)}
 
 
-def fence(seat: dict[str, Any] | None, name: str, epoch: int | None) -> None:
-    """Raise Conflict (stale-session) when a request names an epoch that is not the seat's current
-    one: the session that sent it has ended. A request naming none (a 4.x client) passes."""
-    if epoch is not None and (seat or {}).get("epoch", 0) != epoch:
-        current = (seat or {}).get("epoch", 0)
+def fence(seat: dict[str, Any] | None, name: str, own: Own | None) -> None:
+    """Raise Conflict (stale-session) when the seat's own request does not come from its current
+    session: it names another epoch, or another Claude Code session, or (over REST) no epoch once the
+    seat has one. Only a seat that never registered a session (epoch 0, a 4.x seat) takes a request
+    naming none."""
+    if own is None:
+        return
+    current, session = (seat or {}).get("epoch", 0), (seat or {}).get("session_id")
+    if own.epoch is None:
+        stale = own.sent and current > 0
+    else:
+        stale = own.epoch != current or bool(own.session and session and own.session != session)
+    if stale:
         raise store.Conflict(
-            f"seat {name!r} is at epoch {current}; this session's ({epoch}) has ended: /clear to rejoin",
+            f"seat {name!r} is in session {session} at epoch {current}; this request's session "
+            f"({own.session or '?'}, epoch {own.epoch}) has ended: /clear to rejoin",
             "stale-session",
         )
 
@@ -245,7 +258,7 @@ def assign(
 
 
 def claim(
-    conn: sqlite3.Connection, item_id: str, seat: str, epoch: int | None = None, version: int | None = None
+    conn: sqlite3.Connection, item_id: str, seat: str, own: Own | None = None, version: int | None = None
 ) -> None:
     """desk_claim: a free seat takes a queued, unowned, auto item in its lane. Fails closed: a seat
     with no lane claims nothing, and an item with no lane is claimed by no seat; Josui sets its lane
@@ -254,7 +267,7 @@ def claim(
         item = store.get_item(conn, item_id)
         if item is None:
             raise KeyError(item_id)
-        fence(store.get_seat(conn, seat), seat, epoch)
+        fence(store.get_seat(conn, seat), seat, own)
         unmoved(item, version)
         _ready(conn, item)
         if item["state"] != State.QUEUED or item["seat"] is not None:
@@ -279,7 +292,7 @@ def autodispatch(conn: sqlite3.Connection) -> bool:
     return mark is not None and mark["value"] == "on"
 
 
-def _waiting_seat(conn: sqlite3.Connection, seat: str, epoch: int | None = None) -> sqlite3.Row | None:
+def _waiting_seat(conn: sqlite3.Connection, seat: str, own: Own | None = None) -> sqlite3.Row | None:
     """The item a free seat would claim now, or None to keep waiting: the switch is off, the seat is
     mid-turn (a brief it is reading arrived another way), its item is still wrapping, or nothing in
     its lane is ready. Raises Conflict when the seat cannot take work at all (busy, held, unseen or
@@ -287,7 +300,7 @@ def _waiting_seat(conn: sqlite3.Connection, seat: str, epoch: int | None = None)
     before `wrap` closes a wrapping item, so the hook /clear starts waits; a wrapping seat still
     mid-turn is not that race and is busy."""
     current = store.get_seat(conn, seat)
-    fence(current, seat, epoch)
+    fence(current, seat, own)
     item_id = current["item"] if current and not current["owner"] else None
     wrapping = item_id is not None and (store.get_item(conn, item_id) or {}).get("wrap") == Wrap.WRAPPING
     row = current if current and wrapping and current["turn"] == Turn.IDLE else _free(current, seat)
@@ -299,16 +312,16 @@ def _waiting_seat(conn: sqlite3.Connection, seat: str, epoch: int | None = None)
     return found
 
 
-def next_item(conn: sqlite3.Connection, seat: str, epoch: int | None = None) -> dict[str, Any] | None:
+def next_item(conn: sqlite3.Connection, seat: str, own: Own | None = None) -> dict[str, Any] | None:
     """`POST /seats/{name}/next`: the free, idle seat claims the oldest queued auto item in its lane
     whose `after` items are done, or None to keep waiting. Raises Conflict when the seat cannot take
     work at all, so its hook stops asking. Reads first and takes the write lock only to claim, so a
     waiting seat's looks cost no lock while the switch is off or the lane is empty. The claim waits
     for the seat's next turn to acknowledge it (ACK_AFTER)."""
-    if _waiting_seat(conn, seat, epoch) is None:
+    if _waiting_seat(conn, seat, own) is None:
         return None
     with store.transaction(conn):
-        found = _waiting_seat(conn, seat, epoch)
+        found = _waiting_seat(conn, seat, own)
         if found is None:
             return None
         item = store.decode(found)
@@ -335,7 +348,7 @@ BRIEF_FIELDS = (("done_when", "Done when"), ("ref", "Ref"), ("repo", "Repo"), ("
 BRIEF_LIMITS = """\
 Don't merge, tag, release or deploy; Josui Prime does that. Don't message other seats.
 Branch as `fix/{id}-<short-slug>` (feat/, docs/, chore/, refactor/ or test/ as fits) and end each PR \
-body with the line `Ashigaru-Item: {id}`, so the Desk links the PR to {id} instead of queuing it again.
+body with the line `Ashigaru-Item: {id}`: that line always links the PR to {id}, the branch not always.
 Fan out with Sonnet subagents (Agent tool, model sonnet) wherever the work splits; you stay the integrator.
 Report with `ashigaru report {id} <verb>`, and SendMessage to Josui Prime "DONE {id}: <result, links>" \
 or "BLOCKED {id}: <what you need>", then "Filed: <urls or none>"; end with "Learned: <gotcha>" \
@@ -361,13 +374,13 @@ def brief(item: dict[str, Any]) -> str:
     )
 
 
-def check_in(conn: sqlite3.Connection, name: str, epoch: int | None, turn: str | None = None) -> None:
+def check_in(conn: sqlite3.Connection, name: str, own: Own) -> None:
     """A request from the seat itself: refused when its session has ended (`fence`), else proof the
     seat is up, which renews its lease. A seat's first request creates its row."""
     with store.transaction(conn):
         current = store.get_seat(conn, name)
-        fence(current, name, epoch)
-        store.write_seat(conn, name, lease(turn or (current or {}).get("turn")))
+        fence(current, name, own)
+        store.write_seat(conn, name, lease((current or {}).get("turn")))
 
 
 def _cleared(
@@ -420,7 +433,7 @@ def _report_seat(
 ) -> dict[str, Any]:
     before = store.get_seat(conn, name)
     if own:
-        fence(before, name, own.epoch)
+        fence(before, name, own)
         fields = {**fields, **lease(fields.get("turn") or (before or {}).get("turn"))}
     seat = store.write_seat(conn, name, fields)
     if not set(fields) - {"lease_until"} <= SEAT_ROW_FIELDS:
@@ -450,12 +463,12 @@ def report_seat(
 
 
 def end_session(conn: sqlite3.Connection, name: str, actor: str, why: str) -> list[str]:
-    """End the seat's session, the caller holding the transaction: the next epoch, which no session
-    holds, and no lease, so the seat is missing until a new session starts. Josui's work leaves the
-    seat: queued again when it was assigned or working, else as it stands, each with `why` as its
-    note. Scott's hold and a wrapping item stay for a person. Returns the item moved, if any: a seat
-    holds one open item at most."""
-    conn.execute("UPDATE seats SET epoch = epoch + 1, lease_until = NULL WHERE name = ?", (name,))
+    """End the seat's session, the caller holding the transaction: no lease, so the seat is missing,
+    and, once it has registered sessions, the next epoch, which no session holds, so the old one is
+    fenced out. Josui's work leaves the seat: queued again when it was assigned or working, else as
+    it stands, with `why` as its note. Scott's hold and a wrapping item stay for a person. Returns the
+    item moved, if any: a seat holds one open item at most."""
+    conn.execute("UPDATE seats SET epoch = epoch + (epoch > 0), lease_until = NULL WHERE name = ?", (name,))
     held = store.seat_holder(conn, name)
     item = store.get_item(conn, held) if held else None
     if item is None or item["mode"] != Mode.AUTO or item["wrap"] is not None:
@@ -471,56 +484,56 @@ def start_session(
     conn: sqlite3.Connection, name: str, session_id: str, source: str, actor: str
 ) -> tuple[int, dict[str, Any]]:
     """POST /seats/{name}/session: the seat's SessionStart. A new session (startup, clear) gets the
-    next epoch, which ends the one before it (`_cleared`: its context is gone). A resume keeps the
-    epoch when it is the seat's current session and its lease is live; else it is refused, Conflict
-    (stale-session): what it remembers is no longer its own. A resume of the current session whose
-    lease ran out ends it first (`end_session`), as reconcile would have. A seat that never registered
-    a session (no row, or epoch 0: a 4.x seat resuming across the upgrade) has nothing to be stale
-    against, so its resume starts one. Returns the epoch and the
-    seat."""
+    next epoch, which ends the one before it (`_cleared`: its context is gone). A resume keeps its
+    context, so it keeps its work: the seat's current session resumes at its epoch, however long it
+    was idle, unless the Desk ended it (a newer session started, or reconcile ended it after
+    STALE_SEAT of silence), which is Conflict (stale-session): what it remembers is no longer its own.
+    A seat that never registered a session (no row, or epoch 0: a 4.x seat resuming across the
+    upgrade) adopts this one at epoch 1, its work untouched. Returns the epoch and the seat."""
     with store.transaction(conn):
         current = store.get_seat(conn, name)
-        resumed = source == "resume" and current is not None and current["epoch"] > 0
-        if current and resumed and current["session_id"] == session_id and live(current):
-            seat = _report_seat(conn, name, {"turn": Turn.IDLE}, actor, Own(current["epoch"]))
-            return current["epoch"], seat
-        if current and resumed and current["session_id"] == session_id:
-            end_session(conn, name, actor, f"seat {name}'s session {session_id} lapsed")
-        if not resumed:
-            epoch = (current["epoch"] if current else 0) + 1
-            same = current is not None and current["session_id"] == session_id
-            fresh = {} if same else {"session_cost_usd": 0.0, "session_booked_usd": 0.0}
-            store.write_seat(conn, name, {"epoch": epoch, "session_id": session_id, **fresh})
+        registered = current is not None and current["epoch"] > 0
+        if source == "resume" and registered and current:
+            if current["session_id"] != session_id or current["lease_until"] is None:
+                raise store.Conflict(
+                    f"seat {name!r}: session {session_id} has ended (the seat is in session "
+                    f"{current['session_id']} at epoch {current['epoch']}); /clear to rejoin",
+                    "stale-session",
+                )
+            return current["epoch"], _report_seat(
+                conn, name, {"turn": Turn.IDLE}, actor, Own(current["epoch"])
+            )
+        epoch = (current["epoch"] if current else 0) + 1
+        same = current is not None and current["session_id"] == session_id
+        fresh = {} if same else {"session_cost_usd": 0.0, "session_booked_usd": 0.0}
+        store.write_seat(conn, name, {"epoch": epoch, "session_id": session_id, **fresh})
+        if source != "resume":
             held = store.get_item(conn, current["item"]) if current and current["item"] else None
             _cleared(conn, held, name, actor, "clear" if source == "clear" else "startup")
-            fields = {"turn": Turn.IDLE, "task": None} if source == "clear" else {"turn": Turn.IDLE}
-            return epoch, _report_seat(conn, name, fields, actor, Own(epoch))
-    raise store.Conflict(
-        f"seat {name!r}: session {session_id} has ended (the seat is at epoch "
-        f"{(store.get_seat(conn, name) or {}).get('epoch')}); /clear to rejoin",
-        "stale-session",
-    )
+        fields = {"turn": Turn.IDLE, "task": None} if source == "clear" else {"turn": Turn.IDLE}
+        return epoch, _report_seat(conn, name, fields, actor, Own(epoch))
 
 
 def report_usage(
     conn: sqlite3.Connection,
     seat: str,
     report: dict[str, Any],
-    lane_first: bool = False,
-    epoch: int | None = None,
+    own: Own | None = None,
 ) -> dict[str, Any]:
     """Record a seat's usage and book whatever of the session's cost is not yet in spend. Billing is
-    the report's, else the seat's lane's, else what the row had; with `lane_first` (a seat reporting
-    for itself) the lane's comes before the report's, the session must be current (`fence`), and the
-    report renews the seat's lease. Until a billing is known the cost waits."""
+    the report's, else the seat's lane's, else what the row had. A seat reporting for itself (`own`)
+    bills by its lane before the report's, must be in its current session (`fence`), and renews its
+    lease; once it has registered a session, a report for another session is refused, so two never
+    take turns resetting what is booked. Until a billing is known the cost waits."""
+    lane_first = own is not None
     with store.transaction(conn):
         found = store.get_seat(conn, seat)
-        if lane_first:
-            fence(found, seat, epoch)
+        if own is not None:
+            fence(found, seat, dataclasses.replace(own, session=own.session or report["session_id"]))
         current = found or {**store.SEAT_DEFAULTS, "session_id": None}
         cost = report.pop("cost_usd", None)
         fields = {key: value for key, value in report.items() if value is not None}
-        if lane_first:
+        if own is not None:
             fields.update(lease(current["turn"]))
         lane = LANE_BILLING.get(current["lane"])
         reported = fields.get("billing")

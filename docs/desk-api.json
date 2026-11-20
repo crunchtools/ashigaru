@@ -5724,6 +5724,24 @@
               "description": "The seat session's epoch, from a seat.",
               "title": "X-Ashigaru-Epoch"
             }
+          },
+          {
+            "description": "The seat's Claude Code session id, from its hooks.",
+            "in": "header",
+            "name": "X-Ashigaru-Session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The seat's Claude Code session id, from its hooks.",
+              "title": "X-Ashigaru-Session"
+            }
           }
         ],
         "requestBody": {
@@ -5868,6 +5886,24 @@
               "description": "The seat session's epoch, from a seat.",
               "title": "X-Ashigaru-Epoch"
             }
+          },
+          {
+            "description": "The seat's Claude Code session id, from its hooks.",
+            "in": "header",
+            "name": "X-Ashigaru-Session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The seat's Claude Code session id, from its hooks.",
+              "title": "X-Ashigaru-Session"
+            }
           }
         ],
         "requestBody": {
@@ -6011,6 +6047,24 @@
               ],
               "description": "The seat session's epoch, from a seat.",
               "title": "X-Ashigaru-Epoch"
+            }
+          },
+          {
+            "description": "The seat's Claude Code session id, from its hooks.",
+            "in": "header",
+            "name": "X-Ashigaru-Session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The seat's Claude Code session id, from its hooks.",
+              "title": "X-Ashigaru-Session"
             }
           }
         ],
@@ -6243,6 +6297,24 @@
               "description": "The seat session's epoch, from a seat.",
               "title": "X-Ashigaru-Epoch"
             }
+          },
+          {
+            "description": "The seat's Claude Code session id, from its hooks.",
+            "in": "header",
+            "name": "X-Ashigaru-Session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The seat's Claude Code session id, from its hooks.",
+              "title": "X-Ashigaru-Session"
+            }
           }
         ],
         "requestBody": {
@@ -6387,6 +6459,24 @@
               "description": "The seat session's epoch, from a seat.",
               "title": "X-Ashigaru-Epoch"
             }
+          },
+          {
+            "description": "The seat's Claude Code session id, from its hooks.",
+            "in": "header",
+            "name": "X-Ashigaru-Session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The seat's Claude Code session id, from its hooks.",
+              "title": "X-Ashigaru-Session"
+            }
           }
         ],
         "requestBody": {
@@ -6530,6 +6620,24 @@
               ],
               "description": "The seat session's epoch, from a seat.",
               "title": "X-Ashigaru-Epoch"
+            }
+          },
+          {
+            "description": "The seat's Claude Code session id, from its hooks.",
+            "in": "header",
+            "name": "X-Ashigaru-Session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The seat's Claude Code session id, from its hooks.",
+              "title": "X-Ashigaru-Session"
             }
           }
         ],
@@ -7049,6 +7157,24 @@
               "description": "The seat session's epoch, from a seat.",
               "title": "X-Ashigaru-Epoch"
             }
+          },
+          {
+            "description": "The seat's Claude Code session id, from its hooks.",
+            "in": "header",
+            "name": "X-Ashigaru-Session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The seat's Claude Code session id, from its hooks.",
+              "title": "X-Ashigaru-Session"
+            }
           }
         ],
         "requestBody": {
@@ -7355,6 +7481,24 @@
               ],
               "description": "The seat session's epoch, from a seat.",
               "title": "X-Ashigaru-Epoch"
+            }
+          },
+          {
+            "description": "The seat's Claude Code session id, from its hooks.",
+            "in": "header",
+            "name": "X-Ashigaru-Session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The seat's Claude Code session id, from its hooks.",
+              "title": "X-Ashigaru-Session"
             }
           }
         ],

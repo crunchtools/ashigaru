@@ -16,11 +16,13 @@ hook will ever end. Every EVERY seconds, and at startup, one run:
 3. flags a busy seat whose row has not been written for SILENT: `silent_since` says
    since when, and any write to the seat clears it. Like (1), it waits until the
    Desk has been up for SILENT;
-4. ends the session of a seat whose lease ran out (dispatch.end_session): a new
-   epoch fences the old session out, Josui's work it held goes back to the queue,
-   and the seat is missing until a new session starts. A lease runs out LEASE
-   after the seat's last request, LEASE_ACTIVE mid-turn; like (1), a lease is not
-   held to run out while the Desk was down;
+4. ends the session of a seat whose lease ran out STALE_SEAT ago (dispatch.end_session):
+   a new epoch fences the old session out, Josui's work it held goes back to the
+   queue, and the seat is missing until a new session starts. A lease runs out LEASE
+   after the seat's last request, LEASE_ACTIVE mid-turn, and that alone only makes
+   the seat missing (never picked), its session and work kept: a seat idle between
+   turns is not a dead one. Like (1), the silence counts from no earlier than the
+   Desk's own start;
 5. queues again an item `next` handed a seat that the seat's next turn has not
    acknowledged (it would be `working`) within ACK_AFTER: the brief never arrived.
 
@@ -38,7 +40,7 @@ from datetime import UTC, datetime, timedelta
 from starlette.concurrency import run_in_threadpool
 
 from . import dispatch, store
-from .model import ACK_AFTER, LEASE, LEASE_ACTIVE, STALE_SEAT
+from .model import ACK_AFTER, STALE_SEAT
 
 EVERY = 300.0
 """Seconds between runs."""
@@ -67,9 +69,9 @@ FLAG_SILENT = """
 """Leaves `updated_at` alone, like the others: the flag is the Desk's, not a write by the seat."""
 LAPSED = """
     SELECT name FROM seats
-    WHERE lease_until < :now AND (turn = 'active' AND :active_due OR turn != 'active' AND :idle_due)
+    WHERE max(lease_until, :started) < :horizon
 """
-"""Seats whose lease ran out, each once the Desk has been up long enough for its kind of lease to."""
+"""Seats whose lease ran out STALE_SEAT ago, counting no silence from before the Desk came up."""
 UNACKED = """
     SELECT id FROM items i
     WHERE state = 'assigned' AND mode = 'auto' AND seat IS NOT NULL AND assigned_at < :before
@@ -107,11 +109,7 @@ def run(db_path: str, settings: Settings, started: datetime | None = None) -> di
     conn = store.connect(db_path)
     try:
         with store.transaction(conn):
-            due = {
-                "now": _stamp(now),
-                "active_due": _up(started, now, LEASE_ACTIVE),
-                "idle_due": _up(started, now, LEASE),
-            }
+            due = {"horizon": _stamp(now - STALE_SEAT), "started": _stamp(started) if started else ""}
             lapsed = [row[0] for row in conn.execute(LAPSED, due).fetchall()]
             for name in lapsed:
                 dispatch.end_session(conn, name, ACTOR, "seat lease lapsed: its session ended")

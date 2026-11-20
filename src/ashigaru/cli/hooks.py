@@ -166,6 +166,7 @@ def _start(event: dict[str, Any], desk: Desk, path: str) -> None:
                 return
             if error.status not in (HTTPStatus.NOT_FOUND, HTTPStatus.METHOD_NOT_ALLOWED):
                 raise
+            epoch_file().unlink(missing_ok=True)
         else:
             if isinstance(answer, dict) and isinstance(answer.get("epoch"), int):
                 _keep_epoch(answer["epoch"])
@@ -468,7 +469,7 @@ def _report(name: str, stdin: TextIO, env: Mapping[str, str] | None, transport: 
     if name == "statusline" and _throttled(event, os.environ if env is None else env):
         return None
     config = load(env)
-    desk = Desk(config, timeout=HOOK_SECONDS, transport=transport)
+    desk = Desk(config, HOOK_SECONDS, transport, str(event.get("session_id") or "") or None)
     try:
         if name == "next":
             return _next(desk, config.seat)

@@ -858,9 +858,18 @@ def test_session_start_registers_the_session_and_keeps_the_epoch(seat: FakeDesk)
 
 @pytest.mark.parametrize("missing", [404, 405])
 def test_session_start_falls_back_to_the_patch_on_an_old_desk(seat: FakeDesk, missing: int) -> None:
+    hooks.epoch_file().parent.mkdir(parents=True)
+    hooks.epoch_file().write_text("3\n")
     seat.on("POST", SESSION, (missing, {"detail": "nope"}))
     assert hook("session-start", {"session_id": "s1", "source": "clear"}) == 0
     assert patches(seat) == [{"turn": "idle", "task": None}] and not hooks.epoch_file().exists()
+
+
+def test_a_hook_names_its_session_and_the_cli_none(seat: FakeDesk) -> None:
+    hook("stop", {"session_id": "s1"})
+    assert seat.calls("PATCH", "/v1/seats/Max%201")[0].headers["X-Ashigaru-Session"] == "s1"
+    hook("stop", {})
+    assert "X-Ashigaru-Session" not in seat.calls("PATCH", "/v1/seats/Max%201")[1].headers
 
 
 def test_session_start_does_not_register_a_compact(seat: FakeDesk) -> None:

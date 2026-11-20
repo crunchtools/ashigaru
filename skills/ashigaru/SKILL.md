@@ -78,7 +78,7 @@ free (`ashigaru assign a7 --seat "Dolza 1 - Max"`), never the reverse.
   `cleared` once the seat is. `after` lists the ids an item waits on.
 - **Seats** are `free`, `busy-auto` (Prime's item), `busy-manual` (Scott's
   hold) or `missing` (never checked in, or its lease lapsed: no request from the
-  seat for 10 minutes idle, 60 mid-turn), with an item, a turn (`active` |
+  seat for 10 minutes idle, 60 mid-turn; it keeps its work), with an item, a turn (`active` |
   `idle`) and a task. A seat holds at most one open item, and its row follows
   that item; nothing sets it by hand. The Desk infers Scott's hold from the
   seat's own hooks: his first typed prompt on a free seat opens a `manual`
@@ -136,8 +136,8 @@ his holds on seats silent for a day (`stale`: the
 Desk never closes them; tell Scott), and subjects intake holds for approval. A
 turn whose `stop` hook never arrived is ended by the Desk after three hours of
 silence (`turn_reconciled_at`); a seat silent past its lease (60 minutes
-mid-turn, 10 idle) has its session ended sooner, and is `missing` until a
-`/clear`. Show it
+mid-turn, 10 idle) is `missing`, never picked, but keeps its session and work;
+silent a day, its session is ended and Josui's work requeued. Show it
 for "show the board" or "what needs me"; `work` is the round that acts.
 
 ## `changes`
@@ -230,8 +230,9 @@ token. It re-reads every open item's subject and PR, searches the org for
 issues and PRs updated since the `sweep-search` mark (queuing a member's or a
 trusted author's, held unless the author writes to that repo; anyone else's, other bots included, is only listed under NEEDS
 YOU as `outsider`, never stored: create it by hand if it is work), and
-settles everything. A writer's PR links to the open item it names (branch
-`a7/<slug>`, an `Ashigaru-Item: a7` trailer, or `(a7)`) as that item's `pr`. It
+settles everything. A writer's PR links to the open item it names (an
+`Ashigaru-Item: a7` trailer, a branch `fix/a7-<slug>`, or `(a7)`) as that item's
+`pr`. The trailer is the one that always works: a sweep hit carries no branch. It
 runs at startup, every 10 minutes and on request, and never writes to GitHub.
 Prime no longer runs `gh search` or per-PR lookups. The board's last line shows
 `swept 4m ago (31 subjects, 2 new, 2 closed)`; when it shows an error, run
@@ -406,8 +407,9 @@ Auto items only.
    already reached the Desk through `report`, so `--learned` stays unused.
    Confirm with `agents` that the seat shows `free`. A seat cleared before its
    wrap leaves its item `blocked` and seatless, under NEEDS YOU. A `missing` or
-   stale seat (its lease lapsed, or a `stale-session` reply) must be `/clear`ed
-   to rejoin; its `assigned` and `working` items are already back in the queue.
+   stale seat (silent a day, or a `stale-session` reply) must be `/clear`ed to
+   rejoin; its `assigned` and `working` items are already back in the queue. A
+   seat merely `missing` keeps its work: wake it rather than clearing it.
 
 ## `claim`
 

@@ -237,8 +237,10 @@ MIGRATIONS: tuple[str, ...] = (
     # 5.0.0. A seat session's epoch, which every write a seat makes must match, and its lease, until
     # when the seat counts as up; the epoch of the session that took an item; a subject intake did not
     # queue because a seat may be working it. Then the data the 4.x races left: a queued or proposed
-    # item holds no seat, a seat holds one open item (the one its row names, else its newest), and the
-    # seat row's status, item and owner are what its items say. Each moved item gets an event.
+    # item holds no seat; a seat holds one open item (the one its row names, else its newest), and each
+    # other one leaves it, back to the queue if it was Josui's and under way, else blocked saying why,
+    # so NEEDS YOU shows it; and the seat row's status, item and owner are what its items say. Each
+    # moved item gets an event.
     """
     ALTER TABLE seats ADD COLUMN epoch INTEGER NOT NULL DEFAULT 0;
     ALTER TABLE seats ADD COLUMN lease_until TEXT;
@@ -247,33 +249,48 @@ MIGRATIONS: tuple[str, ...] = (
     UPDATE seats SET lease_until = strftime(
         '%Y-%m-%dT%H:%M:%SZ', updated_at, CASE turn WHEN 'active' THEN '+60 minutes' ELSE '+10 minutes' END
     );
+    CREATE TEMP TABLE keepers AS
+        SELECT s.name AS seat, coalesce(
+            (SELECT k.id FROM items k
+             WHERE k.id = s.item AND k.seat = s.name AND coalesce(k.wrap, '') != 'cleared'
+               AND k.state NOT IN ('done', 'wontdo', 'abandoned', 'queued', 'proposed')),
+            (SELECT k.id FROM items k
+             WHERE k.seat = s.name AND coalesce(k.wrap, '') != 'cleared'
+               AND k.state NOT IN ('done', 'wontdo', 'abandoned', 'queued', 'proposed')
+             ORDER BY k.updated_at DESC, k.id DESC LIMIT 1)
+        ) AS id
+        FROM (SELECT DISTINCT i.seat AS name, (SELECT item FROM seats WHERE name = i.seat) AS item
+              FROM items i WHERE i.seat IS NOT NULL) s;
     CREATE TEMP TABLE unseated AS
-        SELECT id, CASE WHEN state = 'assigned' THEN 'queued' ELSE state END AS state FROM items
-        WHERE seat IS NOT NULL AND coalesce(wrap, '') != 'cleared'
-          AND state NOT IN ('done', 'wontdo', 'abandoned')
-          AND (
-              state IN ('queued', 'proposed')
-              OR id != coalesce(
-                  (SELECT s.item FROM seats s JOIN items k ON k.id = s.item
-                   WHERE s.name = items.seat AND k.seat = items.seat AND coalesce(k.wrap, '') != 'cleared'
-                     AND k.state NOT IN ('done', 'wontdo', 'abandoned', 'queued', 'proposed')),
-                  (SELECT k.id FROM items k
-                   WHERE k.seat = items.seat AND coalesce(k.wrap, '') != 'cleared'
-                     AND k.state NOT IN ('done', 'wontdo', 'abandoned', 'queued', 'proposed')
-                   ORDER BY k.updated_at DESC, k.id DESC LIMIT 1)
-              )
-          );
+        SELECT i.id, i.seat,
+               CASE WHEN i.state IN ('queued', 'proposed') THEN i.state
+                    WHEN i.mode = 'auto' AND i.state IN ('assigned', 'working') THEN 'queued'
+                    ELSE 'blocked' END AS state,
+               CASE WHEN i.state IN ('queued', 'proposed')
+                    THEN 'a waiting item holds no seat (was ' || i.seat || ')'
+                    ELSE 'seat ' || i.seat || ' holds ' || k.id || ', so 5.0.0 took this one off it'
+                    END AS why
+        FROM items i JOIN keepers k ON k.seat = i.seat
+        WHERE coalesce(i.wrap, '') != 'cleared' AND i.state NOT IN ('done', 'wontdo', 'abandoned')
+          AND (i.state IN ('queued', 'proposed') OR i.id != k.id);
     INSERT INTO events (item_id, at, actor, source, patch)
-        SELECT u.id, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'), 'desk', 'migration',
-               json_object('seat', NULL, 'state', u.state, 'note', 'seat ' || i.seat || ' holds another item')
-        FROM unseated u JOIN items i ON i.id = u.id;
+        SELECT id, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'), 'desk', 'migration',
+               json_object(
+                   'seat', NULL, 'state', state,
+                   CASE state WHEN 'blocked' THEN 'blocked_reason' ELSE 'note' END, why
+               )
+        FROM unseated;
     UPDATE items SET
         seat = NULL,
-        state = (SELECT state FROM unseated WHERE unseated.id = items.id),
-        note = 'seat ' || seat || ' holds another item',
+        state = (SELECT state FROM unseated u WHERE u.id = items.id),
+        note = CASE WHEN (SELECT state FROM unseated u WHERE u.id = items.id) = 'blocked' THEN note
+               ELSE (SELECT why FROM unseated u WHERE u.id = items.id) END,
+        blocked_reason = CASE WHEN (SELECT state FROM unseated u WHERE u.id = items.id) = 'blocked'
+                         THEN (SELECT why FROM unseated u WHERE u.id = items.id) ELSE blocked_reason END,
         updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
     WHERE id IN (SELECT id FROM unseated);
     DROP TABLE unseated;
+    DROP TABLE keepers;
     CREATE UNIQUE INDEX items_one_per_seat ON items(seat)
         WHERE seat IS NOT NULL AND coalesce(wrap, '') != 'cleared'
           AND state NOT IN ('done', 'wontdo', 'abandoned');

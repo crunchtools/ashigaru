@@ -10,6 +10,7 @@ import httpx
 from .config import Config
 
 EPOCH_HEADER = "X-Ashigaru-Epoch"
+SESSION_HEADER = "X-Ashigaru-Session"
 
 
 def epoch_file() -> Path:
@@ -51,8 +52,15 @@ class Send:
 
 class Desk:
     def __init__(
-        self, config: Config, timeout: float = 10.0, transport: httpx.BaseTransport | None = None
+        self,
+        config: Config,
+        timeout: float = 10.0,
+        transport: httpx.BaseTransport | None = None,
+        session: str | None = None,
     ) -> None:
+        """`session` is the Claude Code session a hook runs for, sent on every request so the Desk
+        refuses another session's hooks on the seat; the CLI has none."""
+        self._session = {SESSION_HEADER: session} if session else {}
         self._http = httpx.Client(
             base_url=config.url,
             headers={"Authorization": f"Bearer {config.api_key}", "User-Agent": "ashigaru-cli"},
@@ -71,11 +79,12 @@ class Desk:
         send: Send | None = None,
     ) -> Any:
         """`send` says how: a timeout replacing the client's, for a long-poll, and headers added to the
-        request, such as If-Match. The seat's epoch, when epoch_file() holds one, goes on every request."""
+        request, such as If-Match. The seat's epoch, when epoch_file() holds one, and the hook's session
+        go on every request."""
         timeout, headers = (send.timeout, send.headers) if send else (None, {})
         wait = httpx.USE_CLIENT_DEFAULT if timeout is None else httpx.Timeout(timeout)
         held = epoch()
-        sent = ({EPOCH_HEADER: str(held)} if held is not None else {}) | (headers or {})
+        sent = ({EPOCH_HEADER: str(held)} if held is not None else {}) | self._session | (headers or {})
         try:
             response = self._http.request(method, path, params=params, json=body, timeout=wait, headers=sent)
         except httpx.TransportError as exc:
