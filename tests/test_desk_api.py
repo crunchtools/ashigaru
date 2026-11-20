@@ -307,14 +307,34 @@ def test_an_ended_session_renews_nothing(client: TestClient, keys: Keys, conn: s
     assert missing(client, keys, SEAT) and seat_row(conn, SEAT)["lease_until"] is None
 
 
+def test_another_sessions_request_at_the_same_epoch_renews_nothing(
+    client: TestClient, keys: Keys, conn: sqlite3.Connection
+) -> None:
+    own = started(client, keys, SEAT, "s1")
+    lapse(conn, SEAT)
+    client.get("/v1/items", headers={**own, "X-Ashigaru-Session": "s2"})
+    assert missing(client, keys, SEAT)
+    client.get("/v1/items", headers={**own, "X-Ashigaru-Session": "s1"})
+    assert not missing(client, keys, SEAT)
+
+
 def test_a_seats_reads_renew_its_lease_at_most_once_a_minute(
     client: TestClient, keys: Keys, conn: sqlite3.Connection
 ) -> None:
     own = started(client, keys, SEAT)
     soon = dispatch.stamp(datetime.now(UTC) + dispatch.LEASE - dispatch.RENEW_EVERY / 2)
     conn.execute("UPDATE seats SET lease_until = ? WHERE name = ?", (soon, SEAT))
+    before = conn.execute("PRAGMA data_version").fetchone()[0]
     client.get("/v1/items", headers=own)
+    assert conn.execute("PRAGMA data_version").fetchone()[0] == before, "a renewal not due wrote anyway"
     assert seat_row(conn, SEAT)["lease_until"] == soon
+    with store.transaction(conn):  # a renewal not due must not even ask for the write lock
+        assert client.get("/v1/items", headers=own).status_code == OK
+    later = dispatch.stamp(datetime.now(UTC) + dispatch.LEASE)
+    renewal = {"name": SEAT, "epoch": seat_row(conn, SEAT)["epoch"], "until": later}
+    assert conn.execute(dispatch.RENEW, {**renewal, "due": soon}).rowcount == 0, (
+        "the SQL renews a lease not due"
+    )
     conn.execute("UPDATE seats SET turn = 'active' WHERE name = ?", (SEAT,))
     client.get("/v1/items", headers=own)
     assert str(seat_row(conn, SEAT)["lease_until"]) > dispatch.stamp(datetime.now(UTC) + dispatch.LEASE)
