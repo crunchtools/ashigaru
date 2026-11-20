@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [5.0.0] - 2026-11-20
+
 ### BREAKING
 - Seats have sessions, epochs and leases. A seat registers each session with
   `POST /v1/seats/{name}/session`, and every request it makes carries
