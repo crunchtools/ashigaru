@@ -408,7 +408,8 @@ def renew(conn: sqlite3.Connection, name: str, own: Own) -> None:
     span = LEASE_ACTIVE if seat["turn"] == Turn.ACTIVE else LEASE
     at = datetime.now(UTC)
     until = {"until": stamp(at + span), "due": stamp(at + span - RENEW_EVERY)}
-    conn.execute(RENEW, {"name": name, "epoch": seat["epoch"], **until})
+    if seat["lease_until"] < until["due"]:  # an UPDATE that matches nothing still takes the write lock
+        conn.execute(RENEW, {"name": name, "epoch": seat["epoch"], **until})
 
 
 def _cleared(

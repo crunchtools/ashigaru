@@ -82,7 +82,7 @@ NEXT_BACKOFF = 300.0
 NEXT_PAUSE = 2.0
 # Answers that mean this seat will not get work by asking again soon: check in after NEXT_CHECK_IN. So
 # is any 409 but NEXT_BUSY and the stale-session one.
-NEXT_FINAL = frozenset({HTTPStatus.UNAUTHORIZED, HTTPStatus.FORBIDDEN, HTTPStatus.NOT_FOUND})
+NEXT_REFUSED = frozenset({HTTPStatus.UNAUTHORIZED, HTTPStatus.FORBIDDEN, HTTPStatus.NOT_FOUND})
 # Between check-ins of a seat that cannot take work: each renews its lease, which lapses after 10
 # minutes idle (desk.model.LEASE), so the seat stays on the board.
 NEXT_CHECK_IN = 180.0
@@ -313,7 +313,7 @@ class _Stale(Exception):
 
 def _ask(desk: Desk, method: str, path: str, deadline: float, **params: Any) -> Any:
     """One request, retried with backoff while the Desk is down, restarting or throttling (5xx, 429,
-    a 409 busy or held), until `deadline` on the monotonic clock. Raises _Refused on NEXT_FINAL or any
+    a 409 busy or held), until `deadline` on the monotonic clock. Raises _Refused on NEXT_REFUSED or any
     other 409, _Stale on a 409 stale-session, and _Deadline when no request can finish in the time left."""
     pause = NEXT_RETRY
     while True:
@@ -334,7 +334,7 @@ def _ask(desk: Desk, method: str, path: str, deadline: float, **params: Any) -> 
                         raise _Stale(error.detail) from error
                     if error.code not in NEXT_BUSY:
                         raise _Refused from error
-                elif error.status in NEXT_FINAL:
+                elif error.status in NEXT_REFUSED:
                     raise _Refused from error
         time.sleep(min(pause, max(0.0, deadline - time.monotonic())))
         pause = min(pause * 2, NEXT_BACKOFF)

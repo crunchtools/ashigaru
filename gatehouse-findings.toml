@@ -23,3 +23,11 @@ file = "src/ashigaru/desk/subjects.py"
 evidence = "if item.updated_at and stored_at and item.updated_at < stored_at:\n    return False"
 status = "not-a-bug"
 reason = "GitHub stamps updated_at to the second and sends nothing finer, so two changes in one second cannot be ordered by any field it gives; equal wins so a second change in that second lands, merged is sticky regardless, and the subject's next delivery (any later edit, label, push or review) records its state again."
+
+[[findings]]
+agent = "general"
+category = "quality"
+file = "src/ashigaru/desk/dispatch.py"
+evidence = "\"\"\"Renew a lease the Desk has not ended (NULL), in the session the request was checked against, and"
+status = "not-a-bug"
+reason = "A string literal after a module constant is this codebase's attribute docstring (PICK_SEAT, WAITING_ON, NEXT_TICK do the same); Sphinx and IDEs read it, and it is no runtime cost."
