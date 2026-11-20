@@ -274,7 +274,7 @@ When Prime asks, run /cc seat and reply CC-DONE {id}.
 Gatehouse: answer each finding with a reply whose first line is "Fixed in <sha>", \
 "Not a bug: <20+ chars>" or "Deferred: <open issue URL>"; anything else leaves triage red, \
 and a reply posted just before a push waits for the next retriage."""
-"""The standing limits every brief ends with, the ones Josui Prime's hand briefs carry; {id} is the item's."""
+"""The standing limits every brief ends with, as Josui Prime's hand briefs do; {id} is the item's id."""
 
 
 def brief(item: dict[str, Any]) -> str:
