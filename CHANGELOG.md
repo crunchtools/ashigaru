@@ -21,6 +21,7 @@ All notable changes to this project are documented here. The format follows
 ### Fixed
 - A session the Desk ended after its lease lapsed is fenced out by its session
   id too: ending it clears the seat's `session_id` as well as moving the epoch.
+- A sweep test no longer fails once its fixed timestamp is a day old.
 
 ## [5.0.1] - 2026-11-20
 
