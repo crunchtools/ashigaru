@@ -1,6 +1,6 @@
 # Major tag — deliver a published release to every enrolled repository.
 #
-# Callers use `@v4`. When a release is published this moves `v4` to it, and
+# Callers use `@v5`. When a release is published this moves `v5` to it, and
 # that is the whole rollout: no caller file changes anywhere. The tag moves
 # forward only: a release older than the newest of its major leaves it alone.
 # To undo a release, move the tag back by hand (docs/enrollment.md).
