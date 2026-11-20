@@ -7283,7 +7283,7 @@
                 }
               }
             },
-            "description": "A taken id or subject_key (the detail names the item holding it), an existing identity, a second child in one assignment, a seat that holds another open item, a seat session the Desk has ended (`code` stale-session), or an item or seat not in a state to assign, claim or wrap."
+            "description": "`stale-session`: a resume of a session the Desk has ended (its lease ran out, or a newer session started); the session must not act on what it remembers."
           },
           "422": {
             "content": {
@@ -7407,7 +7407,7 @@
                 }
               }
             },
-            "description": "A taken id or subject_key (the detail names the item holding it), an existing identity, a second child in one assignment, a seat that holds another open item, a seat session the Desk has ended (`code` stale-session), or an item or seat not in a state to assign, claim or wrap."
+            "description": "`stale-session`: the seat's own report came from a session the Desk has ended; nothing is booked and the lease is not renewed."
           },
           "422": {
             "content": {

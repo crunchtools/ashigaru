@@ -578,7 +578,18 @@ def patch_seat(conn: Conn, who: Who, name: str, body: SeatPatch, checked: Guarde
         raise _conflict(error) from error
 
 
-@router.post("/v1/seats/{name}/session", tags=["seats"], responses=errors(401, 403, 409))
+@router.post(
+    "/v1/seats/{name}/session",
+    tags=["seats"],
+    responses={
+        **errors(401, 403),
+        409: {
+            "model": Problem,
+            "description": "`stale-session`: a resume of a session the Desk has ended (its lease ran out, or"
+            " a newer session started); the session must not act on what it remembers.",
+        },
+    },
+)
 def start_session(conn: Conn, who: Who, name: str, body: SessionStart) -> SessionStarted:
     """The seat's SessionStart hook. A new session (startup, clear) gets the next epoch, which every
     request of the session then sends as X-Ashigaru-Epoch, and ends the one before: Josui's item it
@@ -639,7 +650,18 @@ async def next_item(
         await asyncio.sleep(NEXT_TICK)
 
 
-@router.post("/v1/seats/{name}/usage", tags=["seats"], responses=errors(401, 403, 409))
+@router.post(
+    "/v1/seats/{name}/usage",
+    tags=["seats"],
+    responses={
+        **errors(401, 403),
+        409: {
+            "model": Problem,
+            "description": "`stale-session`: the seat's own report came from a session the Desk has ended;"
+            " nothing is booked and the lease is not renewed.",
+        },
+    },
+)
 def report_usage(conn: Conn, who: Who, name: str, body: UsageReport, checked: Guarded = UNGUARDED) -> Seat:
     """From the seat's hooks and status line: model, billing source, context, session tokens, and the
     session's running cost, of which the increase since the last report is booked to today's spend.

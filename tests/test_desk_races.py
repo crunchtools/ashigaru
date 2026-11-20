@@ -243,6 +243,15 @@ def test_r10_a_seat_mid_turn_keeps_its_session_for_the_longer_lease(
     assert reconcile.run(str(db), reconcile.Settings(), long_up)["lapsed"] == 1
 
 
+def test_r4_a_4x_seat_resuming_across_the_upgrade_joins_with_a_first_epoch(
+    client: TestClient, keys: Keys
+) -> None:
+    up(client, keys, MINE)
+    assert seat_row(client, keys, MINE)["epoch"] == 0
+    joined = session(client, keys, MINE, "s0", "resume")
+    assert joined.status_code == OK and joined.json()["epoch"] == 1
+
+
 # R2 residue: the next hook stopped for good on a 409 that only meant "busy until the wrap".
 
 

@@ -453,18 +453,18 @@ def end_session(conn: sqlite3.Connection, name: str, actor: str, why: str) -> li
     """End the seat's session, the caller holding the transaction: the next epoch, which no session
     holds, and no lease, so the seat is missing until a new session starts. Josui's work leaves the
     seat: queued again when it was assigned or working, else as it stands, each with `why` as its
-    note. Scott's hold and a wrapping item stay for a person. Returns the items moved."""
+    note. Scott's hold and a wrapping item stay for a person. Returns the item moved, if any: a seat
+    holds one open item at most."""
     conn.execute("UPDATE seats SET epoch = epoch + 1, lease_until = NULL WHERE name = ?", (name,))
-    moved = []
-    for item in store.list_items(conn, seat=name, mode=Mode.AUTO):
-        if item["state"] in CLOSED or item["wrap"] is not None:
-            continue
-        fields: dict[str, Any] = {"seat": None, "note": why}
-        if item["state"] in (State.ASSIGNED, State.WORKING):
-            fields["state"] = State.QUEUED
-        store.update_item(conn, item["id"], fields, actor, source="session")
-        moved.append(item["id"])
-    return moved
+    held = store.seat_holder(conn, name)
+    item = store.get_item(conn, held) if held else None
+    if item is None or item["mode"] != Mode.AUTO or item["wrap"] is not None:
+        return []
+    fields: dict[str, Any] = {"seat": None, "note": why}
+    if item["state"] in (State.ASSIGNED, State.WORKING):
+        fields["state"] = State.QUEUED
+    store.update_item(conn, item["id"], fields, actor, source="session")
+    return [item["id"]]
 
 
 def start_session(
@@ -474,7 +474,9 @@ def start_session(
     next epoch, which ends the one before it (`_cleared`: its context is gone). A resume keeps the
     epoch when it is the seat's current session and its lease is live; else it is refused, Conflict
     (stale-session): what it remembers is no longer its own. A resume of the current session whose
-    lease ran out ends it first (`end_session`), as reconcile would have. Returns the epoch and the
+    lease ran out ends it first (`end_session`), as reconcile would have. A seat that never registered
+    a session (no row, or epoch 0: a 4.x seat resuming across the upgrade) has nothing to be stale
+    against, so its resume starts one. Returns the epoch and the
     seat."""
     with store.transaction(conn):
         current = store.get_seat(conn, name)
