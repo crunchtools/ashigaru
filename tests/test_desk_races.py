@@ -145,6 +145,36 @@ def test_r4_a_stale_session_cannot_claim_report_or_keep_the_seat_up(
     assert seat_row(client, keys, MINE)["lease_until"] < ago()
 
 
+@pytest.mark.parametrize("stale", ["epoch", "session"])
+def test_r4_an_ended_sessions_item_writes_are_refused_and_change_nothing(
+    client: TestClient, keys: Keys, stale: str
+) -> None:
+    up(client, keys, MINE)
+    old = session(client, keys, MINE, "s1", "startup").json()["epoch"]
+    work = item(client, keys, lane="exedore-max")
+    if stale == "epoch":
+        now = session(client, keys, MINE, "s2", "startup").json()["epoch"]
+        assign(client, keys, work, seat=MINE)
+        sent = headers(keys, MINE, old, "s1")
+    else:
+        now = old
+        assign(client, keys, work, seat=MINE)
+        sent = headers(keys, MINE, now, "s0")
+    before = get(client, keys, work)
+    writes = [
+        client.patch(f"/v1/items/{work}", headers=sent, json={"note": "from the old session"}),
+        client.post(f"/v1/items/{work}/report", headers=sent, json={"verb": "DONE"}),
+    ]
+    assert [(w.status_code, w.json()["code"]) for w in writes] == [(CONFLICT, "stale-session")] * len(writes)
+    assert get(client, keys, work) == before
+    mine = client.patch(
+        f"/v1/items/{work}",
+        headers=headers(keys, MINE, now, "s2" if stale == "epoch" else "s1"),
+        json={"note": "from this session"},
+    )
+    assert mine.status_code == OK
+
+
 def test_r4_a_lease_lapsed_a_day_ends_the_session_and_requeues_its_auto_work(
     client: TestClient, keys: Keys, conn: sqlite3.Connection, db: Path
 ) -> None:
