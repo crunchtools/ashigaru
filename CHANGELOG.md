@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [4.3.2] - 2026-11-20
+
 ### Fixed
 - A brief the Desk hands a seat on autodispatch now ends with the standing
   limits a hand-written brief carries: don't merge, tag, release or deploy;
