@@ -3,7 +3,8 @@
 import json
 import sqlite3
 import stat
-from http.client import CONFLICT, CREATED, FORBIDDEN, NOT_FOUND, OK, UNPROCESSABLE_ENTITY
+from datetime import UTC, datetime
+from http.client import CONFLICT, CREATED, FORBIDDEN, NO_CONTENT, NOT_FOUND, OK, UNPROCESSABLE_ENTITY
 from pathlib import Path
 
 import pytest
@@ -236,6 +237,87 @@ def test_seats_show_the_missing(client: TestClient, keys: Keys, conn: sqlite3.Co
     assert client.get(f"/v1/seats/{SEAT}", headers=keys["ci"]).json()["missing"] is True
     client.patch(f"/v1/seats/{SEAT}", headers=keys[SEAT], json={"turn": "idle"})
     assert client.get(f"/v1/seats/{SEAT}", headers=keys["ci"]).json()["missing"] is False
+
+
+LAPSED = "2000-01-01T00:00:00Z"
+
+
+def lapse(conn: sqlite3.Connection, name: str) -> None:
+    conn.execute("UPDATE seats SET lease_until = ? WHERE name = ?", (LAPSED, name))
+
+
+def started(client: TestClient, keys: Keys, name: str, session: str = "s1") -> dict[str, str]:
+    """Start a session on the seat; the headers its later requests send, as the CLI and hooks do."""
+    body = {"session_id": session, "source": "startup"}
+    epoch = client.post(f"/v1/seats/{name}/session", headers=keys[name], json=body).json()["epoch"]
+    return {**keys[name], "X-Ashigaru-Epoch": str(epoch)}
+
+
+def seat_row(conn: sqlite3.Connection, name: str) -> dict[str, object]:
+    found = store.get_seat(conn, name)
+    assert found is not None
+    return found
+
+
+def missing(client: TestClient, keys: Keys, name: str) -> bool:
+    return bool(client.get(f"/v1/seats/{name}", headers=keys["ci"]).json()["missing"])
+
+
+@pytest.mark.parametrize("name", [SEAT, JOSUI])
+def test_any_request_from_a_seat_renews_its_lease(
+    client: TestClient, keys: Keys, conn: sqlite3.Connection, name: str
+) -> None:
+    """a831: Josui Prime's CLI calls and an idle seat's reads keep it on the board, not only its
+    own reports; Prime's key is an admin's."""
+    own = started(client, keys, name)
+    lapse(conn, name)
+    assert missing(client, keys, name)
+    assert client.get("/v1/items", headers=own).status_code == OK
+    assert not missing(client, keys, name)
+    lapse(conn, name)
+    assert client.get("/v1/items", headers=keys["ci"]).status_code == OK
+    assert missing(client, keys, name)
+
+
+def test_a_next_with_nothing_for_the_seat_renews_its_lease(
+    client: TestClient, keys: Keys, conn: sqlite3.Connection
+) -> None:
+    own = started(client, keys, SEAT)
+    lapse(conn, SEAT)
+    refused = client.post(f"/v1/seats/{SEAT}/next?wait=0", headers=own)
+    assert refused.status_code == CONFLICT and refused.json()["code"] == "no-lane"
+    assert not missing(client, keys, SEAT)
+    conn.execute("UPDATE seats SET lane = 'exedore-max' WHERE name = ?", (SEAT,))
+    lapse(conn, SEAT)
+    assert client.post(f"/v1/seats/{SEAT}/next?wait=0", headers=own).status_code == NO_CONTENT
+    assert not missing(client, keys, SEAT)
+
+
+def test_an_ended_session_renews_nothing(client: TestClient, keys: Keys, conn: sqlite3.Connection) -> None:
+    old = started(client, keys, SEAT, "s1")
+    started(client, keys, SEAT, "s2")
+    lapse(conn, SEAT)
+    client.get("/v1/items", headers=old)
+    client.get("/v1/items", headers=keys[SEAT])
+    assert missing(client, keys, SEAT)
+    with store.transaction(conn):
+        dispatch.end_session(conn, SEAT, "test", "lapsed")
+    current = {**keys[SEAT], "X-Ashigaru-Epoch": str(seat_row(conn, SEAT)["epoch"])}
+    client.get("/v1/items", headers=current)
+    assert missing(client, keys, SEAT) and seat_row(conn, SEAT)["lease_until"] is None
+
+
+def test_a_seats_reads_renew_its_lease_at_most_once_a_minute(
+    client: TestClient, keys: Keys, conn: sqlite3.Connection
+) -> None:
+    own = started(client, keys, SEAT)
+    soon = dispatch.stamp(datetime.now(UTC) + dispatch.LEASE - dispatch.RENEW_EVERY / 2)
+    conn.execute("UPDATE seats SET lease_until = ? WHERE name = ?", (soon, SEAT))
+    client.get("/v1/items", headers=own)
+    assert seat_row(conn, SEAT)["lease_until"] == soon
+    conn.execute("UPDATE seats SET turn = 'active' WHERE name = ?", (SEAT,))
+    client.get("/v1/items", headers=own)
+    assert str(seat_row(conn, SEAT)["lease_until"]) > dispatch.stamp(datetime.now(UTC) + dispatch.LEASE)
 
 
 def test_marks_are_read_by_all_and_set_by_an_admin(client: TestClient, keys: Keys) -> None:

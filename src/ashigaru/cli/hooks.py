@@ -20,16 +20,17 @@ seat-state.json hooks and keep their rules.
                   idle. idle_prompt leaves alone a turn that started too
                   recently to be the one it reports on. Stop also sends the
                   seat's final message as waiting_on, trimmed to WAITING_LENGTH.
-  next            SessionStart (startup, clear), registered async with
+  next            SessionStart (startup, clear, resume), registered async with
                   asyncRewake: waits up to NEXT_SECONDS for the Desk to hand
                   this free seat its next queued item, then prints the brief
                   on stderr and exits 2, which wakes the idle session with it.
-                  It stops, exit 0, when the seat cannot take work (401, 403,
-                  404, or a 409 that is not busy, held or stale-session); a
-                  busy or held seat is asked again with backoff. On a 409
-                  stale-session it stops silently if the epoch file now holds a
-                  newer session's epoch (a /clear), else exits 2 with a notice
-                  that the Desk ended this session.
+                  Its asks are what keeps an idle seat's lease, so while the
+                  seat cannot take work (401, 403, 404, or a 409 that is not
+                  busy, held or stale-session) it checks in again every
+                  NEXT_CHECK_IN; a busy or held seat is asked again with
+                  backoff. On a 409 stale-session it stops silently if the
+                  epoch file now holds a newer session's epoch (a /clear), else
+                  exits 2 with a notice that the Desk ended this session.
   statusline      The status line command, not a hook: model, context, session
                   tokens and running cost to POST /v1/seats/{name}/usage. It
                   runs on every refresh, so it posts at most once per
@@ -79,9 +80,12 @@ NEXT_RETRY = 5.0
 NEXT_BACKOFF = 300.0
 # Between looks that brought nothing back, so an empty answer is never a spin.
 NEXT_PAUSE = 2.0
-# Answers that mean this seat will not get work by asking again: stop. So is any 409 but NEXT_BUSY and
-# the stale-session one.
+# Answers that mean this seat will not get work by asking again soon: check in after NEXT_CHECK_IN. So
+# is any 409 but NEXT_BUSY and the stale-session one.
 NEXT_FINAL = frozenset({HTTPStatus.UNAUTHORIZED, HTTPStatus.FORBIDDEN, HTTPStatus.NOT_FOUND})
+# Between check-ins of a seat that cannot take work: each renews its lease, which lapses after 10
+# minutes idle (desk.model.LEASE), so the seat stays on the board.
+NEXT_CHECK_IN = 180.0
 # The 409 codes that pass: the seat is mid-wrap or held, so ask again with the backoff.
 NEXT_BUSY = frozenset({"busy", "held"})
 # The 409 code for a session the Desk has ended or superseded.
@@ -295,8 +299,8 @@ def _stop(event: dict[str, Any], desk: Desk, path: str) -> None:
     desk.request("PATCH", path, body=body)
 
 
-class _Stop(Exception):
-    """The Desk said this seat will not get work by asking again."""
+class _Refused(Exception):
+    """The Desk said this seat cannot take work now: check in again after NEXT_CHECK_IN."""
 
 
 class _Stale(Exception):
@@ -309,7 +313,7 @@ class _Stale(Exception):
 
 def _ask(desk: Desk, method: str, path: str, deadline: float, **params: Any) -> Any:
     """One request, retried with backoff while the Desk is down, restarting or throttling (5xx, 429,
-    a 409 busy or held), until `deadline` on the monotonic clock. Raises _Stop on NEXT_FINAL or any
+    a 409 busy or held), until `deadline` on the monotonic clock. Raises _Refused on NEXT_FINAL or any
     other 409, _Stale on a 409 stale-session, and _Deadline when no request can finish in the time left."""
     pause = NEXT_RETRY
     while True:
@@ -329,33 +333,38 @@ def _ask(desk: Desk, method: str, path: str, deadline: float, **params: Any) -> 
                     if error.code == STALE:
                         raise _Stale(error.detail) from error
                     if error.code not in NEXT_BUSY:
-                        raise _Stop from error
+                        raise _Refused from error
                 elif error.status in NEXT_FINAL:
-                    raise _Stop from error
+                    raise _Refused from error
         time.sleep(min(pause, max(0.0, deadline - time.monotonic())))
         pause = min(pause * 2, NEXT_BACKOFF)
 
 
 def _next(desk: Desk, seat: str | None) -> str | None:
-    """The brief of the item the Desk hands this seat, or None once the seat cannot take work or the
-    wait runs out. Every request ends before NEXT_SECONDS, so no claim lands on a hook already gone. On
-    a stale-session answer it returns the notice for the model, unless the epoch file has moved on since
-    it started: a newer session on this seat took over, and it stops silently."""
+    """The brief of the item the Desk hands this seat, or None once the wait runs out. Every request
+    ends before NEXT_SECONDS, so no claim lands on a hook already gone. While the seat cannot take work
+    it checks in every NEXT_CHECK_IN, which keeps its lease. On a stale-session answer it returns the
+    notice for the model, unless the epoch file has moved on since it started: a newer session on this
+    seat took over, and it stops silently."""
     deadline = time.monotonic() + NEXT_SECONDS
     time.sleep(NEXT_SETTLE)
     started = epoch()
+    name = seat
     try:
-        name = seat or _ask(desk, "GET", "/v1/me", deadline)["name"]
-        path = f"/v1/seats/{quote(name, safe='')}/next"
         while True:
-            found = _ask(desk, "POST", path, deadline, wait=NEXT_WAIT)
+            try:
+                name = name or _ask(desk, "GET", "/v1/me", deadline)["name"]
+                found = _ask(desk, "POST", f"/v1/seats/{quote(name, safe='')}/next", deadline, wait=NEXT_WAIT)
+            except _Refused:
+                time.sleep(min(NEXT_CHECK_IN, max(0.0, deadline - time.monotonic())))
+                continue
             brief = found.get("brief") if isinstance(found, dict) else None
             if isinstance(brief, str) and brief.strip():
                 return brief
             time.sleep(NEXT_PAUSE)
     except _Stale as stale:
         return None if epoch() != started else _stale(stale.detail)
-    except (_Stop, _Deadline):
+    except _Deadline:
         return None
 
 

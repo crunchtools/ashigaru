@@ -109,17 +109,17 @@ exits 0 on every failure, so a hook never blocks Claude. `next` runs in the
 background for up to a day, as below.
 
 `ashigaru hook next` is how the Desk hands out work without Josui's round. It
-runs on SessionStart (startup and `/clear`, the points where a seat's context is
-clean), registered `async` with `asyncRewake`, so it never holds the prompt. It
+runs on SessionStart (startup, `/clear` and resume), registered `async` with `asyncRewake`, so it never holds the prompt. It
 long-polls `POST /v1/seats/{name}/next` for up to a day; when the Desk
 hands this free seat an item, it prints the brief on stderr and exits 2, which
 wakes the idle session with it. The Desk claims only while the seat's turn is
 idle, so a seat reading a brief that came another way is never handed a second.
 A transient 409 (`busy`, `held`) is asked again with backoff. On `stale-session` it
 wakes the seat with "this session is stale... /clear to rejoin", unless a newer
-session on the seat superseded the hook, which then stops silently. It exits 0
-on any other 409 (`unseen`, `no-lane`), or when its key is refused (401, 403,
-404); a Desk that is down or restarting (5xx, 429) is
+session on the seat superseded the hook, which then stops silently. Its asks
+are what keeps an idle seat's lease, so on any other 409 (`unseen`, `no-lane`),
+or when its key is refused (401, 403, 404), it checks in again every 3 minutes
+rather than exiting; a Desk that is down or restarting (5xx, 429) is
 asked again with backoff up to 5 minutes. Nothing flows until an admin sets the `autodispatch` mark to
 `on` (`ashigaru mark autodispatch --set on`); any other value is off.
 

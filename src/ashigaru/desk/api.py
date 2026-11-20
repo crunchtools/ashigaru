@@ -88,11 +88,16 @@ Conn = Annotated[sqlite3.Connection, Depends(connection)]
 
 
 def caller(
-    conn: Conn, credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer)]
+    request: Request, conn: Conn, credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer)]
 ) -> auth.Caller:
+    """The key's identity. A request from the identity a seat is named for renews that seat's lease
+    (`dispatch.renew`), whatever it asks: the CLI's calls, a `next` the Desk answers with nothing."""
     found = auth.authenticate(conn, credentials.credentials) if credentials else None
     if found is None:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "missing, unknown or revoked API key")
+    held = request.headers.get("X-Ashigaru-Epoch", "").strip()
+    session = request.headers.get("X-Ashigaru-Session") or None
+    dispatch.renew(conn, found.name, dispatch.Own(int(held) if held.isdigit() else None, session, sent=True))
     return found
 
 
