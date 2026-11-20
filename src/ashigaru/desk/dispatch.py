@@ -158,9 +158,10 @@ def _ready(conn: sqlite3.Connection, item: dict[str, Any]) -> None:
 
 @dataclasses.dataclass(frozen=True)
 class Own:
-    """A request from the seat itself: the epoch and Claude Code session it names (a hook knows its
-    session; the CLI only the seat's epoch), and whether it came over REST, where naming no epoch
-    means a 4.x client. An MCP tool call names neither and is not held to them."""
+    """A request from the seat itself: the Claude Code session it names (X-Ashigaru-Session, from a
+    hook's event or the seat's CLAUDE_CODE_SESSION_ID), the epoch a 5.0 client names beside or instead
+    of it, and whether it came over REST, where naming neither means a 4.x client. An MCP tool call
+    names nothing and is not held to them."""
 
     epoch: int | None = None
     session: str | None = None
@@ -178,24 +179,29 @@ def lease(turn: str | None) -> dict[str, Any]:
     return {"lease_until": stamp(datetime.now(UTC) + span)}
 
 
-def fence(seat: dict[str, Any] | None, name: str, own: Own | None) -> None:
+def fence(seat: dict[str, Any] | None, name: str, own: Own | None) -> int | None:
     """Raise Conflict (stale-session) when the seat's own request does not come from its current
-    session: it names another epoch, or another Claude Code session, or (over REST) no epoch once the
-    seat has one. Only a seat that never registered a session (epoch 0, a 4.x seat) takes a request
-    naming none."""
+    session: it names another Claude Code session, or another epoch, or (over REST) neither once the
+    seat has registered one. A session names the seat's current one only while the Desk has not ended
+    it (`end_session` drops it). Only a seat that never registered a session (epoch 0, a 4.x seat)
+    takes a request naming neither. Returns the epoch the request is in: the one it names, else its
+    session's, else None."""
     if own is None:
-        return
+        return None
     current, session = (seat or {}).get("epoch", 0), (seat or {}).get("session_id")
-    if own.epoch is None:
-        stale = own.sent and current > 0
-    else:
+    if own.epoch is not None:
         stale = own.epoch != current or bool(own.session and session and own.session != session)
+    elif own.session is not None:
+        stale = current > 0 and own.session != session
+    else:
+        stale = own.sent and current > 0
     if stale:
         raise store.Conflict(
             f"seat {name!r} is in session {session} at epoch {current}; this request's session "
             f"({own.session or '?'}, epoch {own.epoch}) has ended: /clear to rejoin",
             "stale-session",
         )
+    return own.epoch if own.epoch is not None else (current if own.session is not None else None)
 
 
 def unmoved(item: dict[str, Any], version: int | None) -> None:
@@ -461,6 +467,9 @@ def _report_seat(
     conn: sqlite3.Connection, name: str, fields: dict[str, Any], actor: str, own: Own | None
 ) -> dict[str, Any]:
     before = store.get_seat(conn, name)
+    if own and fields.get("task") and (before or {}).get("task"):
+        # The session's first typed prompt set the task; a later one is just a turn.
+        fields = {key: value for key, value in fields.items() if key != "task"}
     if own:
         fence(before, name, own)
         fields = {**fields, **lease(fields.get("turn") or (before or {}).get("turn"))}
@@ -481,11 +490,13 @@ def report_seat(
     """PATCH /seats/{name}, and how the Desk sees what happens in a seat, which no seat can claim or drop.
 
     `own` is the seat reporting for itself: refused for an ended session (`fence`), and renewing its
-    lease. A seat's turn starting acknowledges Josui's item it has not started, unless the turn is
-    Scott's first typed prompt (turn active with a task): that hands the item back and makes the seat
-    his, holding a new manual item with that task, the way /agents ledgered untracked manual work. A
-    /clear (task back to null) ends what the session held (`_cleared`). Turn changes without a task
-    (Claude Code's own turns: an assignment arriving, a background task's result) never start a hold.
+    lease. Its task is set once a session, by the first typed prompt: a seat's own write of a task
+    while the seat has one is a turn without it. A seat's turn starting acknowledges Josui's item it
+    has not started, unless the turn is Scott's first typed prompt (turn active with a task): that
+    hands the item back and makes the seat his, holding a new manual item with that task, the way
+    /agents ledgered untracked manual work. A /clear (task back to null) ends what the session held
+    (`_cleared`). Turn changes without a task (Claude Code's own turns: an assignment arriving, a
+    background task's result) never start a hold.
     """
     with store.transaction(conn):
         return _report_seat(conn, name, fields, actor, own)
@@ -493,11 +504,14 @@ def report_seat(
 
 def end_session(conn: sqlite3.Connection, name: str, actor: str, why: str) -> list[str]:
     """End the seat's session, the caller holding the transaction: no lease, so the seat is missing,
-    and, once it has registered sessions, the next epoch, which no session holds, so the old one is
-    fenced out. Josui's work leaves the seat: queued again when it was assigned or working, else as
-    it stands, with `why` as its note. Scott's hold and a wrapping item stay for a person. Returns the
-    item moved, if any: a seat holds one open item at most."""
-    conn.execute("UPDATE seats SET epoch = epoch + (epoch > 0), lease_until = NULL WHERE name = ?", (name,))
+    and, once it has registered sessions, the next epoch and no session id, so the old session is
+    fenced out whichever it names. Josui's work leaves the seat: queued again when it was assigned or
+    working, else as it stands, with `why` as its note. Scott's hold and a wrapping item stay for a
+    person. Returns the item moved, if any: a seat holds one open item at most."""
+    conn.execute(
+        "UPDATE seats SET epoch = epoch + (epoch > 0), session_id = NULL, lease_until = NULL WHERE name = ?",
+        (name,),
+    )
     held = store.seat_holder(conn, name)
     item = store.get_item(conn, held) if held else None
     if item is None or item["mode"] != Mode.AUTO or item["wrap"] is not None:
@@ -535,7 +549,10 @@ def start_session(
         epoch = (current["epoch"] if current else 0) + 1
         same = current is not None and current["session_id"] == session_id
         fresh = {} if same else {"session_cost_usd": 0.0, "session_booked_usd": 0.0}
-        store.write_seat(conn, name, {"epoch": epoch, "session_id": session_id, **fresh})
+        # A new session's first typed prompt becomes the seat's task (`_report_seat`), so startup drops
+        # the last one's as /clear does; the /clear's own `task: None` below also ends Scott's hold.
+        dropped = {"task": None} if source == "startup" else {}
+        store.write_seat(conn, name, {"epoch": epoch, "session_id": session_id, **fresh, **dropped})
         if source != "resume":
             held = store.get_item(conn, current["item"]) if current and current["item"] else None
             _cleared(conn, held, name, actor, "clear" if source == "clear" else "startup")

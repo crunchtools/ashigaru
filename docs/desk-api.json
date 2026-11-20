@@ -3624,7 +3624,7 @@
         "type": "object"
       },
       "SessionStarted": {
-        "description": "The epoch the session sends as X-Ashigaru-Epoch from now on, and the seat as it stands.",
+        "description": "The session's epoch, which a 5.0 client sends as X-Ashigaru-Epoch, and the seat as it stands.",
         "properties": {
           "epoch": {
             "title": "Epoch",
@@ -5708,7 +5708,7 @@
             }
           },
           {
-            "description": "The seat session's epoch, from a seat.",
+            "description": "The seat session's epoch, from a 5.0 seat.",
             "in": "header",
             "name": "X-Ashigaru-Epoch",
             "required": false,
@@ -5721,12 +5721,12 @@
                   "type": "null"
                 }
               ],
-              "description": "The seat session's epoch, from a seat.",
+              "description": "The seat session's epoch, from a 5.0 seat.",
               "title": "X-Ashigaru-Epoch"
             }
           },
           {
-            "description": "The seat's Claude Code session id, from its hooks.",
+            "description": "The seat's Claude Code session id, from its hooks and its CLI.",
             "in": "header",
             "name": "X-Ashigaru-Session",
             "required": false,
@@ -5739,7 +5739,7 @@
                   "type": "null"
                 }
               ],
-              "description": "The seat's Claude Code session id, from its hooks.",
+              "description": "The seat's Claude Code session id, from its hooks and its CLI.",
               "title": "X-Ashigaru-Session"
             }
           }
@@ -5870,7 +5870,7 @@
             }
           },
           {
-            "description": "The seat session's epoch, from a seat.",
+            "description": "The seat session's epoch, from a 5.0 seat.",
             "in": "header",
             "name": "X-Ashigaru-Epoch",
             "required": false,
@@ -5883,12 +5883,12 @@
                   "type": "null"
                 }
               ],
-              "description": "The seat session's epoch, from a seat.",
+              "description": "The seat session's epoch, from a 5.0 seat.",
               "title": "X-Ashigaru-Epoch"
             }
           },
           {
-            "description": "The seat's Claude Code session id, from its hooks.",
+            "description": "The seat's Claude Code session id, from its hooks and its CLI.",
             "in": "header",
             "name": "X-Ashigaru-Session",
             "required": false,
@@ -5901,7 +5901,7 @@
                   "type": "null"
                 }
               ],
-              "description": "The seat's Claude Code session id, from its hooks.",
+              "description": "The seat's Claude Code session id, from its hooks and its CLI.",
               "title": "X-Ashigaru-Session"
             }
           }
@@ -6032,7 +6032,7 @@
             }
           },
           {
-            "description": "The seat session's epoch, from a seat.",
+            "description": "The seat session's epoch, from a 5.0 seat.",
             "in": "header",
             "name": "X-Ashigaru-Epoch",
             "required": false,
@@ -6045,12 +6045,12 @@
                   "type": "null"
                 }
               ],
-              "description": "The seat session's epoch, from a seat.",
+              "description": "The seat session's epoch, from a 5.0 seat.",
               "title": "X-Ashigaru-Epoch"
             }
           },
           {
-            "description": "The seat's Claude Code session id, from its hooks.",
+            "description": "The seat's Claude Code session id, from its hooks and its CLI.",
             "in": "header",
             "name": "X-Ashigaru-Session",
             "required": false,
@@ -6063,7 +6063,7 @@
                   "type": "null"
                 }
               ],
-              "description": "The seat's Claude Code session id, from its hooks.",
+              "description": "The seat's Claude Code session id, from its hooks and its CLI.",
               "title": "X-Ashigaru-Session"
             }
           }
@@ -6281,7 +6281,7 @@
             }
           },
           {
-            "description": "The seat session's epoch, from a seat.",
+            "description": "The seat session's epoch, from a 5.0 seat.",
             "in": "header",
             "name": "X-Ashigaru-Epoch",
             "required": false,
@@ -6294,12 +6294,12 @@
                   "type": "null"
                 }
               ],
-              "description": "The seat session's epoch, from a seat.",
+              "description": "The seat session's epoch, from a 5.0 seat.",
               "title": "X-Ashigaru-Epoch"
             }
           },
           {
-            "description": "The seat's Claude Code session id, from its hooks.",
+            "description": "The seat's Claude Code session id, from its hooks and its CLI.",
             "in": "header",
             "name": "X-Ashigaru-Session",
             "required": false,
@@ -6312,7 +6312,7 @@
                   "type": "null"
                 }
               ],
-              "description": "The seat's Claude Code session id, from its hooks.",
+              "description": "The seat's Claude Code session id, from its hooks and its CLI.",
               "title": "X-Ashigaru-Session"
             }
           }
@@ -6443,7 +6443,7 @@
             }
           },
           {
-            "description": "The seat session's epoch, from a seat.",
+            "description": "The seat session's epoch, from a 5.0 seat.",
             "in": "header",
             "name": "X-Ashigaru-Epoch",
             "required": false,
@@ -6456,12 +6456,12 @@
                   "type": "null"
                 }
               ],
-              "description": "The seat session's epoch, from a seat.",
+              "description": "The seat session's epoch, from a 5.0 seat.",
               "title": "X-Ashigaru-Epoch"
             }
           },
           {
-            "description": "The seat's Claude Code session id, from its hooks.",
+            "description": "The seat's Claude Code session id, from its hooks and its CLI.",
             "in": "header",
             "name": "X-Ashigaru-Session",
             "required": false,
@@ -6474,7 +6474,7 @@
                   "type": "null"
                 }
               ],
-              "description": "The seat's Claude Code session id, from its hooks.",
+              "description": "The seat's Claude Code session id, from its hooks and its CLI.",
               "title": "X-Ashigaru-Session"
             }
           }
@@ -6605,7 +6605,7 @@
             }
           },
           {
-            "description": "The seat session's epoch, from a seat.",
+            "description": "The seat session's epoch, from a 5.0 seat.",
             "in": "header",
             "name": "X-Ashigaru-Epoch",
             "required": false,
@@ -6618,12 +6618,12 @@
                   "type": "null"
                 }
               ],
-              "description": "The seat session's epoch, from a seat.",
+              "description": "The seat session's epoch, from a 5.0 seat.",
               "title": "X-Ashigaru-Epoch"
             }
           },
           {
-            "description": "The seat's Claude Code session id, from its hooks.",
+            "description": "The seat's Claude Code session id, from its hooks and its CLI.",
             "in": "header",
             "name": "X-Ashigaru-Session",
             "required": false,
@@ -6636,7 +6636,7 @@
                   "type": "null"
                 }
               ],
-              "description": "The seat's Claude Code session id, from its hooks.",
+              "description": "The seat's Claude Code session id, from its hooks and its CLI.",
               "title": "X-Ashigaru-Session"
             }
           }
@@ -7141,7 +7141,7 @@
             }
           },
           {
-            "description": "The seat session's epoch, from a seat.",
+            "description": "The seat session's epoch, from a 5.0 seat.",
             "in": "header",
             "name": "X-Ashigaru-Epoch",
             "required": false,
@@ -7154,12 +7154,12 @@
                   "type": "null"
                 }
               ],
-              "description": "The seat session's epoch, from a seat.",
+              "description": "The seat session's epoch, from a 5.0 seat.",
               "title": "X-Ashigaru-Epoch"
             }
           },
           {
-            "description": "The seat's Claude Code session id, from its hooks.",
+            "description": "The seat's Claude Code session id, from its hooks and its CLI.",
             "in": "header",
             "name": "X-Ashigaru-Session",
             "required": false,
@@ -7172,7 +7172,7 @@
                   "type": "null"
                 }
               ],
-              "description": "The seat's Claude Code session id, from its hooks.",
+              "description": "The seat's Claude Code session id, from its hooks and its CLI.",
               "title": "X-Ashigaru-Session"
             }
           }
@@ -7347,7 +7347,7 @@
     },
     "/v1/seats/{name}/session": {
       "post": {
-        "description": "The seat's SessionStart hook. A new session (startup, clear) gets the next epoch, which every\nrequest of the session then sends as X-Ashigaru-Epoch, and ends the one before: Josui's item it\nwas working is blocked (cleared before its wrap), Scott's hold ends on a clear. A resume keeps\nthe epoch of the seat's current session while its lease is live; any other resume is 409\nstale-session, and the session must not act on what it remembers.",
+        "description": "The seat's SessionStart hook. A new session (startup, clear) becomes the seat's current one,\nwhich every later request names as X-Ashigaru-Session, at the next epoch, and ends the one\nbefore: Josui's item it was working is blocked (cleared before its wrap), Scott's hold ends on a\nclear, and the task is dropped for the new session's first typed prompt to set. A resume stays\nthe seat's current session while its lease is live; any other resume is 409 stale-session, and\nthe session must not act on what it remembers. The epoch answered is for 5.0 clients.",
         "operationId": "start_session_v1_seats__name__session_post",
         "parameters": [
           {
@@ -7466,7 +7466,7 @@
             }
           },
           {
-            "description": "The seat session's epoch, from a seat.",
+            "description": "The seat session's epoch, from a 5.0 seat.",
             "in": "header",
             "name": "X-Ashigaru-Epoch",
             "required": false,
@@ -7479,12 +7479,12 @@
                   "type": "null"
                 }
               ],
-              "description": "The seat session's epoch, from a seat.",
+              "description": "The seat session's epoch, from a 5.0 seat.",
               "title": "X-Ashigaru-Epoch"
             }
           },
           {
-            "description": "The seat's Claude Code session id, from its hooks.",
+            "description": "The seat's Claude Code session id, from its hooks and its CLI.",
             "in": "header",
             "name": "X-Ashigaru-Session",
             "required": false,
@@ -7497,7 +7497,7 @@
                   "type": "null"
                 }
               ],
-              "description": "The seat's Claude Code session id, from its hooks.",
+              "description": "The seat's Claude Code session id, from its hooks and its CLI.",
               "title": "X-Ashigaru-Session"
             }
           }

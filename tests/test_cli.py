@@ -847,30 +847,41 @@ def test_session_start(seat: FakeDesk, source: str, sent: list[Any]) -> None:
 SESSION = "/v1/seats/Max%201/session"
 
 
-def test_session_start_registers_the_session_and_keeps_the_epoch(seat: FakeDesk) -> None:
+def test_session_start_registers_the_session_and_keeps_nothing(seat: FakeDesk) -> None:
     seat.on("POST", SESSION, (200, {"epoch": 4, "seat": SEAT}))
     assert hook("session-start", {"session_id": "s1", "source": "clear"}) == 0
-    assert seat.calls("POST", SESSION)[0].body == {"session_id": "s1", "source": "clear"}
-    assert patches(seat) == [] and hooks.epoch_file().read_text() == "4\n"
-    assert not hooks.epoch_file().with_suffix(".tmp").exists()
+    (call,) = seat.calls("POST", SESSION)
+    assert call.body == {"session_id": "s1", "source": "clear"} and call.headers["X-Ashigaru-Session"] == "s1"
+    assert patches(seat) == []
     hook("stop", {})
-    assert seat.calls("PATCH", "/v1/seats/Max%201")[0].headers["X-Ashigaru-Epoch"] == "4"
+    assert "X-Ashigaru-Epoch" not in seat.calls("PATCH", "/v1/seats/Max%201")[0].headers
+    assert not (Path.home() / ".local").exists()
 
 
 @pytest.mark.parametrize("missing", [404, 405])
 def test_session_start_falls_back_to_the_patch_on_an_old_desk(seat: FakeDesk, missing: int) -> None:
-    hooks.epoch_file().parent.mkdir(parents=True)
-    hooks.epoch_file().write_text("3\n")
     seat.on("POST", SESSION, (missing, {"detail": "nope"}))
     assert hook("session-start", {"session_id": "s1", "source": "clear"}) == 0
-    assert patches(seat) == [{"turn": "idle", "task": None}] and not hooks.epoch_file().exists()
+    assert patches(seat) == [{"turn": "idle", "task": None}]
 
 
-def test_a_hook_names_its_session_and_the_cli_none(seat: FakeDesk) -> None:
+def test_a_hook_names_its_session_and_without_one_the_seats_env_session(
+    seat: FakeDesk, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    hook("stop", {"session_id": "s1"})
+    hook("stop", {})
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "env1")
+    hook("stop", {})
+    sent = [s.headers.get("X-Ashigaru-Session") for s in seat.calls("PATCH", "/v1/seats/Max%201")]
+    assert sent == ["s1", None, "env1"]
+
+
+def test_a_hooks_event_session_wins_over_the_env_session(
+    seat: FakeDesk, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "env1")
     hook("stop", {"session_id": "s1"})
     assert seat.calls("PATCH", "/v1/seats/Max%201")[0].headers["X-Ashigaru-Session"] == "s1"
-    hook("stop", {})
-    assert "X-Ashigaru-Session" not in seat.calls("PATCH", "/v1/seats/Max%201")[1].headers
 
 
 def test_session_start_does_not_register_a_compact(seat: FakeDesk) -> None:
@@ -882,16 +893,16 @@ def test_session_start_does_not_register_a_compact(seat: FakeDesk) -> None:
 def test_session_start_tells_the_model_a_resumed_session_is_stale(
     seat: FakeDesk, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    hooks.epoch_file().parent.mkdir(parents=True)
-    hooks.epoch_file().write_text("2\n")
     seat.on("POST", SESSION, (409, {"detail": "its lease lapsed", "code": "stale-session"}))
     assert hook("session-start", {"session_id": "s1", "source": "resume"}) == 0
     out = capsys.readouterr().out
     assert out.startswith("Ashigaru Desk: this session is stale: its lease lapsed.") and "/clear" in out
-    assert patches(seat) == [] and hooks.epoch_file().read_text() == "2\n"
+    assert patches(seat) == []
 
 
-def test_the_first_typed_prompt_is_the_task(seat: FakeDesk, capsys: pytest.CaptureFixture[str]) -> None:
+def test_every_typed_prompt_is_sent_as_the_task_and_the_desk_keeps_the_first(
+    seat: FakeDesk, capsys: pytest.CaptureFixture[str]
+) -> None:
     hook("prompt-submit", {"session_id": "s1", "prompt": "<cross-session-message from=x>do a1"})
     hook("prompt-submit", {"session_id": "s1", "prompt": "  fix the build\n"})
     hook("prompt-submit", {"session_id": "s1", "prompt": "and the docs"})
@@ -899,7 +910,7 @@ def test_the_first_typed_prompt_is_the_task(seat: FakeDesk, capsys: pytest.Captu
     assert patches(seat) == [
         {"turn": "active"},
         {"turn": "active", "task": "fix the build"},
-        {"turn": "active"},
+        {"turn": "active", "task": "and the docs"},
         {"turn": "active", "task": "x" * 120},
     ]
     assert capsys.readouterr().out == ""
@@ -952,7 +963,7 @@ def test_a_missing_transcript_leaves_a_typed_prompt_the_task(seat: FakeDesk, tmp
     assert patches(seat) == [{"turn": "active", "task": "go"}]
 
 
-def test_clear_lets_the_next_typed_prompt_be_the_task(seat: FakeDesk) -> None:
+def test_a_typed_prompt_after_a_clear_is_sent_as_the_task(seat: FakeDesk) -> None:
     hook("prompt-submit", {"session_id": "s1", "prompt": "first"})
     hook("session-start", {"session_id": "s1", "source": "clear"})
     hook("prompt-submit", {"session_id": "s1", "prompt": "second"})
@@ -1168,15 +1179,17 @@ def stale() -> tuple[int, Any]:
     return 409, {"detail": "the Desk ended it", "code": "stale-session"}
 
 
-def keep_epoch(number: int) -> None:
-    hooks.epoch_file().parent.mkdir(parents=True, exist_ok=True)
-    hooks.epoch_file().write_text(f"{number}\n")
+def took_over(by: str) -> tuple[int, Any]:
+    """The Desk's stale-session answer once `by` is the seat's session, worded as dispatch.fence does."""
+    return 409, {
+        "detail": f"seat 'Max 1' is in session {by} at epoch 8; this request has ended",
+        "code": "stale-session",
+    }
 
 
 def test_next_tells_the_model_its_session_was_ended(
     waking: FakeDesk, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    keep_epoch(7)
     waking.on("POST", NEXT, stale())
     assert hook("next", {}) == hooks.WAKE
     captured = capsys.readouterr()
@@ -1187,33 +1200,61 @@ def test_next_tells_the_model_its_session_was_ended(
 def test_next_stops_silently_when_a_newer_session_took_the_seat(
     waking: FakeDesk, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    keep_epoch(7)
-
-    def cleared(seen: Seen) -> tuple[int, Any]:
-        keep_epoch(8)
-        return stale()
-
-    waking.on("POST", NEXT, cleared)
-    assert hook("next", {}) == 0
+    waking.on("POST", NEXT, took_over("s2"))
+    assert hook("next", {"session_id": "s1"}) == 0
     captured = capsys.readouterr()
-    assert captured.out == "" and captured.err == ""
+    assert captured.out == "" and captured.err == "" and len(waking.calls("POST", NEXT)) == 1
 
 
-def test_every_request_carries_the_epoch_when_there_is_one(seat: FakeDesk) -> None:
-    hook("stop", {})
-    keep_epoch(7)
-    hook("stop", {})
-    hooks.epoch_file().write_text("junk\n")
-    hook("stop", {})
-    held = [s.headers.get("X-Ashigaru-Epoch") for s in seat.calls("PATCH", "/v1/seats/Max%201")]
-    assert held == [None, "7", None]
+@pytest.mark.parametrize("current", ["None", "s1"])
+def test_next_tells_the_model_when_the_desk_names_no_newer_session(
+    waking: FakeDesk, capsys: pytest.CaptureFixture[str], current: str
+) -> None:
+    """None: the Desk ended the session. s1: the seat's current session is this one, so nothing took over."""
+    waking.on("POST", NEXT, took_over(current))
+    assert hook("next", {"session_id": "s1"}) == hooks.WAKE
+    assert capsys.readouterr().err.startswith("Ashigaru Desk: this session is stale:")
 
 
-def test_the_cli_carries_the_epoch_too(desk: FakeDesk) -> None:
-    keep_epoch(3)
+def test_superseded_reads_the_session_the_desk_names() -> None:
+    assert hooks._superseded("seat 'Max 1' is in session s2 at epoch 8; x", "s1")
+    assert not hooks._superseded("seat 'Max 1' is in session s1 at epoch 8; x", "s1")
+    assert not hooks._superseded("seat 'Max 1' is in session None at epoch 8; x", "s1")
+    assert not hooks._superseded("the Desk ended it", "s1")
+
+
+def test_the_cli_names_the_session_it_runs_in_and_never_an_epoch(
+    desk: FakeDesk, monkeypatch: pytest.MonkeyPatch
+) -> None:
     desk.on("PATCH", "/v1/items/a1", (200, item()))
     assert main(["update", "a1", "--note", "x"]) == 0
-    assert desk.seen[0].headers["X-Ashigaru-Epoch"] == "3"
+    assert "X-Ashigaru-Session" not in desk.seen[0].headers
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "env1")
+    assert main(["update", "a1", "--note", "x"]) == 0
+    assert desk.seen[1].headers["X-Ashigaru-Session"] == "env1"
+    assert all("X-Ashigaru-Epoch" not in s.headers for s in desk.seen)
+
+
+def test_every_hook_and_the_cli_write_nothing_under_home(
+    waking: FakeDesk, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path / "run"))
+    waking.on("POST", SESSION, (200, {"epoch": 4, "seat": SEAT}))
+    waking.on("POST", NEXT, (200, {"brief": "Desk assignment a7"}))
+    waking.on("POST", "/v1/seats/Max%201/usage", (200, SEAT))
+    waking.on("GET", "/v1/seats", (200, []))
+    for source in ("startup", "clear", "resume"):
+        assert hook("session-start", {"session_id": "s1", "source": source}) == 0
+    assert hook("prompt-submit", {"session_id": "s1", "prompt": "fix it"}) == 0
+    assert hook("stop", {"session_id": "s1"}) == 0
+    assert hook("next", {"session_id": "s1"}) == hooks.WAKE
+    assert hook("statusline", statusline()) == 0
+    assert main(["agents"]) == 0
+    assert len(waking.seen) >= len(["session x3", "prompt", "stop", "next", "usage", "agents"])
+    assert list(home.rglob("*")) == []
 
 
 @pytest.mark.parametrize("passing", [500, 502, 503, 504, 429])

@@ -12,7 +12,7 @@ import pytest
 from conftest import Keys
 from fastapi.testclient import TestClient
 
-from ashigaru.desk import reconcile, store, subjects
+from ashigaru.desk import dispatch, reconcile, store, subjects
 
 JOSUI, MINE, OTHER, CI = "Josui Prime", "Exedore 1 - Max", "Exedore 2 - Max", "ci"
 
@@ -610,3 +610,134 @@ def test_review_3c_a_seat_with_an_epoch_refuses_a_request_without_one(client: Te
     )
     other = client.patch(f"/v1/seats/{OTHER}", headers=keys[OTHER], json={"turn": "idle"})
     assert other.status_code == OK, "a seat that never registered (4.x) still needs no epoch"
+
+
+# The seat's Claude Code session id alone fences its requests; the epoch is derived from the row.
+
+
+def only(keys: Keys, name: str, session_id: str) -> dict[str, str]:
+    return {**keys[name], "X-Ashigaru-Session": session_id}
+
+
+def refused(response: Any) -> bool:
+    return bool(response.status_code == CONFLICT and response.json()["code"] == "stale-session")
+
+
+def test_the_current_session_alone_is_accepted_without_an_epoch(client: TestClient, keys: Keys) -> None:
+    up(client, keys, MINE)
+    session(client, keys, MINE, "s1", "startup")
+    work = item(client, keys, lane="exedore-max")
+    assign(client, keys, work, seat=MINE)
+    sent = only(keys, MINE, "s1")
+    assert client.patch(f"/v1/seats/{MINE}", headers=sent, json={"turn": "idle"}).status_code == OK
+    assert client.patch(f"/v1/items/{work}", headers=sent, json={"note": "mine"}).status_code == OK
+    assert client.post(f"/v1/items/{work}/report", headers=sent, json={"verb": "WORKING"}).status_code == OK
+
+
+def test_another_session_alone_is_refused_and_changes_nothing(client: TestClient, keys: Keys) -> None:
+    up(client, keys, MINE)
+    session(client, keys, MINE, "s1", "startup")
+    work = item(client, keys, lane="exedore-max")
+    assign(client, keys, work, seat=MINE)
+    before, row = get(client, keys, work), seat_row(client, keys, MINE)
+    other = only(keys, MINE, "s0")
+    writes = [
+        client.patch(f"/v1/seats/{MINE}", headers=other, json={"turn": "active", "task": "x"}),
+        client.patch(f"/v1/items/{work}", headers=other, json={"note": "not mine"}),
+        client.post(f"/v1/items/{work}/report", headers=other, json={"verb": "DONE"}),
+    ]
+    assert all(refused(w) for w in writes)
+    assert get(client, keys, work) == before and seat_row(client, keys, MINE) == row
+
+
+def test_a_5_0_client_naming_the_epoch_is_held_to_it_with_or_without_a_session(
+    client: TestClient, keys: Keys
+) -> None:
+    up(client, keys, MINE)
+    old = session(client, keys, MINE, "s1", "startup").json()["epoch"]
+    now = session(client, keys, MINE, "s2", "startup").json()["epoch"]
+    path = f"/v1/seats/{MINE}"
+    for sent in (epoch(keys, MINE, now), headers(keys, MINE, now, "s2")):
+        assert client.patch(path, headers=sent, json={"turn": "idle"}).status_code == OK
+    for sent in (epoch(keys, MINE, old), headers(keys, MINE, old, "s2"), headers(keys, MINE, now, "s1")):
+        assert refused(client.patch(path, headers=sent, json={"turn": "idle"}))
+
+
+def test_a_request_naming_neither_is_refused_once_the_seat_registered_a_session(
+    client: TestClient, keys: Keys
+) -> None:
+    up(client, keys, MINE)
+    up(client, keys, OTHER)
+    assert client.patch(f"/v1/seats/{OTHER}", headers=keys[OTHER], json={"turn": "idle"}).status_code == OK
+    session(client, keys, MINE, "s1", "startup")
+    assert refused(client.patch(f"/v1/seats/{MINE}", headers=keys[MINE], json={"turn": "idle"}))
+    assert refused(client.post(f"/v1/seats/{MINE}/next?wait=0", headers=keys[MINE]))
+
+
+def test_an_ended_session_is_refused_by_its_id_and_does_not_revive_the_lease(
+    client: TestClient, keys: Keys, conn: sqlite3.Connection
+) -> None:
+    up(client, keys, MINE)
+    session(client, keys, MINE, "s1", "startup")
+    conn.execute("UPDATE seats SET lease_until = ? WHERE name = ?", (ago(minutes=1), MINE))
+    with store.transaction(conn):
+        dispatch.end_session(conn, MINE, "test", "lapsed")
+    row = seat_row(client, keys, MINE)
+    assert row["session_id"] is None and row["lease_until"] is None
+    old = only(keys, MINE, "s1")
+    assert refused(client.post(f"/v1/seats/{MINE}/next?wait=0", headers=old))
+    assert refused(client.patch(f"/v1/seats/{MINE}", headers=old, json={"turn": "idle"}))
+    client.get("/v1/items", headers=old)
+    after = seat_row(client, keys, MINE)
+    assert after["lease_until"] is None and after["session_id"] is None
+    assert session(client, keys, MINE, "s1", "resume").status_code == CONFLICT
+
+
+def test_an_item_taken_in_an_earlier_session_is_refused_to_the_current_one(
+    client: TestClient, keys: Keys, conn: sqlite3.Connection
+) -> None:
+    up(client, keys, MINE)
+    first = session(client, keys, MINE, "s1", "startup").json()["epoch"]
+    work = item(client, keys, lane="exedore-max")
+    assign(client, keys, work, seat=MINE)
+    assert get(client, keys, work)["epoch"] == first
+    # A new session takes the seat while the item stays on it: /clear would move it off, so arrange the row.
+    conn.execute("UPDATE seats SET epoch = ?, session_id = 's2' WHERE name = ?", (first + 1, MINE))
+    before = get(client, keys, work)
+    stale = client.patch(f"/v1/items/{work}", headers=only(keys, MINE, "s2"), json={"note": "x"})
+    assert refused(stale) and get(client, keys, work) == before
+    conn.execute("UPDATE items SET epoch = ? WHERE id = ?", (first + 1, work))
+    assert (
+        client.patch(f"/v1/items/{work}", headers=only(keys, MINE, "s2"), json={"note": "x"}).status_code
+        == OK
+    )
+
+
+def test_only_the_sessions_first_typed_prompt_sets_the_task(client: TestClient, keys: Keys) -> None:
+    up(client, keys, MINE)
+    session(client, keys, MINE, "s1", "startup")
+    sent, path = only(keys, MINE, "s1"), f"/v1/seats/{MINE}"
+    first = client.patch(path, headers=sent, json={"turn": "active", "task": "first"})
+    assert first.status_code == OK and first.json()["task"] == "first"
+    opened = client.get("/v1/items", headers=keys[JOSUI]).json()
+    second = client.patch(path, headers=sent, json={"turn": "active", "task": "second"})
+    assert second.status_code == OK and second.json()["task"] == "first"
+    assert client.get("/v1/items", headers=keys[JOSUI]).json() == opened
+    assert seat_row(client, keys, MINE)["item"] == first.json()["item"]
+    admin = client.patch(path, headers=keys[JOSUI], json={"task": "by Josui"})
+    assert admin.status_code == OK and admin.json()["task"] == "by Josui"
+
+
+@pytest.mark.parametrize("source", ["clear", "startup"])
+def test_a_new_session_drops_the_task_for_its_first_prompt_to_set(
+    client: TestClient, keys: Keys, source: str
+) -> None:
+    up(client, keys, MINE)
+    session(client, keys, MINE, "s1", "startup")
+    path = f"/v1/seats/{MINE}"
+    client.patch(path, headers=only(keys, MINE, "s1"), json={"turn": "active", "task": "first"})
+    assert seat_row(client, keys, MINE)["task"] == "first"
+    assert session(client, keys, MINE, "s2", source).status_code == OK
+    assert seat_row(client, keys, MINE)["task"] is None
+    again = client.patch(path, headers=only(keys, MINE, "s2"), json={"turn": "active", "task": "again"})
+    assert again.status_code == OK and again.json()["task"] == "again"

@@ -523,7 +523,7 @@ class SessionStart(BaseModel):
 
 
 class SessionStarted(BaseModel):
-    """The epoch the session sends as X-Ashigaru-Epoch from now on, and the seat as it stands."""
+    """The session's epoch, which a 5.0 client sends as X-Ashigaru-Epoch, and the seat as it stands."""
 
     epoch: int
     seat: "Seat"

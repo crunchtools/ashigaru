@@ -40,12 +40,14 @@ can return. A 409 or 412 body also carries a `code`: `stale-session`, `busy`,
 `held`, `unseen`, `no-lane`, `missing`, `derived`, `not-ready` (a wrap before
 CC-DONE or mid-turn) or `version`.
 
-A seat's requests carry `X-Ashigaru-Epoch`, the epoch its session registered,
-and its hooks `X-Ashigaru-Session`, their Claude Code session id. One that is
-not the seat's current epoch, or names another session, is 409 `stale-session`
-and changes nothing. A REST request without the epoch is accepted only from a
-seat that never registered a session (epoch 0, a 4.x client); MCP tool calls
-name neither and are not fenced.
+A seat's requests carry `X-Ashigaru-Session`, the Claude Code session id its
+hook was handed or its shell sees as `CLAUDE_CODE_SESSION_ID`. One that names
+another session than the seat's current one, or a session the Desk has ended,
+is 409 `stale-session` and changes nothing; the request is in that session's
+epoch. A 5.0 client sends `X-Ashigaru-Epoch`, the epoch its session registered,
+instead or as well, and is held to it. A REST request naming neither is
+accepted only from a seat that never registered a session (epoch 0, a 4.x
+client); MCP tool calls name neither and are not fenced.
 
 Writes to an item take `If-Match: <version>`, where `version` is the item's last
 event's seq. When the item has moved since, the write is 412 `version` and
@@ -119,7 +121,9 @@ back as a tool error carrying the same status and detail.
 ## Scott's hold
 
 The Desk infers it from a seat's own reports, so no seat can claim or drop one.
-A seat holding no item that reports `turn: active` with a `task` (its
+A seat's own `task` is set once a session: a seat that already has one
+reporting another is reporting only its turn, and `startup` and `clear` drop
+it. A seat holding no item that reports `turn: active` with a `task` (its
 session's first typed prompt) becomes busy, `owner: Scott`, holding a new
 `manual` item in `working` with that task and the seat's lane, unless an open
 `manual` item already names the seat (imported, or left `blocked`): it takes
@@ -153,7 +157,8 @@ nor does any request once the Desk has ended the seat's session; a seat's reads
 write the renewal at most once a minute. A seat is
 `missing` when its lease is not live: never picked or assigned, its session and
 work kept. Seat reconcile ends the session of a seat whose lease ran out
-`STALE_SEAT` (24 hours) ago (the epoch moves on and the lease clears): Josui's
+`STALE_SEAT` (24 hours) ago (the epoch moves on, and the session id and the
+lease clear): Josui's
 `assigned` and `working` items go back to `queued` with the note "seat lease
 lapsed: its session ended", other `auto` items leave the seat as they stand, and
 `wrapping` and `manual` items stay. It counts no silence from before the Desk

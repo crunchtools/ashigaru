@@ -6,6 +6,22 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+- The seat-side CLI keeps no local state (a837): `~/.local/state/ashigaru/epoch`
+  and `task-session` are gone, so a seat whose `~/.local` it cannot write (podman
+  makes it root's as the parent of a bind mount) no longer goes `missing`. Every
+  request names its Claude Code session as `X-Ashigaru-Session`, a hook's from
+  its event, the CLI's from `CLAUDE_CODE_SESSION_ID`, and the Desk fences on that
+  alone, taking the epoch from the seat's row; `X-Ashigaru-Epoch` from a 5.0
+  client is still honoured. The Desk keeps a seat's task from its session's
+  first typed prompt (startup now drops the last one's, as /clear did), and
+  `hook next` tells a newer session taking over from an ended one by the session
+  the stale-session answer names.
+
+### Fixed
+- A session the Desk ended after its lease lapsed is fenced out by its session
+  id too: ending it clears the seat's `session_id` as well as moving the epoch.
+
 ## [5.0.1] - 2026-11-20
 
 ### Fixed

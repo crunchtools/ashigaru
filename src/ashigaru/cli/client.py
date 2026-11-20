@@ -2,28 +2,16 @@
 config points."""
 
 import dataclasses
-from pathlib import Path
+import os
 from typing import Any
 
 import httpx
 
 from .config import Config
 
-EPOCH_HEADER = "X-Ashigaru-Epoch"
 SESSION_HEADER = "X-Ashigaru-Session"
-
-
-def epoch_file() -> Path:
-    """The epoch of the session the Desk registered for this seat, "N\n", beside the task marker."""
-    return Path.home() / ".local/state/ashigaru/epoch"
-
-
-def epoch() -> int | None:
-    """The epoch in epoch_file(), or None when it is missing or not an integer."""
-    try:
-        return int(epoch_file().read_text().strip())
-    except (OSError, ValueError):
-        return None
+# What Claude Code puts in the environment of a seat's shell commands: the session they run in.
+SESSION_ENV = "CLAUDE_CODE_SESSION_ID"
 
 
 class DeskError(Exception):
@@ -58,8 +46,10 @@ class Desk:
         transport: httpx.BaseTransport | None = None,
         session: str | None = None,
     ) -> None:
-        """`session` is the Claude Code session a hook runs for, sent on every request so the Desk
-        refuses another session's hooks on the seat; the CLI has none."""
+        """`session` is the Claude Code session a hook runs for, else the one the CLI runs in
+        (SESSION_ENV), sent on every request so the Desk refuses a session it has ended or another
+        session's on the seat. Outside a seat there is none, and nothing is sent."""
+        session = session or os.environ.get(SESSION_ENV) or None
         self._session = {SESSION_HEADER: session} if session else {}
         self._http = httpx.Client(
             base_url=config.url,
@@ -79,12 +69,10 @@ class Desk:
         send: Send | None = None,
     ) -> Any:
         """`send` says how: a timeout replacing the client's, for a long-poll, and headers added to the
-        request, such as If-Match. The seat's epoch, when epoch_file() holds one, and the hook's session
-        go on every request."""
+        request, such as If-Match. The session goes on every request."""
         timeout, headers = (send.timeout, send.headers) if send else (None, {})
         wait = httpx.USE_CLIENT_DEFAULT if timeout is None else httpx.Timeout(timeout)
-        held = epoch()
-        sent = ({EPOCH_HEADER: str(held)} if held is not None else {}) | self._session | (headers or {})
+        sent = self._session | (headers or {})
         try:
             response = self._http.request(method, path, params=params, json=body, timeout=wait, headers=sent)
         except httpx.TransportError as exc:
