@@ -165,6 +165,58 @@ def test_r4_a_lapsed_lease_ends_the_session_and_requeues_its_auto_work(
     assert resumed.status_code == CONFLICT and resumed.json()["code"] == "stale-session"
 
 
+def test_r4_a_resume_that_finds_its_own_lease_lapsed_ends_the_session(
+    client: TestClient, keys: Keys, conn: sqlite3.Connection
+) -> None:
+    up(client, keys, MINE)
+    first = session(client, keys, MINE, "s1", "startup").json()["epoch"]
+    work = item(client, keys, lane="exedore-max")
+    assign(client, keys, work, seat=MINE)
+    conn.execute("UPDATE seats SET lease_until = ? WHERE name = ?", (ago(minutes=1), MINE))
+    resumed = session(client, keys, MINE, "s1", "resume")
+    assert resumed.status_code == CONFLICT and resumed.json()["code"] == "stale-session"
+    assert seat_row(client, keys, MINE)["epoch"] == first + 1
+    assert (get(client, keys, work)["state"], get(client, keys, work)["seat"]) == ("queued", None)
+
+
+def test_r4_a_stale_usage_report_books_nothing_and_renews_nothing(
+    client: TestClient, keys: Keys, conn: sqlite3.Connection
+) -> None:
+    up(client, keys, MINE)
+    old = session(client, keys, MINE, "s1", "startup").json()["epoch"]
+    new = session(client, keys, MINE, "s2", "clear").json()["epoch"]
+    conn.execute("UPDATE seats SET lease_until = ? WHERE name = ?", (ago(minutes=1), MINE))
+    report = {"session_id": "s1", "cost_usd": 5.0}
+    stale = client.post(f"/v1/seats/{MINE}/usage", headers=epoch(keys, MINE, old), json=report)
+    assert stale.status_code == CONFLICT and stale.json()["code"] == "stale-session"
+    assert conn.execute("SELECT coalesce(sum(cost_usd), 0) FROM spend").fetchone()[0] == 0
+    assert seat_row(client, keys, MINE)["missing"] is True
+    report = {"session_id": "s2", "cost_usd": 1.0}
+    assert (
+        client.post(f"/v1/seats/{MINE}/usage", headers=epoch(keys, MINE, new), json=report).status_code == OK
+    )
+    assert seat_row(client, keys, MINE)["missing"] is False
+
+
+def test_r4_a_desk_just_up_lapses_and_hands_back_nothing_its_outage_silenced(
+    client: TestClient, keys: Keys, conn: sqlite3.Connection, db: Path
+) -> None:
+    up(client, keys, MINE)
+    switch_on(client, keys)
+    claimed = item(client, keys, lane="exedore-max")
+    client.post(f"/v1/seats/{MINE}/next?wait=0", headers=keys[MINE])
+    conn.execute("UPDATE seats SET lease_until = ?, turn = 'idle'", (ago(minutes=30),))
+    conn.execute("UPDATE items SET assigned_at = ? WHERE id = ?", (ago(minutes=30), claimed))
+    just_up = datetime.now(UTC) - timedelta(minutes=2)
+    assert reconcile.run(str(db), reconcile.Settings(), just_up) == {
+        "turns": 0, "tasks": 0, "silent": 0, "lapsed": 0, "unacked": 0
+    }  # fmt: skip
+    assert get(client, keys, claimed)["seat"] == MINE
+    long_up = datetime.now(UTC) - timedelta(minutes=11)
+    assert reconcile.run(str(db), reconcile.Settings(), long_up)["lapsed"] == 1
+    assert get(client, keys, claimed)["seat"] is None
+
+
 # R2 residue: the next hook stopped for good on a 409 that only meant "busy until the wrap".
 
 

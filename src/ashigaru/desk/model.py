@@ -324,8 +324,10 @@ class Problem(BaseModel):
     detail: str
     code: str | None = Field(
         None,
-        description="What a 409 or 412 is, for a client that acts on it: stale-session, busy, held, unseen, "
-        "no-lane, version.",
+        description="What a 409 or 412 is, for a client that acts on it: stale-session (the seat session "
+        "has ended), busy or held (the seat holds an item, or Scott does), unseen (never reported), no-lane, "
+        "missing (the seat's lease ran out), derived (a seat's occupancy follows its items), version (412: "
+        "the item moved since If-Match).",
     )
 
 
