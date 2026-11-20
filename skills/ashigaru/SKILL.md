@@ -77,11 +77,17 @@ free (`ashigaru assign a7 --seat "Dolza 1 - Max"`), never the reverse.
   `abandoned`. `wrap` is separate: `wrapping` once `/cc seat` is sent,
   `cleared` once the seat is. `after` lists the ids an item waits on.
 - **Seats** are `free`, `busy-auto` (Prime's item), `busy-manual` (Scott's
-  hold) or `missing` (never checked in, or silent for 24 hours), with an item,
-  a turn (`active` | `idle`) and a task. The Desk infers Scott's hold from the
+  hold) or `missing` (never checked in, or its lease lapsed: no request from the
+  seat for 10 minutes idle, 60 mid-turn; it keeps its work), with an item, a turn (`active` |
+  `idle`) and a task. A seat holds at most one open item, and its row follows
+  that item; nothing sets it by hand. The Desk infers Scott's hold from the
   seat's own hooks: his first typed prompt on a free seat opens a `manual`
   item, and his `/clear` closes it. A seat is **free** only when the Desk says
   so.
+- Every item has a `version`, shown in `ashigaru get`. Pass it back as
+  `--if-version N` on a write that must not clobber a change: if the item
+  moved, the Desk answers 412, prints the item as it now stands and exits 1;
+  read it again and decide.
 - `subject_key` is the Desk's dedup key: `owner/repo#N` for a GitHub issue or
   PR, `RT#N` for an RT ticket. The Desk normalises a URL to that form. A second
   item with the same key is refused, and the CLI prints the item holding it.
@@ -123,10 +129,15 @@ missing seat, the likely cause and fix:
 WORK, TIME, ACTIVE, whole TASK), one line of free and missing seats with `X of Y up,
 Z open`, then NEEDS YOU: manual seats idle with the question they last asked
 (`waiting_on`, from the seat's `stop` hook, dropped on a new turn or `/clear`),
-Scott's blocked manual work, his holds on seats silent for a day (`stale`: the
+Scott's blocked manual work, blocked items no seat holds (a seat was cleared
+before its wrap: its context is gone, so requeue or reassign the item), writers'
+PRs no item names (`unlinked`: link it with `ashigaru update a7 --pr owner/repo#N`),
+his holds on seats silent for a day (`stale`: the
 Desk never closes them; tell Scott), and subjects intake holds for approval. A
-seat whose `stop` hook never arrived is ended by the Desk itself after three
-hours of silence (`turn_reconciled_at`). Show it
+turn whose `stop` hook never arrived is ended by the Desk after three hours of
+silence (`turn_reconciled_at`); a seat silent past its lease (60 minutes
+mid-turn, 10 idle) is `missing`, never picked, but keeps its session and work;
+silent a day, its session is ended and Josui's work requeued. Show it
 for "show the board" or "what needs me"; `work` is the round that acts.
 
 ## `changes`
@@ -165,7 +176,7 @@ already queued it, `auto` in its lane when its author may write to the repo or
 is a trusted author (`ashigaru-crunchtools[bot]`), otherwise `held` (no lane, `manual`) until a maintainer adds a lane label. A bot that is not a trusted author (dependabot) is not queued when first seen; a Dependabot PR still open a day later is queued `auto` on exedore-max to land or close, and never listed as an outsider. Its
 title is the source's text, never a brief. **Reopened** lists subjects open
 again at the source whose item is closed: requeue the ones that need work with
-`ashigaru update a7 --state queued`.
+`ashigaru update a7 --state queued`, which frees any seat it held.
 The Desk closes seatless auto items whose subject merged or closed, and
 requeues ones it closed that reopen; it never closes a seat's or Scott's item,
 only marks it landed. A seat records its PR with
@@ -218,8 +229,10 @@ sweep that used to run here is `work`'s catch-up.
 token. It re-reads every open item's subject and PR, searches the org for
 issues and PRs updated since the `sweep-search` mark (queuing a member's or a
 trusted author's, held unless the author writes to that repo; anyone else's, other bots included, is only listed under NEEDS
-YOU as `outsider`, never stored: create it by hand if it is work), links a
-writer's PR that names `(a676)` as that item's `pr`, and settles everything. It
+YOU as `outsider`, never stored: create it by hand if it is work), and
+settles everything. A writer's PR links to the open item it names (an
+`Ashigaru-Item: a7` trailer, a branch `fix/a7-<slug>`, or `(a7)`) as that item's
+`pr`. The trailer is the one that always works: a sweep hit carries no branch. It
 runs at startup, every 10 minutes and on request, and never writes to GitHub.
 Prime no longer runs `gh search` or per-PR lookups. The board's last line shows
 `swept 4m ago (31 subjects, 2 new, 2 closed)`; when it shows an error, run
@@ -301,7 +314,7 @@ item's learnings memorized. A Learned of `none` records nothing.
    ```
    [a7] <objective in one sentence>
    Context: <what is known, what was ruled out, links/paths/ticket>
-   Scope: <repo and branch; files or areas in bounds>. Out of bounds: <what not to touch>.
+   Scope: <repo; files or areas in bounds>. Branch `fix/a7-<short-slug>` (or feat/, docs/, chore/, refactor/, test/) and end the PR body with `Ashigaru-Item: a7`. Out of bounds: <what not to touch>.
    Use: <tools, hosts, skills that fit>. Don't: <deploy / merge / message others / restart X> unless stated.
    Use: Fan out with Sonnet subagents (Agent tool, model sonnet) wherever the work splits; you stay the integrator: judgment, edits and final verification are yours.
    Done when: <the observable result, e.g. "PR open with CI green", "root cause named with evidence">.
@@ -385,13 +398,18 @@ Auto items only.
    EOF
    fi
    ```
-4. Close it with `ashigaru wrap a7`. The Desk refuses without CC-DONE or while
+4. Close it with `ashigaru wrap a7 --if-version 42`, the version from the row
+   you just read in `ashigaru get a7`. The Desk refuses without CC-DONE or while
    the turn is active, then clears the wrap, closes the item `done` and frees
    the seat. The seat's `next` hook, started by the clear, waits while the
    item is `wrapping` and claims its next work once this closes it. Seat text
    never goes on its command line: the Learned line
    already reached the Desk through `report`, so `--learned` stays unused.
-   Confirm with `agents` that the seat shows `free`.
+   Confirm with `agents` that the seat shows `free`. A seat cleared before its
+   wrap leaves its item `blocked` and seatless, under NEEDS YOU. A `missing` or
+   stale seat (silent a day, or a `stale-session` reply) must be `/clear`ed to
+   rejoin; its `assigned` and `working` items are already back in the queue. A
+   seat merely `missing` keeps its work: wake it rather than clearing it.
 
 ## `claim`
 

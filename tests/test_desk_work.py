@@ -7,7 +7,7 @@ from http.client import CREATED, FORBIDDEN, NOT_FOUND, OK, UNPROCESSABLE_ENTITY
 from typing import Any
 
 import pytest
-from conftest import Keys
+from conftest import Keys, up_seat
 from fastapi.testclient import TestClient
 
 from ashigaru.desk import dispatch, intake, store
@@ -89,10 +89,9 @@ def test_open_counts_open_rows_even_with_all(client: TestClient, keys: Keys) -> 
 def test_up_counts_the_seats_that_are_not_missing(
     client: TestClient, keys: Keys, conn: sqlite3.Connection
 ) -> None:
-    with store.transaction(conn):
-        store.write_seat(conn, SEAT, {"status": "free"})
-        store.write_seat(conn, "Old Seat", {"status": "free"})
-        conn.execute("UPDATE seats SET updated_at = ? WHERE name = 'Old Seat'", (LONG_AGO,))
+    up_seat(conn, SEAT)
+    up_seat(conn, "Old Seat")
+    conn.execute("UPDATE seats SET lease_until = ? WHERE name = 'Old Seat'", (LONG_AGO,))
     summary = work(client, keys)["summary"]
     rows = {row["name"]: row["missing"] for row in work(client, keys)["seats"]}
     assert rows[SEAT] is False and rows["Old Seat"] is True
@@ -296,10 +295,9 @@ def test_the_board_shows_busy_seats_in_full_and_free_ones_by_name(
     client: TestClient, keys: Keys, conn: sqlite3.Connection
 ) -> None:
     other = "Exedore 2 - Max"
-    with store.transaction(conn):
-        for name in (SEAT, other, "Dolza 1 - Max"):
-            store.write_seat(conn, name, {"status": "free", "lane": "exedore-max"})
-        conn.execute("UPDATE seats SET updated_at = ? WHERE name = 'Dolza 1 - Max'", (LONG_AGO,))
+    for name in (SEAT, other, "Dolza 1 - Max"):
+        up_seat(conn, name, lane="exedore-max")
+    conn.execute("UPDATE seats SET lease_until = ? WHERE name = 'Dolza 1 - Max'", (LONG_AGO,))
     task = "a task long enough that any table would have clipped it, " * 3
     work_id = create(client, keys, task=task, done_when="PR open")["id"]
     assigned = client.post(f"/v1/items/{work_id}/assign", headers=keys[JOSUI], json={"seat": other})
@@ -321,12 +319,13 @@ def test_the_board_shows_busy_seats_in_full_and_free_ones_by_name(
 def test_needs_you_lists_a_waiting_manual_seat_then_blocked_manual_work_then_held_subjects(
     client: TestClient, keys: Keys, conn: sqlite3.Connection
 ) -> None:
-    with store.transaction(conn):
-        store.write_seat(conn, SEAT, {"status": "free", "lane": "exedore-max"})
+    other = "Exedore 2 - Max"
+    up_seat(conn, SEAT, lane="exedore-max")
+    up_seat(conn, other, lane="exedore-max")
     held = seen(conn, 7, ago(minutes=5))
     seen(conn, 8, ago(minutes=5), author_writes=True, lane_hint="vertex")
     blocked = create(client, keys, mode="manual", state="blocked", blocked_reason="which deck?")["id"]
-    create(client, keys, state="blocked", blocked_reason="Josui's, not Scott's")
+    create(client, keys, state="blocked", seat=other, blocked_reason="Josui's, not Scott's")
     path = f"/v1/seats/{SEAT}"
     assert (
         client.patch(path, headers=keys[SEAT], json={"turn": "active", "task": "OLF deck"}).status_code == OK
@@ -379,3 +378,8 @@ def test_only_an_admin_and_the_seat_itself_read_what_it_is_waiting_on(
     shown = ["Keep slide 4?", "Keep slide 4?", "Keep slide 4?", ["Keep slide 4?"]]
     assert read(JOSUI) == shown and read(SEAT) == shown
     assert read("Exedore 2 - Max") == read("ci") == [None, None, None, []]
+
+
+def test_needs_you_lists_blocked_work_no_seat_holds(client: TestClient, keys: Keys) -> None:
+    orphan = create(client, keys, state="blocked", blocked_reason="cleared before its wrap")["id"]
+    assert [(need["why"], need["work"]) for need in board(client, keys)["needs_you"]] == [("blocked", orphan)]

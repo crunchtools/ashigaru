@@ -46,7 +46,7 @@ def test_a_silent_turn_past_the_limit_ends_without_touching_updated_at(
 ) -> None:
     seat(conn, "dead", ago(minutes=30), turn="active")
     conn.execute("UPDATE seats SET turn_started_at = ? WHERE name = 'dead'", (ago(hours=4),))
-    assert reconciling(db) == {"turns": 1, "tasks": 0, "silent": 0}
+    assert reconciling(db) == {"turns": 1, "tasks": 0, "silent": 0, "lapsed": 0, "unacked": 0}
     found = row(conn, "dead")
     assert found["turn"] == "idle" and found["turn_reconciled_at"]
     assert found["updated_at"] == ago(minutes=30), "a dead seat still goes missing on time"
@@ -85,7 +85,7 @@ def test_a_day_idle_drops_an_unheld_seats_task_and_keeps_a_hold(conn: sqlite3.Co
     seat(conn, "idle", ago(hours=25), task="old first prompt", waiting_on="anything else?")
     seat(conn, "held", ago(hours=25), task="Scott's work", owner=store.MANUAL_OWNER, status="busy")
     seat(conn, "recent", ago(hours=1), task="today's first prompt")
-    assert reconciling(db) == {"turns": 0, "tasks": 1, "silent": 1}
+    assert reconciling(db) == {"turns": 0, "tasks": 1, "silent": 1, "lapsed": 0, "unacked": 0}
     assert (row(conn, "idle")["task"], row(conn, "idle")["waiting_on"]) == (None, None)
     assert row(conn, "held")["task"] == "Scott's work"
     assert row(conn, "recent")["task"] == "today's first prompt"

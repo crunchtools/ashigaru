@@ -9,7 +9,9 @@ an item recorded but not assigned) still prints that item.
 import argparse
 import json
 import sys
+from http import HTTPStatus
 from typing import Any
+from urllib.parse import quote
 
 from .. import __version__
 from . import commands, hooks, render
@@ -64,6 +66,16 @@ CLEARABLE = (
     "kind", "parent", "subject_key", "done_when", "ref", "repo", "lane", "note", "filed_by", "result",
     "next", "learned", "blocked_reason", "check_after", "verified_by", "wrap", "after", "pr",
 )  # fmt: skip
+
+
+def _if_version(command: argparse.ArgumentParser) -> None:
+    command.add_argument(
+        "--if-version",
+        dest="if_version",
+        type=int,
+        metavar="N",
+        help="only if the item is still at version N",
+    )
 
 
 def _fields(command: argparse.ArgumentParser, options: tuple[tuple[str, str | None], ...]) -> None:
@@ -249,6 +261,8 @@ def parser() -> argparse.ArgumentParser:
     wrap.add_argument("--force", action="store_true", help="skip the idle and CC-DONE checks")
 
     _seat_commands(sub, common)
+    for name in ("update", "report", "assign", "wrap", "claim", "file"):
+        _if_version(sub.choices[name])
 
     mcp = sub.add_parser("mcp", help="hosted MCP URLs: mint, list, revoke")
     action = mcp.add_subparsers(dest="action", required=True, metavar="action")
@@ -296,6 +310,13 @@ def execute(args: argparse.Namespace, desk: Desk) -> int:
     except commands.Refused as exc:
         _show(args, "get", exc.item)
         raise
+    except DeskError as exc:
+        if exc.status != HTTPStatus.PRECONDITION_FAILED or not getattr(args, "item", None):
+            raise
+        # The item moved since the version the caller read: say so, then show it as it stands.
+        print(f"ashigaru: {exc}", file=sys.stderr)
+        _show(args, "get", desk.get(f"/v1/items/{quote(args.item, safe='')}"))
+        return 1
     _show(args, command, result)
     if command == "work" and isinstance(result, dict) and result.get("board"):
         commands.seen(desk, result, render.CHANGED_SHOWN)

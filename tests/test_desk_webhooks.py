@@ -30,7 +30,7 @@ from fastapi.testclient import TestClient
 
 import common
 from ashigaru.desk import __main__ as desk_main
-from ashigaru.desk import ci, intake, store, webhooks
+from ashigaru.desk import ci, dispatch, intake, store, webhooks
 from ashigaru.desk.api import create_app
 from ashigaru.desk.forges import FORGES, CIUpdate, github
 from ashigaru.desk.model import Verdict
@@ -1222,3 +1222,254 @@ def test_the_apps_pr_is_queued_once_the_desk_lists_its_bot(
     assert pr_item(conn) == {}
     deliver(trusting_the_bot, "pull_request", bot_pr("edited"), "d-2")
     assert (pr_item(conn)["mode"], pr_item(conn)["extra"]["trusted"]) == ("auto", True)
+
+
+SEAT = "Exedore 1 - Max"
+PR_KEY = f"{REPO}#191"
+
+
+def seated(conn: sqlite3.Connection, **fields: Any) -> str:
+    """An open item a seat holds in REPO, with no PR yet."""
+    row = {"task": "work", "repo": REPO, "seat": SEAT, "state": "working", "mode": "manual", **fields}
+    with store.transaction(conn):
+        return store.insert_item(conn, row, "test")
+
+
+def seat_pr(
+    action: str = "opened", by: str = "fatherlinux", body: str = "", ref: str = "main", **fields: Any
+) -> dict[str, Any]:
+    """The writer's PR #191 with `body` and a head branch `ref`, as delivered for `action` by `by`."""
+    pull = {"user": {"login": by}, "head": {"sha": FORK_HEAD, "ref": ref}, "body": body, **fields}
+    return {**payload("pull_request", **pull), "action": action, "sender": {"login": by}}
+
+
+def all_items(conn: sqlite3.Connection) -> list[str]:
+    return sorted(row["id"] for row in store.list_items(conn))
+
+
+@pytest.mark.parametrize(
+    "fields",
+    [
+        {"body": "Fixes it.\n\nAshigaru-Item: {id}\n"},
+        {"body": "ashigaru-item:   {id}"},
+        {"ref": "{id}/fix-thing"},
+        {"ref": "{id}-fix-thing"},
+        {"ref": "fix/{id}-thing"},
+        {"ref": "docs/{id}/thing"},
+        {"title": "fix the thing ({id})"},
+        {"body": "closes ({id})"},
+    ],
+)
+def test_a_seats_pr_becomes_the_pr_of_the_item_it_names(
+    trusting: TestClient, conn: sqlite3.Connection, fields: dict[str, str]
+) -> None:
+    work = seated(conn)
+    filled = {key: value.format(id=work) for key, value in fields.items()}
+    deliver(trusting, "pull_request", seat_pr(**filled))
+    assert all_items(conn) == [work]
+    assert (store.get_item(conn, work) or {})["pr"] == PR_KEY
+
+
+def test_a_trailer_beats_a_branch_and_a_title(trusting: TestClient, conn: sqlite3.Connection) -> None:
+    other, work, third = seated(conn, seat=None), seated(conn, seat=None), seated(conn, seat=None)
+    mentioned = seat_pr(body=f"Ashigaru-Item: {work}", ref=f"{other}/x", title=f"t ({third})")
+    deliver(trusting, "pull_request", mentioned)
+    assert sorted((found["id"], found["pr"]) for found in store.list_items(conn)) == [
+        (other, None),
+        (work, PR_KEY),
+        (third, None),
+    ]
+
+
+def test_a_pr_an_item_already_names_makes_no_second_item(
+    trusting: TestClient, conn: sqlite3.Connection
+) -> None:
+    work = seated(conn, pr=PR_KEY)
+    deliver(trusting, "pull_request", seat_pr(), "d-1")
+    deliver(trusting, "pull_request", {**seat_pr("synchronize"), "before": FORK_HEAD}, "d-2")
+    assert all_items(conn) == [work]
+    assert store.item_by_subject(conn, PR_KEY) is None
+
+
+def test_a_closed_items_pr_makes_no_second_item(trusting: TestClient, conn: sqlite3.Connection) -> None:
+    work = seated(conn, pr=PR_KEY, seat=None, state="done")
+    deliver(trusting, "pull_request", seat_pr("reopened"))
+    assert all_items(conn) == [work]
+
+
+def test_a_trailer_naming_an_item_in_another_repo_links_nothing(
+    trusting: TestClient, conn: sqlite3.Connection
+) -> None:
+    elsewhere = seated(conn, repo="crunchtools/y", seat=None)
+    deliver(trusting, "pull_request", seat_pr(body=f"Ashigaru-Item: {elsewhere}"))
+    assert (store.get_item(conn, elsewhere) or {})["pr"] is None
+    assert (pr_item(conn)["mode"], pr_item(conn)["extra"]["trusted"]) == ("auto", True)
+
+
+@pytest.mark.parametrize("fields", [{"state": "done"}, {"pr": "crunchtools/ashigaru#7"}])
+def test_a_trailer_naming_a_closed_or_prd_item_links_nothing(
+    trusting: TestClient, conn: sqlite3.Connection, fields: dict[str, Any]
+) -> None:
+    work = seated(conn, seat=None, **fields)
+    deliver(trusting, "pull_request", seat_pr(body=f"Ashigaru-Item: {work}"))
+    assert (store.get_item(conn, work) or {})["pr"] == fields.get("pr")
+    assert pr_item(conn)["extra"]["trusted"] is True
+
+
+def test_a_strangers_pr_with_a_trailer_is_not_linked(trusting: TestClient, conn: sqlite3.Connection) -> None:
+    work = seated(conn)
+    deliver(trusting, "pull_request", seat_pr(by="stranger", body=f"Ashigaru-Item: {work} ({work})"))
+    assert (store.get_item(conn, work) or {})["pr"] is None
+    assert (pr_item(conn)["mode"], pr_item(conn)["extra"]["trusted"]) == ("manual", False)
+
+
+def test_a_writers_unlinked_pr_while_a_seat_works_the_repo_waits_for_josui(
+    trusting: TestClient, conn: sqlite3.Connection
+) -> None:
+    work = seated(conn)
+    deliver(trusting, "pull_request", seat_pr(title="fix: the thing"))
+    assert all_items(conn) == [work] and pr_item(conn) == {}
+    listed = intake.unlinked(conn)
+    assert [(row["subject_key"], row["repo"], row["author"], row["title"]) for row in listed] == [
+        (PR_KEY, REPO, "fatherlinux", "fix: the thing")
+    ]
+    assert listed[0]["since"]
+    deliver(trusting, "pull_request", seat_pr("edited", title="fix: again"), "d-2")
+    assert len(intake.unlinked(conn)) == 1 and all_items(conn) == [work]
+    with store.transaction(conn):
+        store.update_item(conn, work, {"pr": PR_KEY}, "test")
+    assert intake.unlinked(conn) == []
+
+
+def test_the_apps_own_pr_is_queued_while_a_seat_works_the_repo(
+    trusting_the_bot: TestClient, conn: sqlite3.Connection
+) -> None:
+    """The unlinked hold is for a seat's PR, pushed as a writer; the app's bot opens its own fixes."""
+    work = seated(conn)
+    deliver(trusting_the_bot, "pull_request", seat_pr(by=BOT, ref="ashigaru/fix-190"))
+    assert all_items(conn) != [work] and pr_item(conn)["extra"]["trusted"] is True
+    assert intake.unlinked(conn) == []
+
+
+def test_unlinked_lists_at_most_the_limit_oldest_first(conn: sqlite3.Connection) -> None:
+    for number, at in ((3, "2026-01-03T00:00:00Z"), (1, "2026-01-01T00:00:00Z"), (2, "2026-01-02T00:00:00Z")):
+        conn.execute(
+            "INSERT INTO subjects (subject_key, repo, kind, state, source, seen_at, unlinked_at)"
+            " VALUES (?, ?, 'story', 'open', 'webhook', ?, ?)",
+            (f"{REPO}#{number}", REPO, at, at),
+        )
+    assert [row["subject_key"] for row in intake.unlinked(conn, 2)] == [f"{REPO}#1", f"{REPO}#2"]
+    assert [row["subject_key"] for row in intake.unlinked(conn)][2:] == [f"{REPO}#3"]
+
+
+def test_a_merged_unlinked_pr_is_not_listed(trusting: TestClient, conn: sqlite3.Connection) -> None:
+    seated(conn)
+    deliver(trusting, "pull_request", seat_pr())
+    deliver(trusting, "pull_request", seat_pr("closed", state="closed", merged=True), "d-2")
+    assert intake.unlinked(conn) == []
+
+
+def test_a_writers_pr_with_no_seat_working_its_repo_is_queued(
+    trusting: TestClient, conn: sqlite3.Connection
+) -> None:
+    seated(conn, seat=None, state="queued", mode="auto")
+    seated(conn, repo="crunchtools/y", seat="Exedore 2 - Max")
+    deliver(trusting, "pull_request", seat_pr())
+    assert (pr_item(conn)["mode"], pr_item(conn)["extra"]["trusted"]) == ("auto", True)
+    assert intake.unlinked(conn) == []
+
+
+def test_a_seat_with_a_pr_already_does_not_hold_a_writers_next_pr(
+    trusting: TestClient, conn: sqlite3.Connection
+) -> None:
+    seated(conn, pr="crunchtools/ashigaru#7")
+    deliver(trusting, "pull_request", seat_pr())
+    assert pr_item(conn)["extra"]["trusted"] is True
+
+
+JUDGING = webhooks._judged
+
+
+def land(db: Path, event: str, body: dict[str, Any], delivery: str) -> None:
+    """Judge and apply one delivery as the handler does, without going through HTTP."""
+    raw = json.dumps(body).encode()
+    adapter = FORGES["github"]
+    headers = {name.lower(): value for name, value in signed(event, raw, delivery).items()}
+    parsed = adapter.parse(headers, raw)
+    digest = webhooks.digest(adapter.name, parsed.event, raw)
+    judged = JUDGING(str(db), adapter, webhooks.Access("token"), digest, parsed)
+    webhooks._apply(str(db), adapter.name, digest, judged)
+
+
+def approval() -> dict[str, Any]:
+    return {**outsider("labeled", by="maintainer"), "label": {"name": "lane:vertex"}}
+
+
+def test_an_approval_judged_before_the_first_delivery_landed_is_judged_again(
+    trusting: TestClient, conn: sqlite3.Connection, db: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    judging = JUDGING
+    raced: list[bool] = []
+
+    def racing(*args: Any) -> Any:
+        judged = judging(*args)
+        if not raced:
+            raced.append(True)
+            land(db, "issues", outsider(), "d-1")
+        return judged
+
+    monkeypatch.setattr(webhooks, "_judged", racing)
+    assert deliver(trusting, "issues", approval(), "d-2").status_code == OK
+    item = store.item_by_subject(conn, f"{REPO}#190") or {}
+    assert (item["lane"], item["mode"], item["extra"]["trusted"]) == ("vertex", "auto", True)
+    assert item["extra"]["approved_by"] == "maintainer"
+
+
+def test_a_row_that_moves_under_every_judging_falls_back_to_stripping_the_grant(
+    trusting: TestClient, conn: sqlite3.Connection, db: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    judging = JUDGING
+    rounds: list[int] = []
+
+    def racing(*args: Any) -> Any:
+        judged = judging(*args)
+        rounds.append(1)
+        if len(rounds) == 1:
+            land(db, "issues", outsider(), "d-1")
+        else:
+            with store.transaction(conn):
+                store.update_item(conn, "a1", {"note": f"moved {len(rounds)}"}, "test")
+        return judged
+
+    monkeypatch.setattr(webhooks, "_judged", racing)
+    assert deliver(trusting, "issues", approval(), "d-2").status_code == OK
+    assert len(rounds) == webhooks.RETRIES + 1
+    assert "approved_by" not in held_item(conn)["extra"]
+    assert deliver(trusting, "issues", approval(), "d-2").json()["duplicate"] is True
+
+
+def test_an_older_delivery_arriving_late_does_not_reopen_the_item(
+    trusting: TestClient, conn: sqlite3.Connection
+) -> None:
+    def issue(action: str, state: str, at: str) -> dict[str, Any]:
+        return {**payload("issues", state=state, updated_at=at), "action": action}
+
+    deliver(trusting, "issues", issue("opened", "open", "2026-11-19T10:00:00Z"), "d-1")
+    deliver(trusting, "issues", issue("closed", "closed", "2026-11-19T10:10:00Z"), "d-2")
+    deliver(trusting, "issues", issue("edited", "open", "2026-11-19T10:05:00Z") | {"changes": {}}, "d-3")
+    found = store.item_by_subject(conn, f"{REPO}#190") or {}
+    assert found["state"] == "done" and found["extra"]["source_state"] == "closed"
+    assert found["extra"]["source_updated_at"] == "2026-11-19T10:10:00Z"
+    rows, _, _ = dispatch.window(conn, dispatch.CAUGHT, 0)
+    assert [row["event_seq"] == row["first_seq"] for row in rows] == [True]
+
+
+def test_a_later_delivery_still_moves_the_sources_title_and_state(
+    trusting: TestClient, conn: sqlite3.Connection
+) -> None:
+    deliver(trusting, "issues", payload("issues", updated_at="2026-11-19T10:00:00Z"), "d-1")
+    later = {**payload("issues", title="Renamed", updated_at="2026-11-19T10:05:00Z"), "action": "edited"}
+    deliver(trusting, "issues", later, "d-2")
+    deliver(trusting, "issues", later | {"action": "assigned"}, "d-3")
+    extra = (store.item_by_subject(conn, f"{REPO}#190") or {})["extra"]
+    assert (extra["title"], extra["source_updated_at"]) == ("Renamed", "2026-11-19T10:05:00Z")

@@ -1177,6 +1177,18 @@
             ],
             "title": "Done When"
           },
+          "epoch": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The epoch of the seat session that took it; null before 5.0.",
+            "title": "Epoch"
+          },
           "expires_at": {
             "anyOf": [
               {
@@ -1412,6 +1424,12 @@
               }
             ],
             "title": "Verified By"
+          },
+          "version": {
+            "default": 0,
+            "description": "Its last event's seq. Sent back as If-Match, a write answers 412 once the item moved.",
+            "title": "Version",
+            "type": "integer"
           },
           "wrap": {
             "anyOf": [
@@ -2327,7 +2345,7 @@
         "type": "string"
       },
       "NeedsYou": {
-        "description": "Something only Scott can move: his blocked work, a subject held for approval, a manual seat\nidle on a question, a hold of his on a seat silent for a day, a busy seat gone silent (`silent`),\nor an outsider's subject the sweep found and did not store.",
+        "description": "Something only Scott can move: his blocked work, a subject held for approval, a manual seat\nidle on a question, a hold of his on a seat silent for a day, a busy seat gone silent (`silent`),\nan outsider's subject the sweep found and did not store, or a writer's PR intake did not queue\nbecause it names no item while a seat works in its repo (`unlinked`: link it with `update --pr`).",
         "properties": {
           "check_after": {
             "anyOf": [
@@ -2463,7 +2481,8 @@
               "waiting",
               "outsider",
               "stale",
-              "silent"
+              "silent",
+              "unlinked"
             ],
             "title": "Why",
             "type": "string"
@@ -2602,6 +2621,18 @@
       "Problem": {
         "description": "Every 4xx body.",
         "properties": {
+          "code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What a 409 or 412 is, for a client that acts on it: stale-session (the seat session has ended), busy or held (the seat holds an item, or Scott does), unseen (never reported), no-lane, missing (the seat's lease ran out), derived (a seat's occupancy follows its items), not-ready (a wrap before CC-DONE or mid-turn), version (412: the item moved since If-Match).",
+            "title": "Code"
+          },
           "detail": {
             "title": "Detail",
             "type": "string"
@@ -2723,6 +2754,18 @@
               }
             ],
             "title": "Done When"
+          },
+          "epoch": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The epoch of the seat session that took it; null before 5.0.",
+            "title": "Epoch"
           },
           "expires_at": {
             "anyOf": [
@@ -2960,6 +3003,12 @@
             ],
             "title": "Verified By"
           },
+          "version": {
+            "default": 0,
+            "description": "Its last event's seq. Sent back as If-Match, a write answers 412 once the item moved.",
+            "title": "Version",
+            "type": "integer"
+          },
           "waits_on": {
             "description": "Each `after` item and its state.",
             "items": {
@@ -3125,6 +3174,12 @@
             ],
             "title": "Context Window"
           },
+          "epoch": {
+            "default": 0,
+            "description": "The current session's epoch; a write with another is refused.",
+            "title": "Epoch",
+            "type": "integer"
+          },
           "hold": {
             "description": "free, busy-auto (Josui's item) or busy-manual (Scott's hold).",
             "enum": [
@@ -3157,6 +3212,18 @@
                 "type": "null"
               }
             ]
+          },
+          "lease_until": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Until when the seat counts as up without another request.",
+            "title": "Lease Until"
           },
           "missing": {
             "default": false,
@@ -3528,6 +3595,50 @@
           "turn_seconds"
         ],
         "title": "SeatUsage",
+        "type": "object"
+      },
+      "SessionStart": {
+        "additionalProperties": false,
+        "description": "POST /v1/seats/{name}/session: the seat's SessionStart hook registering its Claude Code session.",
+        "properties": {
+          "session_id": {
+            "minLength": 1,
+            "title": "Session Id",
+            "type": "string"
+          },
+          "source": {
+            "enum": [
+              "startup",
+              "resume",
+              "clear"
+            ],
+            "title": "Source",
+            "type": "string"
+          }
+        },
+        "required": [
+          "session_id",
+          "source"
+        ],
+        "title": "SessionStart",
+        "type": "object"
+      },
+      "SessionStarted": {
+        "description": "The epoch the session sends as X-Ashigaru-Epoch from now on, and the seat as it stands.",
+        "properties": {
+          "epoch": {
+            "title": "Epoch",
+            "type": "integer"
+          },
+          "seat": {
+            "$ref": "#/components/schemas/Seat"
+          }
+        },
+        "required": [
+          "epoch",
+          "seat"
+        ],
+        "title": "SessionStarted",
         "type": "object"
       },
       "Spend": {
@@ -4659,7 +4770,7 @@
                 }
               }
             },
-            "description": "A taken id or subject_key (the detail names the item holding it), an existing identity, a second child in one assignment, or an item or seat not in a state to assign, claim or wrap."
+            "description": "A taken id or subject_key (the detail names the item holding it), an existing identity, a second child in one assignment, a seat that holds another open item, a seat session the Desk has ended (`code` stale-session), or an item or seat not in a state to assign, claim or wrap."
           },
           "422": {
             "content": {
@@ -5072,7 +5183,7 @@
                 }
               }
             },
-            "description": "A taken id or subject_key (the detail names the item holding it), an existing identity, a second child in one assignment, or an item or seat not in a state to assign, claim or wrap."
+            "description": "A taken id or subject_key (the detail names the item holding it), an existing identity, a second child in one assignment, a seat that holds another open item, a seat session the Desk has ended (`code` stale-session), or an item or seat not in a state to assign, claim or wrap."
           },
           "422": {
             "content": {
@@ -5475,7 +5586,7 @@
                 }
               }
             },
-            "description": "A taken id or subject_key (the detail names the item holding it), an existing identity, a second child in one assignment, or an item or seat not in a state to assign, claim or wrap."
+            "description": "A taken id or subject_key (the detail names the item holding it), an existing identity, a second child in one assignment, a seat that holds another open item, a seat session the Desk has ended (`code` stale-session), or an item or seat not in a state to assign, claim or wrap."
           },
           "422": {
             "content": {
@@ -5566,6 +5677,7 @@
         ]
       },
       "patch": {
+        "description": "Only the fields sent change. A seat change takes the new seat and frees the old; a move to\nqueued or proposed frees the seat.",
         "operationId": "patch_item_v1_items__item_id__patch",
         "parameters": [
           {
@@ -5575,6 +5687,60 @@
             "schema": {
               "title": "Item Id",
               "type": "string"
+            }
+          },
+          {
+            "description": "The item's `version` the write was decided on.",
+            "in": "header",
+            "name": "if-match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The item's `version` the write was decided on.",
+              "title": "If-Match"
+            }
+          },
+          {
+            "description": "The seat session's epoch, from a seat.",
+            "in": "header",
+            "name": "X-Ashigaru-Epoch",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The seat session's epoch, from a seat.",
+              "title": "X-Ashigaru-Epoch"
+            }
+          },
+          {
+            "description": "The seat's Claude Code session id, from its hooks.",
+            "in": "header",
+            "name": "X-Ashigaru-Session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The seat's Claude Code session id, from its hooks.",
+              "title": "X-Ashigaru-Session"
             }
           }
         ],
@@ -5637,7 +5803,17 @@
                 }
               }
             },
-            "description": "A taken id or subject_key (the detail names the item holding it), an existing identity, a second child in one assignment, or an item or seat not in a state to assign, claim or wrap."
+            "description": "A taken id or subject_key (the detail names the item holding it), an existing identity, a second child in one assignment, a seat that holds another open item, a seat session the Desk has ended (`code` stale-session), or an item or seat not in a state to assign, claim or wrap."
+          },
+          "412": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The item moved since the version named in If-Match (`code` version): read it again."
           },
           "422": {
             "content": {
@@ -5663,7 +5839,7 @@
     },
     "/v1/items/{item_id}/assign": {
       "post": {
-        "description": "Admin: give an open item whose `after` items are all done to a seat. With no seat named, picks\nthe seat in the lane that has been free longest and is not held by Scott; 409 when none is.",
+        "description": "Admin: give an open item whose `after` items are all done to a seat, in the seat's current\nsession. With no seat named, picks the seat in the lane that has been free longest, is idle and\nup (its lease live) and is not held by Scott; 409 when none is, or the seat named is missing.",
         "operationId": "assign_v1_items__item_id__assign_post",
         "parameters": [
           {
@@ -5673,6 +5849,60 @@
             "schema": {
               "title": "Item Id",
               "type": "string"
+            }
+          },
+          {
+            "description": "The item's `version` the write was decided on.",
+            "in": "header",
+            "name": "if-match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The item's `version` the write was decided on.",
+              "title": "If-Match"
+            }
+          },
+          {
+            "description": "The seat session's epoch, from a seat.",
+            "in": "header",
+            "name": "X-Ashigaru-Epoch",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The seat session's epoch, from a seat.",
+              "title": "X-Ashigaru-Epoch"
+            }
+          },
+          {
+            "description": "The seat's Claude Code session id, from its hooks.",
+            "in": "header",
+            "name": "X-Ashigaru-Session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The seat's Claude Code session id, from its hooks.",
+              "title": "X-Ashigaru-Session"
             }
           }
         ],
@@ -5735,7 +5965,17 @@
                 }
               }
             },
-            "description": "A taken id or subject_key (the detail names the item holding it), an existing identity, a second child in one assignment, or an item or seat not in a state to assign, claim or wrap."
+            "description": "A taken id or subject_key (the detail names the item holding it), an existing identity, a second child in one assignment, a seat that holds another open item, a seat session the Desk has ended (`code` stale-session), or an item or seat not in a state to assign, claim or wrap."
+          },
+          "412": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The item moved since the version named in If-Match (`code` version): read it again."
           },
           "422": {
             "content": {
@@ -5771,6 +6011,60 @@
             "schema": {
               "title": "Item Id",
               "type": "string"
+            }
+          },
+          {
+            "description": "The item's `version` the write was decided on.",
+            "in": "header",
+            "name": "if-match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The item's `version` the write was decided on.",
+              "title": "If-Match"
+            }
+          },
+          {
+            "description": "The seat session's epoch, from a seat.",
+            "in": "header",
+            "name": "X-Ashigaru-Epoch",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The seat session's epoch, from a seat.",
+              "title": "X-Ashigaru-Epoch"
+            }
+          },
+          {
+            "description": "The seat's Claude Code session id, from its hooks.",
+            "in": "header",
+            "name": "X-Ashigaru-Session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The seat's Claude Code session id, from its hooks.",
+              "title": "X-Ashigaru-Session"
             }
           }
         ],
@@ -5823,7 +6117,17 @@
                 }
               }
             },
-            "description": "A taken id or subject_key (the detail names the item holding it), an existing identity, a second child in one assignment, or an item or seat not in a state to assign, claim or wrap."
+            "description": "A taken id or subject_key (the detail names the item holding it), an existing identity, a second child in one assignment, a seat that holds another open item, a seat session the Desk has ended (`code` stale-session), or an item or seat not in a state to assign, claim or wrap."
+          },
+          "412": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The item moved since the version named in If-Match (`code` version): read it again."
           },
           "422": {
             "content": {
@@ -5957,6 +6261,60 @@
               "title": "Item Id",
               "type": "string"
             }
+          },
+          {
+            "description": "The item's `version` the write was decided on.",
+            "in": "header",
+            "name": "if-match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The item's `version` the write was decided on.",
+              "title": "If-Match"
+            }
+          },
+          {
+            "description": "The seat session's epoch, from a seat.",
+            "in": "header",
+            "name": "X-Ashigaru-Epoch",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The seat session's epoch, from a seat.",
+              "title": "X-Ashigaru-Epoch"
+            }
+          },
+          {
+            "description": "The seat's Claude Code session id, from its hooks.",
+            "in": "header",
+            "name": "X-Ashigaru-Session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The seat's Claude Code session id, from its hooks.",
+              "title": "X-Ashigaru-Session"
+            }
           }
         ],
         "requestBody": {
@@ -6018,7 +6376,17 @@
                 }
               }
             },
-            "description": "A taken id or subject_key (the detail names the item holding it), an existing identity, a second child in one assignment, or an item or seat not in a state to assign, claim or wrap."
+            "description": "A taken id or subject_key (the detail names the item holding it), an existing identity, a second child in one assignment, a seat that holds another open item, a seat session the Desk has ended (`code` stale-session), or an item or seat not in a state to assign, claim or wrap."
+          },
+          "412": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The item moved since the version named in If-Match (`code` version): read it again."
           },
           "422": {
             "content": {
@@ -6054,6 +6422,60 @@
             "schema": {
               "title": "Item Id",
               "type": "string"
+            }
+          },
+          {
+            "description": "The item's `version` the write was decided on.",
+            "in": "header",
+            "name": "if-match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The item's `version` the write was decided on.",
+              "title": "If-Match"
+            }
+          },
+          {
+            "description": "The seat session's epoch, from a seat.",
+            "in": "header",
+            "name": "X-Ashigaru-Epoch",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The seat session's epoch, from a seat.",
+              "title": "X-Ashigaru-Epoch"
+            }
+          },
+          {
+            "description": "The seat's Claude Code session id, from its hooks.",
+            "in": "header",
+            "name": "X-Ashigaru-Session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The seat's Claude Code session id, from its hooks.",
+              "title": "X-Ashigaru-Session"
             }
           }
         ],
@@ -6116,7 +6538,17 @@
                 }
               }
             },
-            "description": "A taken id or subject_key (the detail names the item holding it), an existing identity, a second child in one assignment, or an item or seat not in a state to assign, claim or wrap."
+            "description": "A taken id or subject_key (the detail names the item holding it), an existing identity, a second child in one assignment, a seat that holds another open item, a seat session the Desk has ended (`code` stale-session), or an item or seat not in a state to assign, claim or wrap."
+          },
+          "412": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The item moved since the version named in If-Match (`code` version): read it again."
           },
           "422": {
             "content": {
@@ -6152,6 +6584,60 @@
             "schema": {
               "title": "Item Id",
               "type": "string"
+            }
+          },
+          {
+            "description": "The item's `version` the write was decided on.",
+            "in": "header",
+            "name": "if-match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The item's `version` the write was decided on.",
+              "title": "If-Match"
+            }
+          },
+          {
+            "description": "The seat session's epoch, from a seat.",
+            "in": "header",
+            "name": "X-Ashigaru-Epoch",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The seat session's epoch, from a seat.",
+              "title": "X-Ashigaru-Epoch"
+            }
+          },
+          {
+            "description": "The seat's Claude Code session id, from its hooks.",
+            "in": "header",
+            "name": "X-Ashigaru-Session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The seat's Claude Code session id, from its hooks.",
+              "title": "X-Ashigaru-Session"
             }
           }
         ],
@@ -6214,7 +6700,17 @@
                 }
               }
             },
-            "description": "A taken id or subject_key (the detail names the item holding it), an existing identity, a second child in one assignment, or an item or seat not in a state to assign, claim or wrap."
+            "description": "A taken id or subject_key (the detail names the item holding it), an existing identity, a second child in one assignment, a seat that holds another open item, a seat session the Desk has ended (`code` stale-session), or an item or seat not in a state to assign, claim or wrap."
+          },
+          "412": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The item moved since the version named in If-Match (`code` version): read it again."
           },
           "422": {
             "content": {
@@ -6614,7 +7110,7 @@
         ]
       },
       "patch": {
-        "description": "Created on first report. A seat writes only turn and task on its own row; lane, status, owner\n(Scott's manual hold) and item are Josui's. `since` is the Desk's: it moves when status does.\nThe Desk infers Scott's hold from the report: a first typed prompt (turn active with a task) on a\nseat holding no item opens a manual item and holds the seat; a /clear (task null) releases it.",
+        "description": "Created on first report. A seat writes only turn, task and waiting_on on its own row, which\nrenews its lease; Josui sets its lane. Status, item and owner (Scott's manual hold) are what the\nseat's open item says: a write that would change one is 409 (assign, claim, update or wrap the\nitem instead). `since` is the Desk's: it moves when status does. The Desk infers what happened in\nthe seat from the report: a turn starting acknowledges Josui's item, unless it is Scott's first\ntyped prompt (turn active with a task), which hands an unstarted item back and opens his manual\nitem, holding the seat; a /clear (task null) ends what the session held.",
         "operationId": "patch_seat_v1_seats__name__patch",
         "parameters": [
           {
@@ -6624,6 +7120,60 @@
             "schema": {
               "title": "Name",
               "type": "string"
+            }
+          },
+          {
+            "description": "The item's `version` the write was decided on.",
+            "in": "header",
+            "name": "if-match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The item's `version` the write was decided on.",
+              "title": "If-Match"
+            }
+          },
+          {
+            "description": "The seat session's epoch, from a seat.",
+            "in": "header",
+            "name": "X-Ashigaru-Epoch",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The seat session's epoch, from a seat.",
+              "title": "X-Ashigaru-Epoch"
+            }
+          },
+          {
+            "description": "The seat's Claude Code session id, from its hooks.",
+            "in": "header",
+            "name": "X-Ashigaru-Session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The seat's Claude Code session id, from its hooks.",
+              "title": "X-Ashigaru-Session"
             }
           }
         ],
@@ -6668,6 +7218,16 @@
             },
             "description": "The caller's role, or its seat, may not do this."
           },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "`derived`: the write would change status, item or owner, which follow the seat's items; `stale-session`: the seat's own write came from a session the Desk has ended."
+          },
           "422": {
             "content": {
               "application/json": {
@@ -6692,7 +7252,7 @@
     },
     "/v1/seats/{name}/next": {
       "post": {
-        "description": "The seat's `next` hook: claim the oldest queued auto item in the seat's lane whose `after` items\nare done, waiting up to `wait` seconds for one while the seat is idle. 204 when none came, the\n`autodispatch` mark is not `on`, or the client went away (nothing is claimed for a seat no longer\nlistening, and a claim made as it left is handed back); 409 when the seat cannot take work (busy,\nheld, unseen or laneless), so the hook stops.",
+        "description": "The seat's `next` hook: claim the oldest queued auto item in the seat's lane whose `after` items\nare done, waiting up to `wait` seconds for one while the seat is idle. 204 when none came, the\n`autodispatch` mark is not `on`, or the client went away (nothing is claimed for a seat no longer\nlistening, and a claim made as it left is handed back); 409 when the seat cannot take work, its\n`code` saying why: busy or held (for now: ask again later), unseen or no-lane, or stale-session for\na session the Desk has ended. Asking renews the seat's lease. The seat's next turn acknowledges a\nclaim; one not acknowledged in ACK_AFTER goes back to the queue.",
         "operationId": "next_item_v1_seats__name__next_post",
         "parameters": [
           {
@@ -6761,7 +7321,7 @@
                 }
               }
             },
-            "description": "A taken id or subject_key (the detail names the item holding it), an existing identity, a second child in one assignment, or an item or seat not in a state to assign, claim or wrap."
+            "description": "A taken id or subject_key (the detail names the item holding it), an existing identity, a second child in one assignment, a seat that holds another open item, a seat session the Desk has ended (`code` stale-session), or an item or seat not in a state to assign, claim or wrap."
           },
           "422": {
             "content": {
@@ -6785,9 +7345,97 @@
         ]
       }
     },
+    "/v1/seats/{name}/session": {
+      "post": {
+        "description": "The seat's SessionStart hook. A new session (startup, clear) gets the next epoch, which every\nrequest of the session then sends as X-Ashigaru-Epoch, and ends the one before: Josui's item it\nwas working is blocked (cleared before its wrap), Scott's hold ends on a clear. A resume keeps\nthe epoch of the seat's current session while its lease is live; any other resume is 409\nstale-session, and the session must not act on what it remembers.",
+        "operationId": "start_session_v1_seats__name__session_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SessionStart"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionStarted"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Missing, unknown or revoked API key."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The caller's role, or its seat, may not do this."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "`stale-session`: a resume of a session the Desk has ended (its lease ran out, or a newer session started); the session must not act on what it remembers."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Start Session",
+        "tags": [
+          "seats"
+        ]
+      }
+    },
     "/v1/seats/{name}/usage": {
       "post": {
-        "description": "From the seat's hooks and status line: model, billing source, context, session tokens, and the\nsession's running cost, of which the increase since the last report is booked to today's spend.\nA seat's lane decides its billing over the report's, so a seat key cannot pick what it bills.",
+        "description": "From the seat's hooks and status line: model, billing source, context, session tokens, and the\nsession's running cost, of which the increase since the last report is booked to today's spend.\nA seat's lane decides its billing over the report's, so a seat key cannot pick what it bills. A\nseat's own report renews its lease; from a session the Desk has ended it is 409 stale-session.",
         "operationId": "report_usage_v1_seats__name__usage_post",
         "parameters": [
           {
@@ -6797,6 +7445,60 @@
             "schema": {
               "title": "Name",
               "type": "string"
+            }
+          },
+          {
+            "description": "The item's `version` the write was decided on.",
+            "in": "header",
+            "name": "if-match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The item's `version` the write was decided on.",
+              "title": "If-Match"
+            }
+          },
+          {
+            "description": "The seat session's epoch, from a seat.",
+            "in": "header",
+            "name": "X-Ashigaru-Epoch",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The seat session's epoch, from a seat.",
+              "title": "X-Ashigaru-Epoch"
+            }
+          },
+          {
+            "description": "The seat's Claude Code session id, from its hooks.",
+            "in": "header",
+            "name": "X-Ashigaru-Session",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The seat's Claude Code session id, from its hooks.",
+              "title": "X-Ashigaru-Session"
             }
           }
         ],
@@ -6840,6 +7542,16 @@
               }
             },
             "description": "The caller's role, or its seat, may not do this."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "`stale-session`: the seat's own report came from a session the Desk has ended; nothing is booked and the lease is not renewed."
           },
           "422": {
             "content": {

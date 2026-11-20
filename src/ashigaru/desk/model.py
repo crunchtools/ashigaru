@@ -153,6 +153,12 @@ class Item(BaseModel):
     extra: dict[str, Any] = Field(default_factory=dict, description="Imported ledger fields with no column.")
     pr: str | None = Field(None, description="The PR carrying the work, owner/repo#N.")
     landed_at: str | None = Field(None, description="When its subject or PR merged while a seat held it.")
+    epoch: int | None = Field(
+        None, description="The epoch of the seat session that took it; null before 5.0."
+    )
+    version: int = Field(
+        0, description="Its last event's seq. Sent back as If-Match, a write answers 412 once the item moved."
+    )
 
 
 def _no_learned_line(value: str | None) -> str | None:
@@ -316,6 +322,13 @@ class Problem(BaseModel):
     """Every 4xx body."""
 
     detail: str
+    code: str | None = Field(
+        None,
+        description="What a 409 or 412 is, for a client that acts on it: stale-session (the seat session "
+        "has ended), busy or held (the seat holds an item, or Scott does), unseen (never reported), no-lane, "
+        "missing (the seat's lease ran out), derived (a seat's occupancy follows its items), not-ready (a "
+        "wrap before CC-DONE or mid-turn), version (412: the item moved since If-Match).",
+    )
 
 
 class Event(BaseModel):
@@ -444,6 +457,10 @@ class Seat(BaseModel):
     waiting_on: str | None = Field(
         None, description="The seat's last message before it went idle, trimmed; null once a turn starts."
     )
+    epoch: int = Field(0, description="The current session's epoch; a write with another is refused.")
+    lease_until: str | None = Field(
+        None, description="Until when the seat counts as up without another request."
+    )
     missing: bool = Field(
         False,
         description="In `GET /seats`: a seat identity that never checked in, or whose row has not "
@@ -484,10 +501,32 @@ class SeatPatch(BaseModel):
 
 
 STALE_SEAT = timedelta(hours=24)
-"""A seat whose row has not changed for this long is shown as missing."""
+"""A seat whose row has not changed for this long is idle long enough for reconcile to drop its task."""
+LEASE = timedelta(minutes=10)
+"""How long an idle seat counts as up after its last request: its `next` hook asks every 90 seconds."""
+LEASE_ACTIVE = timedelta(minutes=60)
+"""How long a seat mid-turn counts as up after its last request: a long tool call posts nothing."""
+ACK_AFTER = timedelta(minutes=10)
+"""How long an item `next` handed a seat may wait for the seat's next turn before it is queued again."""
 
 SEAT_ROW_FIELDS = frozenset({"turn", "task", "waiting_on"})
 """`since` is in neither: the Desk stamps it when status changes, so no one can jump the pick queue."""
+
+
+class SessionStart(BaseModel):
+    """POST /v1/seats/{name}/session: the seat's SessionStart hook registering its Claude Code session."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    session_id: str = Field(min_length=1)
+    source: Literal["startup", "resume", "clear"]
+
+
+class SessionStarted(BaseModel):
+    """The epoch the session sends as X-Ashigaru-Epoch from now on, and the seat as it stands."""
+
+    epoch: int
+    seat: "Seat"
 
 
 class UsageReport(BaseModel):
@@ -566,9 +605,10 @@ class BoardRow(BaseModel):
 class NeedsYou(BaseModel):
     """Something only Scott can move: his blocked work, a subject held for approval, a manual seat
     idle on a question, a hold of his on a seat silent for a day, a busy seat gone silent (`silent`),
-    or an outsider's subject the sweep found and did not store."""
+    an outsider's subject the sweep found and did not store, or a writer's PR intake did not queue
+    because it names no item while a seat works in its repo (`unlinked`: link it with `update --pr`)."""
 
-    why: Literal["blocked", "held", "waiting", "outsider", "stale", "silent"]
+    why: Literal["blocked", "held", "waiting", "outsider", "stale", "silent", "unlinked"]
     work: str | None
     seat: str | None = None
     mode: Mode | None

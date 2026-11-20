@@ -3,7 +3,7 @@
 import sqlite3
 from http.client import CONFLICT, CREATED, FORBIDDEN, NOT_FOUND, OK, UNAUTHORIZED
 
-from conftest import Keys
+from conftest import Keys, up_seat
 from fastapi.testclient import TestClient
 
 JOSUI, MINE, OTHER, CI = "Josui Prime", "Exedore 1 - Max", "Exedore 2 - Max", "ci"
@@ -73,7 +73,8 @@ def test_seat_cannot_reassign_close_or_verify(client: TestClient, keys: Keys) ->
     assert client.get(f"/v1/items/{mine}", headers=keys[MINE]).json()["state"] == "assigned"
 
 
-def test_josui_writes_any_item(client: TestClient, keys: Keys) -> None:
+def test_josui_writes_any_item(client: TestClient, keys: Keys, conn: sqlite3.Connection) -> None:
+    up_seat(conn, MINE)
     theirs = make(client, keys, seat=OTHER)
     body = {"state": "done", "verified_by": JOSUI, "seat": MINE}
     response = client.patch(f"/v1/items/{theirs}", headers=keys[JOSUI], json=body)
@@ -152,9 +153,11 @@ def test_seat_writes_only_turn_task_and_since_on_its_own_row(client: TestClient,
     assert [(seat["name"], seat["missing"]) for seat in rows] == [(MINE, False), (OTHER, True)]
 
 
-def test_a_seat_cannot_undo_scotts_manual_hold(client: TestClient, keys: Keys) -> None:
-    held = client.patch(f"/v1/seats/{MINE}", headers=keys[JOSUI], json={"owner": "Scott", "status": "busy"})
-    assert held.status_code == OK
+def test_a_seat_cannot_undo_scotts_manual_hold(
+    client: TestClient, keys: Keys, conn: sqlite3.Connection
+) -> None:
+    up_seat(conn, MINE)
+    make(client, keys, mode="manual")
     assert (
         client.patch(f"/v1/seats/{MINE}", headers=keys[MINE], json={"owner": None}).status_code == FORBIDDEN
     )

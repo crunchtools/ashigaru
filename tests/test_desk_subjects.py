@@ -7,7 +7,7 @@ from typing import Any
 from urllib.parse import quote
 
 import pytest
-from conftest import Keys
+from conftest import Keys, up_seat
 from fastapi.testclient import TestClient
 from test_desk_webhooks import deliver, hooked, payload
 
@@ -78,8 +78,7 @@ def test_a_closed_issue_is_done(hooked: TestClient, keys: Keys) -> None:
 def test_a_seat_or_scott_keeps_the_item_and_only_hears_it_landed(
     hooked: TestClient, keys: Keys, conn: sqlite3.Connection
 ) -> None:
-    with store.transaction(conn):
-        store.write_seat(conn, SEAT, {"status": "free", "lane": "exedore-max"})
+    up_seat(conn, SEAT, lane="exedore-max")
     held = create(hooked, keys, subject_key=PR)
     assert hooked.post(f"/v1/items/{held}/assign", headers=keys[JOSUI], json={"seat": SEAT}).status_code == OK
     manual = create(hooked, keys, subject_key="crunchtools/ashigaru#192", mode="manual", state="blocked")
@@ -247,9 +246,8 @@ def test_a_seat_sets_the_pr_of_its_own_item_only(
     hooked: TestClient, keys: Keys, conn: sqlite3.Connection
 ) -> None:
     other = "Exedore 2 - Max"
-    with store.transaction(conn):
-        for name in (SEAT, other):
-            store.write_seat(conn, name, {"status": "free", "lane": "exedore-max"})
+    for name in (SEAT, other):
+        up_seat(conn, name, lane="exedore-max")
     mine, theirs = create(hooked, keys), create(hooked, keys)
     hooked.post(f"/v1/items/{mine}/assign", headers=keys[JOSUI], json={"seat": SEAT})
     hooked.post(f"/v1/items/{theirs}/assign", headers=keys[JOSUI], json={"seat": other})

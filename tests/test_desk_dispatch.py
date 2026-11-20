@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any, cast
 
 import pytest
-from conftest import Keys
+from conftest import Keys, up_seat
 from fastapi import Request
 from fastapi.testclient import TestClient
 
@@ -24,9 +24,16 @@ def item(client: TestClient, keys: Keys, **fields: object) -> str:
     return str(client.post("/v1/items", headers=keys[JOSUI], json={"task": "t", **fields}).json()["id"])
 
 
-def seat(client: TestClient, keys: Keys, name: str, **fields: object) -> None:
-    body = {"lane": "exedore-max", "status": "free", **fields}
-    assert client.patch(f"/v1/seats/{name}", headers=keys[JOSUI], json=body).status_code == OK
+def seat(conn: sqlite3.Connection, name: str, **fields: object) -> None:
+    """A free seat that is up, in the lane unless `fields` say otherwise."""
+    up_seat(conn, name, **{"lane": "exedore-max", **fields})
+
+
+def hold(client: TestClient, keys: Keys, name: str, **fields: object) -> str:
+    """The seat takes an item of its own, which is what makes it busy (or held by Scott, if manual)."""
+    work = item(client, keys, **fields)
+    assert client.post(f"/v1/items/{work}/assign", headers=keys[JOSUI], json={"seat": name}).status_code == OK
+    return work
 
 
 def backdate(conn: sqlite3.Connection, name: str, since: str) -> None:
@@ -36,10 +43,11 @@ def backdate(conn: sqlite3.Connection, name: str, since: str) -> None:
 def test_assign_picks_the_longest_free_unheld_seat_in_the_lane(
     client: TestClient, keys: Keys, conn: sqlite3.Connection
 ) -> None:
-    seat(client, keys, MINE)
-    seat(client, keys, OTHER)
-    seat(client, keys, "Dolza 1 - Max", lane="dolza-max")
-    seat(client, keys, "Exedore 3 - Max", owner="Scott")
+    seat(conn, MINE)
+    seat(conn, OTHER)
+    seat(conn, "Dolza 1 - Max", lane="dolza-max")
+    seat(conn, "Exedore 3 - Max")
+    hold(client, keys, "Exedore 3 - Max", mode="manual")
     backdate(conn, OTHER, "2000-01-01T00:00:00Z")
     backdate(conn, "Exedore 3 - Max", "1999-01-01T00:00:00Z")
     first = item(client, keys, lane="exedore-max")
@@ -57,17 +65,21 @@ def test_assign_picks_the_longest_free_unheld_seat_in_the_lane(
     ).status_code == (CONFLICT)
 
 
-def test_assign_refuses_busy_held_unknown_seats_waiting_and_closed_items(
-    client: TestClient, keys: Keys
+def test_assign_refuses_busy_held_missing_unknown_seats_waiting_and_closed_items(
+    client: TestClient, keys: Keys, conn: sqlite3.Connection
 ) -> None:
-    seat(client, keys, MINE, status="busy")
-    seat(client, keys, OTHER, owner="Scott")
-    for name in (MINE, OTHER, "nobody"):
+    seat(conn, MINE)
+    seat(conn, OTHER)
+    seat(conn, "Exedore 4 - Max")
+    hold(client, keys, MINE)
+    hold(client, keys, OTHER, mode="manual")
+    conn.execute("UPDATE seats SET lease_until = '2000-01-01T00:00:00Z' WHERE name = 'Exedore 4 - Max'")
+    for name, code in ((MINE, "busy"), (OTHER, "held"), ("nobody", "unseen"), ("Exedore 4 - Max", "missing")):
         response = client.post(
             f"/v1/items/{item(client, keys)}/assign", headers=keys[JOSUI], json={"seat": name}
         )
-        assert response.status_code == CONFLICT, name
-    seat(client, keys, "Exedore 3 - Max")
+        assert response.status_code == CONFLICT and response.json()["code"] == code, name
+    seat(conn, "Exedore 3 - Max")
     blocker = item(client, keys)
     waiting = item(client, keys, after=[blocker])
     named = {"seat": "Exedore 3 - Max"}
@@ -80,8 +92,8 @@ def test_assign_refuses_busy_held_unknown_seats_waiting_and_closed_items(
     assert client.post(f"/v1/items/{blocker}/assign", headers=keys[MINE], json=named).status_code == FORBIDDEN
 
 
-def test_closing_an_item_frees_its_seat(client: TestClient, keys: Keys) -> None:
-    seat(client, keys, MINE)
+def test_closing_an_item_frees_its_seat(client: TestClient, keys: Keys, conn: sqlite3.Connection) -> None:
+    seat(conn, MINE)
     work = item(client, keys)
     client.post(f"/v1/items/{work}/assign", headers=keys[JOSUI], json={"seat": MINE})
     client.patch(f"/v1/items/{work}", headers=keys[JOSUI], json={"state": "done", "wrap": "cleared"})
@@ -90,10 +102,10 @@ def test_closing_an_item_frees_its_seat(client: TestClient, keys: Keys) -> None:
 
 
 def test_claim_is_atomic_and_scoped_to_queued_auto_items_in_the_seats_lane(
-    client: TestClient, keys: Keys, db: object
+    client: TestClient, keys: Keys, conn: sqlite3.Connection, db: object
 ) -> None:
-    seat(client, keys, MINE)
-    seat(client, keys, OTHER)
+    seat(conn, MINE)
+    seat(conn, OTHER)
     work = item(client, keys, lane="exedore-max")
     claimed = client.post(f"/v1/items/{work}/claim", headers=keys[MINE])
     assert claimed.status_code == OK and (claimed.json()["seat"], claimed.json()["state"]) == (
@@ -116,8 +128,8 @@ def test_claim_is_atomic_and_scoped_to_queued_auto_items_in_the_seats_lane(
 def test_a_second_claim_from_another_connection_loses(
     client: TestClient, keys: Keys, db: object, conn: sqlite3.Connection
 ) -> None:
-    seat(client, keys, MINE)
-    seat(client, keys, OTHER)
+    seat(conn, MINE)
+    seat(conn, OTHER)
     work = item(client, keys, lane="exedore-max")
     other = store.connect(str(db))
     dispatch.claim(conn, work, MINE)
@@ -134,8 +146,10 @@ def switch(client: TestClient, keys: Keys, value: str) -> None:
     assert client.put("/v1/marks/autodispatch", headers=keys[JOSUI], json={"value": value}).status_code == OK
 
 
-def test_next_hands_out_nothing_until_the_switch_is_on(client: TestClient, keys: Keys) -> None:
-    seat(client, keys, MINE)
+def test_next_hands_out_nothing_until_the_switch_is_on(
+    client: TestClient, keys: Keys, conn: sqlite3.Connection
+) -> None:
+    seat(conn, MINE)
     work = item(client, keys, lane="exedore-max", task="the brief's task")
     assert next_item(client, keys, MINE).status_code == NO_CONTENT
     switch(client, keys, "off")
@@ -150,8 +164,10 @@ def test_next_hands_out_nothing_until_the_switch_is_on(client: TestClient, keys:
     assert (taken["status"], taken["item"]) == ("busy", work)
 
 
-def test_next_takes_the_oldest_ready_auto_item_in_the_seats_lane(client: TestClient, keys: Keys) -> None:
-    seat(client, keys, MINE)
+def test_next_takes_the_oldest_ready_auto_item_in_the_seats_lane(
+    client: TestClient, keys: Keys, conn: sqlite3.Connection
+) -> None:
+    seat(conn, MINE)
     switch(client, keys, "on")
     blocker = item(client, keys, lane="dolza-max")
     item(client, keys, lane="exedore-max", after=[blocker])
@@ -163,9 +179,11 @@ def test_next_takes_the_oldest_ready_auto_item_in_the_seats_lane(client: TestCli
     assert next_item(client, keys, MINE).json()["item"]["id"] == ready
 
 
-def test_next_refuses_a_seat_that_cannot_take_work(client: TestClient, keys: Keys) -> None:
-    seat(client, keys, MINE)
-    seat(client, keys, OTHER, lane=None)
+def test_next_refuses_a_seat_that_cannot_take_work(
+    client: TestClient, keys: Keys, conn: sqlite3.Connection
+) -> None:
+    seat(conn, MINE)
+    seat(conn, OTHER, lane=None)
     switch(client, keys, "on")
     item(client, keys, lane="exedore-max")
     item(client, keys, lane="exedore-max")
@@ -176,8 +194,10 @@ def test_next_refuses_a_seat_that_cannot_take_work(client: TestClient, keys: Key
     assert next_item(client, keys, OTHER, who=CI).status_code == FORBIDDEN
 
 
-def test_next_waits_out_a_wrap_until_the_item_closes(client: TestClient, keys: Keys) -> None:
-    seat(client, keys, MINE)
+def test_next_waits_out_a_wrap_until_the_item_closes(
+    client: TestClient, keys: Keys, conn: sqlite3.Connection
+) -> None:
+    seat(conn, MINE)
     switch(client, keys, "on")
     first = item(client, keys, lane="exedore-max")
     second = item(client, keys, lane="exedore-max")
@@ -190,8 +210,10 @@ def test_next_waits_out_a_wrap_until_the_item_closes(client: TestClient, keys: K
     assert next_item(client, keys, MINE).json()["item"]["id"] == second
 
 
-def test_next_is_busy_while_a_wrapping_seat_is_mid_turn(client: TestClient, keys: Keys) -> None:
-    seat(client, keys, MINE)
+def test_next_is_busy_while_a_wrapping_seat_is_mid_turn(
+    client: TestClient, keys: Keys, conn: sqlite3.Connection
+) -> None:
+    seat(conn, MINE)
     switch(client, keys, "on")
     first = item(client, keys, lane="exedore-max")
     assert next_item(client, keys, MINE).json()["item"]["id"] == first
@@ -202,8 +224,10 @@ def test_next_is_busy_while_a_wrapping_seat_is_mid_turn(client: TestClient, keys
     assert next_item(client, keys, MINE).status_code == NO_CONTENT
 
 
-def test_next_never_hands_a_mid_turn_seat_a_second_brief(client: TestClient, keys: Keys) -> None:
-    seat(client, keys, MINE)
+def test_next_never_hands_a_mid_turn_seat_a_second_brief(
+    client: TestClient, keys: Keys, conn: sqlite3.Connection
+) -> None:
+    seat(conn, MINE)
     switch(client, keys, "on")
     work = item(client, keys, lane="exedore-max")
     client.patch(f"/v1/seats/{MINE}", headers=keys[MINE], json={"turn": "active"})
@@ -215,7 +239,7 @@ def test_next_never_hands_a_mid_turn_seat_a_second_brief(client: TestClient, key
 def test_next_takes_no_write_lock_to_find_nothing(
     client: TestClient, keys: Keys, conn: sqlite3.Connection, db: Path
 ) -> None:
-    seat(client, keys, MINE)
+    seat(conn, MINE)
     item(client, keys, lane="exedore-max")
     writer = store.connect(str(db))
     writer.execute("PRAGMA busy_timeout = 0")
@@ -234,10 +258,12 @@ def test_next_claims_nothing_for_a_client_that_has_gone(
     client: TestClient, keys: Keys, conn: sqlite3.Connection
 ) -> None:
     class Gone:
+        headers: dict[str, str] = {}
+
         async def is_disconnected(self) -> bool:
             return True
 
-    seat(client, keys, MINE)
+    seat(conn, MINE)
     switch(client, keys, "on")
     work = item(client, keys, lane="exedore-max")
     caller = auth.Caller(name=MINE, role=Role.SEAT, key_id="k")
@@ -253,13 +279,14 @@ def test_a_claim_made_as_the_client_leaves_is_handed_back(
     class Leaving:
         """Listening at the first look, gone by the time the claim is made."""
 
+        headers: dict[str, str] = {}
         looks = 0
 
         async def is_disconnected(self) -> bool:
             self.looks += 1
             return self.looks > 1
 
-    seat(client, keys, MINE)
+    seat(conn, MINE)
     switch(client, keys, "on")
     work = item(client, keys, lane="exedore-max")
     caller = auth.Caller(name=MINE, role=Role.SEAT, key_id="k")
@@ -276,6 +303,7 @@ def test_one_long_poll_rides_out_a_wrap_and_claims_once_the_item_closes(
     class Wrapped:
         """Listening throughout; Prime closes the wrapping item between the first look and the second."""
 
+        headers: dict[str, str] = {}
         looks = 0
         closed = False
 
@@ -287,7 +315,7 @@ def test_one_long_poll_rides_out_a_wrap_and_claims_once_the_item_closes(
             return False
 
     monkeypatch.setattr(api, "NEXT_TICK", 0.05)
-    seat(client, keys, MINE)
+    seat(conn, MINE)
     switch(client, keys, "on")
     first = item(client, keys, lane="exedore-max")
     second = item(client, keys, lane="exedore-max")
@@ -301,8 +329,8 @@ def test_one_long_poll_rides_out_a_wrap_and_claims_once_the_item_closes(
 def test_unclaim_leaves_work_that_moved_on_alone(
     client: TestClient, keys: Keys, conn: sqlite3.Connection
 ) -> None:
-    seat(client, keys, MINE)
-    seat(client, keys, OTHER)
+    seat(conn, MINE)
+    seat(conn, OTHER)
     switch(client, keys, "on")
     started = item(client, keys, lane="exedore-max")
     assert dispatch.next_item(conn, MINE) is not None
@@ -321,10 +349,10 @@ def test_unclaim_leaves_work_that_moved_on_alone(
 
 
 def test_next_waits_out_its_window_when_nothing_comes(
-    client: TestClient, keys: Keys, monkeypatch: pytest.MonkeyPatch
+    client: TestClient, keys: Keys, conn: sqlite3.Connection, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(api, "NEXT_TICK", 0.05)
-    seat(client, keys, MINE)
+    seat(conn, MINE)
     switch(client, keys, "on")
     started = time.monotonic()
     assert next_item(client, keys, MINE, wait=WAIT).status_code == NO_CONTENT
@@ -377,7 +405,7 @@ def test_usage_books_the_backlog_once_billing_is_known(conn: sqlite3.Connection)
 
 
 def test_usage_bills_by_the_seats_lane(client: TestClient, keys: Keys, conn: sqlite3.Connection) -> None:
-    seat(client, keys, MINE, lane="vertex")
+    seat(conn, MINE, lane="vertex")
     row = dispatch.report_usage(conn, MINE, {"session_id": "s1", "cost_usd": 0.5})
     assert row["billing"] == "vertex" and spent(conn) == {"vertex": pytest.approx(0.5)}
 
@@ -391,8 +419,8 @@ def test_a_late_lower_report_does_not_rewind_what_is_booked(conn: sqlite3.Connec
 def test_a_seats_lane_outranks_the_billing_its_own_key_reports(
     client: TestClient, keys: Keys, conn: sqlite3.Connection
 ) -> None:
-    seat(client, keys, MINE)
-    seat(client, keys, OTHER)
+    seat(conn, MINE)
+    seat(conn, OTHER)
     for name, key in ((MINE, MINE), (OTHER, JOSUI)):
         response = client.post(
             f"/v1/seats/{name}/usage",
@@ -406,7 +434,7 @@ def test_a_seats_lane_outranks_the_billing_its_own_key_reports(
 def test_usage_on_a_lane_with_no_billing_waits_for_one(
     client: TestClient, keys: Keys, conn: sqlite3.Connection
 ) -> None:
-    seat(client, keys, MINE, lane="prime")
+    seat(conn, MINE, lane="prime")
     dispatch.report_usage(conn, MINE, {"session_id": "s1", "cost_usd": 3.0})
     assert spent(conn) == {}
     dispatch.report_usage(conn, MINE, {"session_id": "s2", "cost_usd": 0.25})
@@ -454,10 +482,12 @@ def test_a_seat_with_no_lane_claims_nothing(client: TestClient, keys: Keys) -> N
         assert client.get(f"/v1/items/{target}", headers=keys[CI]).json()["seat"] is None
 
 
-def test_reassigning_frees_the_previous_holder(client: TestClient, keys: Keys) -> None:
-    seat(client, keys, MINE)
-    seat(client, keys, OTHER)
-    seat(client, keys, "Exedore 3 - Max")
+def test_reassigning_frees_the_previous_holder(
+    client: TestClient, keys: Keys, conn: sqlite3.Connection
+) -> None:
+    seat(conn, MINE)
+    seat(conn, OTHER)
+    seat(conn, "Exedore 3 - Max")
     work = item(client, keys)
     client.post(f"/v1/items/{work}/assign", headers=keys[JOSUI], json={"seat": MINE})
     moved = client.post(f"/v1/items/{work}/assign", headers=keys[JOSUI], json={"seat": OTHER})
@@ -473,8 +503,8 @@ def test_reassigning_frees_the_previous_holder(client: TestClient, keys: Keys) -
 def test_since_is_server_set_so_no_seat_jumps_the_pick_queue(
     client: TestClient, keys: Keys, conn: sqlite3.Connection
 ) -> None:
-    seat(client, keys, MINE)
-    seat(client, keys, OTHER)
+    seat(conn, MINE)
+    seat(conn, OTHER)
     backdate(conn, OTHER, "2000-01-01T00:00:00Z")
     for who in (MINE, JOSUI):
         jump = client.patch(f"/v1/seats/{MINE}", headers=keys[who], json={"since": "1970-01-01T00:00:00Z"})
@@ -492,8 +522,10 @@ def test_since_is_server_set_so_no_seat_jumps_the_pick_queue(
     assert client.get(f"/v1/seats/{MINE}", headers=keys[CI]).json()["since"] >= before
 
 
-def test_an_item_with_no_lane_is_assigned_never_claimed(client: TestClient, keys: Keys) -> None:
-    seat(client, keys, MINE)
+def test_an_item_with_no_lane_is_assigned_never_claimed(
+    client: TestClient, keys: Keys, conn: sqlite3.Connection
+) -> None:
+    seat(conn, MINE)
     target = item(client, keys)
     assert client.get(f"/v1/items/{target}", headers=keys[CI]).json()["lane"] is None
     assert client.post(f"/v1/items/{target}/claim", headers=keys[MINE]).status_code == CONFLICT
@@ -519,6 +551,7 @@ def test_brief_ends_with_the_limits_a_hand_brief_carries() -> None:
     text = dispatch.brief({"id": "a7", "lane": "exedore-max", "task": "Do it"})
     assert "Don't merge, tag, release or deploy; Josui Prime does that." in text
     assert "Don't message other seats." in text
+    assert "Branch as `fix/a7-<short-slug>`" in text and "`Ashigaru-Item: a7`" in text
     assert "Sonnet subagents" in text
     assert "Report with `ashigaru report a7 <verb>`" in text
     assert '"DONE a7: <result, links>"' in text and '"BLOCKED a7: <what you need>"' in text
@@ -533,30 +566,50 @@ def typed(conn: sqlite3.Connection) -> dict[str, Any]:
     return dispatch.report_seat(conn, MINE, {"turn": "active", "task": "typed prompt"}, MINE)
 
 
-def test_a_typed_prompt_takes_back_the_open_manual_item_naming_the_seat(
+def test_a_typed_prompt_leaves_a_seatless_open_manual_item_alone_and_opens_its_own(
     client: TestClient, keys: Keys, conn: sqlite3.Connection
 ) -> None:
-    seat(client, keys, MINE)
+    seat(conn, MINE)
     with store.transaction(conn):
-        kept = store.insert_item(
-            conn, {"task": "imported", "mode": "manual", "state": "blocked", "seat": MINE}, JOSUI
-        )
+        kept = store.insert_item(conn, {"task": "imported", "mode": "manual", "state": "blocked"}, JOSUI)
     before = store.count_open(conn)
     held = typed(conn)
-    assert store.count_open(conn) == before
-    assert (held["status"], held["owner"], held["item"]) == ("busy", "Scott", kept)
-    reused = store.get_item(conn, kept) or {}
-    assert (reused["state"], reused["task"]) == ("blocked", "imported")
+    assert store.count_open(conn) == before + 1
+    assert (held["status"], held["owner"]) == ("busy", "Scott") and held["item"] != kept
+    untouched = store.get_item(conn, kept) or {}
+    assert (untouched["state"], untouched["seat"], untouched["task"]) == ("blocked", None, "imported")
 
 
-@pytest.mark.parametrize(("mode", "state"), [("manual", "done"), ("auto", "working")])
-def test_a_typed_prompt_ignores_a_closed_manual_or_an_auto_item_on_the_seat(
-    client: TestClient, keys: Keys, conn: sqlite3.Connection, mode: str, state: str
+def test_a_typed_prompt_on_a_closed_manual_item_opens_a_new_one(
+    client: TestClient, keys: Keys, conn: sqlite3.Connection
 ) -> None:
-    seat(client, keys, MINE)
+    seat(conn, MINE)
     with store.transaction(conn):
-        old = store.insert_item(conn, {"task": "old", "mode": mode, "state": state, "seat": MINE}, JOSUI)
+        old = store.insert_item(conn, {"task": "old", "mode": "manual", "state": "done", "seat": MINE}, JOSUI)
     held = typed(conn)
     assert held["item"] != old and (held["status"], held["owner"]) == ("busy", "Scott")
     fresh = store.get_item(conn, held["item"]) or {}
     assert (fresh["mode"], fresh["state"], fresh["task"]) == ("manual", "working", "typed prompt")
+
+
+def test_a_typed_prompt_on_an_auto_item_under_way_leaves_it_on_the_seat(
+    client: TestClient, keys: Keys, conn: sqlite3.Connection
+) -> None:
+    seat(conn, MINE)
+    working = hold(client, keys, MINE)
+    client.patch(f"/v1/items/{working}", headers=keys[JOSUI], json={"state": "working"})
+    before = store.count_open(conn)
+    held = typed(conn)
+    assert (held["item"], held["owner"], held["status"]) == (working, None, "busy")
+    assert store.count_open(conn) == before
+
+
+def test_a_typed_prompt_on_an_assigned_auto_item_queues_it_and_opens_scotts(
+    client: TestClient, keys: Keys, conn: sqlite3.Connection
+) -> None:
+    seat(conn, MINE)
+    assigned = hold(client, keys, MINE)
+    held = typed(conn)
+    assert held["item"] != assigned and (held["status"], held["owner"]) == ("busy", "Scott")
+    back = store.get_item(conn, assigned) or {}
+    assert (back["state"], back["seat"]) == ("queued", None)

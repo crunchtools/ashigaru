@@ -1,9 +1,17 @@
 """Claude Code hooks: report the seat's turn, task and usage to the Desk. They replace the
 seat-state.json hooks and keep their rules.
 
-  session-start   SessionStart. startup and resume are not mid-turn: turn idle.
-                  clear also drops the task. compact can come mid-turn and
-                  changes nothing.
+  session-start   SessionStart. Registers the session with POST
+                  /v1/seats/{name}/session (session_id, source), which turns the
+                  seat idle (clear also drops the task) and answers the epoch,
+                  kept in ~/.local/state/ashigaru/epoch for every later request
+                  to send as X-Ashigaru-Epoch. A resume of a session the Desk
+                  ended (409 stale-session) leaves the epoch alone and prints a
+                  notice on stdout, which SessionStart adds to the session's
+                  context: stop work on any earlier assignment. A Desk without
+                  the route (404, 405) gets the old PATCH of turn idle (clear
+                  also task null). compact can come mid-turn and changes
+                  nothing.
   prompt-submit   UserPromptSubmit. turn active. A prompt a person typed, the
                   session's first, becomes the task; turns Claude Code starts
                   itself (a <cross-session-message>, a <task-notification>,
@@ -16,7 +24,12 @@ seat-state.json hooks and keep their rules.
                   asyncRewake: waits up to NEXT_SECONDS for the Desk to hand
                   this free seat its next queued item, then prints the brief
                   on stderr and exits 2, which wakes the idle session with it.
-                  It stops, exit 0, when the seat cannot take work.
+                  It stops, exit 0, when the seat cannot take work (401, 403,
+                  404, or a 409 that is not busy, held or stale-session); a
+                  busy or held seat is asked again with backoff. On a 409
+                  stale-session it stops silently if the epoch file now holds a
+                  newer session's epoch (a /clear), else exits 2 with a notice
+                  that the Desk ended this session.
   statusline      The status line command, not a hook: model, context, session
                   tokens and running cost to POST /v1/seats/{name}/usage. It
                   runs on every refresh, so it posts at most once per
@@ -47,7 +60,7 @@ from urllib.parse import quote
 
 import httpx
 
-from .client import Desk, DeskError, Unreachable
+from .client import Desk, DeskError, Send, Unreachable, epoch, epoch_file
 from .config import load
 
 EVENTS = ("session-start", "prompt-submit", "stop", "next", "statusline")
@@ -66,10 +79,15 @@ NEXT_RETRY = 5.0
 NEXT_BACKOFF = 300.0
 # Between looks that brought nothing back, so an empty answer is never a spin.
 NEXT_PAUSE = 2.0
-# Answers that mean this seat will not get work by asking again: stop.
-NEXT_FINAL = frozenset(
-    {HTTPStatus.UNAUTHORIZED, HTTPStatus.FORBIDDEN, HTTPStatus.NOT_FOUND, HTTPStatus.CONFLICT}
-)
+# Answers that mean this seat will not get work by asking again: stop. So is any 409 but NEXT_BUSY and
+# the stale-session one.
+NEXT_FINAL = frozenset({HTTPStatus.UNAUTHORIZED, HTTPStatus.FORBIDDEN, HTTPStatus.NOT_FOUND})
+# The 409 codes that pass: the seat is mid-wrap or held, so ask again with the backoff.
+NEXT_BUSY = frozenset({"busy", "held"})
+# The 409 code for a session the Desk has ended or superseded.
+STALE = "stale-session"
+# The sources a session is registered for; compact is not a new session.
+SESSION_SOURCES = frozenset({"startup", "resume", "clear"})
 # Claude Code's asyncRewake: an async hook exiting 2 wakes the idle session with its stderr.
 WAKE = 2
 TASK_LENGTH = 120
@@ -115,12 +133,44 @@ def _started_within(seat: dict[str, Any], window: timedelta) -> bool:
     return datetime.now(UTC) - started < window
 
 
+def _stale(detail: str) -> str:
+    """What the model is told when the Desk ended its session."""
+    return (
+        f"Ashigaru Desk: this session is stale: {detail}. Any earlier Desk assignment is no longer "
+        "yours: stop work on it and do not push, comment or report on it. Ask for /clear to rejoin."
+    )
+
+
+def _keep_epoch(number: Any) -> None:
+    """Write the epoch the Desk answered to epoch_file(), atomically."""
+    target = epoch_file()
+    target.parent.mkdir(parents=True, exist_ok=True)
+    partial = target.with_suffix(".tmp")
+    partial.write_text(f"{int(number)}\n")
+    partial.replace(target)
+
+
 def _start(event: dict[str, Any], desk: Desk, path: str) -> None:
     source = event.get("source")
     if source == "compact":
         return
     if source == "clear":
         task_marker().unlink(missing_ok=True)
+    session = event.get("session_id")
+    if source in SESSION_SOURCES and isinstance(session, str) and session:
+        try:
+            answer = desk.post(f"{path}/session", {"session_id": session, "source": source})
+        except DeskError as error:
+            if error.status == HTTPStatus.CONFLICT and error.code == STALE:
+                print(_stale(error.detail))
+                return
+            if error.status not in (HTTPStatus.NOT_FOUND, HTTPStatus.METHOD_NOT_ALLOWED):
+                raise
+            epoch_file().unlink(missing_ok=True)
+        else:
+            if isinstance(answer, dict) and isinstance(answer.get("epoch"), int):
+                _keep_epoch(answer["epoch"])
+            return
     desk.request(
         "PATCH", path, body={"turn": "idle", "task": None} if source == "clear" else {"turn": "idle"}
     )
@@ -249,10 +299,18 @@ class _Stop(Exception):
     """The Desk said this seat will not get work by asking again."""
 
 
+class _Stale(Exception):
+    """The Desk said this session is over; `detail` is why."""
+
+    def __init__(self, detail: str) -> None:
+        super().__init__(detail)
+        self.detail = detail
+
+
 def _ask(desk: Desk, method: str, path: str, deadline: float, **params: Any) -> Any:
     """One request, retried with backoff while the Desk is down, restarting or throttling (5xx, 429,
-    anything but NEXT_FINAL), until `deadline` on the monotonic clock. Raises _Stop on NEXT_FINAL,
-    and _Deadline when no request can finish in the time left."""
+    a 409 busy or held), until `deadline` on the monotonic clock. Raises _Stop on NEXT_FINAL or any
+    other 409, _Stale on a 409 stale-session, and _Deadline when no request can finish in the time left."""
     pause = NEXT_RETRY
     while True:
         wait = int(min(params.get("wait", 0), deadline - time.monotonic() - NEXT_GRACE))
@@ -260,20 +318,32 @@ def _ask(desk: Desk, method: str, path: str, deadline: float, **params: Any) -> 
             raise _Deadline
         try:
             return desk.request(
-                method, path, params={"wait": wait} if "wait" in params else None, timeout=wait + NEXT_GRACE
+                method,
+                path,
+                params={"wait": wait} if "wait" in params else None,
+                send=Send(timeout=wait + NEXT_GRACE),
             )
         except (DeskError, Unreachable) as error:
-            if isinstance(error, DeskError) and error.status in NEXT_FINAL:
-                raise _Stop from error
+            if isinstance(error, DeskError):
+                if error.status == HTTPStatus.CONFLICT:
+                    if error.code == STALE:
+                        raise _Stale(error.detail) from error
+                    if error.code not in NEXT_BUSY:
+                        raise _Stop from error
+                elif error.status in NEXT_FINAL:
+                    raise _Stop from error
         time.sleep(min(pause, max(0.0, deadline - time.monotonic())))
         pause = min(pause * 2, NEXT_BACKOFF)
 
 
 def _next(desk: Desk, seat: str | None) -> str | None:
     """The brief of the item the Desk hands this seat, or None once the seat cannot take work or the
-    wait runs out. Every request ends before NEXT_SECONDS, so no claim lands on a hook already gone."""
+    wait runs out. Every request ends before NEXT_SECONDS, so no claim lands on a hook already gone. On
+    a stale-session answer it returns the notice for the model, unless the epoch file has moved on since
+    it started: a newer session on this seat took over, and it stops silently."""
     deadline = time.monotonic() + NEXT_SECONDS
     time.sleep(NEXT_SETTLE)
+    started = epoch()
     try:
         name = seat or _ask(desk, "GET", "/v1/me", deadline)["name"]
         path = f"/v1/seats/{quote(name, safe='')}/next"
@@ -283,6 +353,8 @@ def _next(desk: Desk, seat: str | None) -> str | None:
             if isinstance(brief, str) and brief.strip():
                 return brief
             time.sleep(NEXT_PAUSE)
+    except _Stale as stale:
+        return None if epoch() != started else _stale(stale.detail)
     except (_Stop, _Deadline):
         return None
 
@@ -397,7 +469,7 @@ def _report(name: str, stdin: TextIO, env: Mapping[str, str] | None, transport: 
     if name == "statusline" and _throttled(event, os.environ if env is None else env):
         return None
     config = load(env)
-    desk = Desk(config, timeout=HOOK_SECONDS, transport=transport)
+    desk = Desk(config, HOOK_SECONDS, transport, str(event.get("session_id") or "") or None)
     try:
         if name == "next":
             return _next(desk, config.seat)

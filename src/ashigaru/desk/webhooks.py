@@ -12,11 +12,14 @@ delivery that failed half way is processed whole when the forge retries.
 Intake is held (no lane, mode manual, for Josui to assign) unless the forge
 says its author may write to the repo, or until a sender who may write adds a
 lane, which is a maintainer's approval. The checks run before the transaction,
-so no write lock waits on the forge's API.
+so no write lock waits on the forge's API. A delivery judged against a row that moved before it
+was applied (a grant would be lost) is rolled back whole, unrecorded, and judged again, up to RETRIES
+times, then applied with the grants stripped: the delivery is never held by a stale judging.
 """
 
 import dataclasses
 import hashlib
+import sqlite3
 from collections.abc import Callable, Mapping, Sequence
 from http import HTTPStatus
 from typing import Annotated, Any
@@ -34,6 +37,9 @@ MAX_BODY = 2 * 1024 * 1024
 """Issue, PR and CI payloads are tens of KB; nothing this Desk takes needs more."""
 
 UNVERIFIED = "unverified delivery"
+RETRIES = 3
+"""How many times a delivery judged against a row that moved is judged again before it is applied
+without what that judging granted."""
 
 router = APIRouter()
 
@@ -151,23 +157,45 @@ def _judged(db_path: str, adapter: Forge, access: Access, signed: str, delivery:
             return delivery
         existing = [store.item_by_subject(conn, item.subject_key) for item in delivery.intake]
         versions = [store.last_event(conn, found["id"]) if found else 0 for found in existing]
+        named = [
+            found is None and intake.by_pr(conn, item.subject_key)
+            for item, found in zip(delivery.intake, existing, strict=True)
+        ]
     finally:
         conn.close()
     items = tuple(
-        dataclasses.replace(_judge(adapter, access, item, found), judged_at=version)
-        for item, found, version in zip(delivery.intake, existing, versions, strict=True)
+        dataclasses.replace(item if owned else _judge(adapter, access, item, found), judged_at=version)
+        for item, found, version, owned in zip(delivery.intake, existing, versions, named, strict=True)
     )
     return dataclasses.replace(delivery, intake=items)
 
 
-def _apply(db_path: str, source: str, signed: str, delivery: Delivery) -> tuple[list[ci.Key], bool]:
+class Stale(Exception):
+    """A delivery was judged against a row that has since moved, so what the judging granted would be lost."""
+
+
+def _moved(conn: sqlite3.Connection, item: IntakeItem) -> bool:
+    """The item carries a grant, and the row it was judged against is no longer the row as it stands."""
+    granted = item.author_writes or item.approved or item.pushed_by_writer
+    if not granted or item.judged_at is None:
+        return False
+    found = store.item_by_subject(conn, item.subject_key)
+    return item.judged_at != (store.last_event(conn, found["id"]) if found else 0)
+
+
+def _apply(
+    db_path: str, source: str, signed: str, delivery: Delivery, *, again: bool = False
+) -> tuple[list[ci.Key], bool]:
     """Record and apply one delivery in one transaction. Returns the commits whose CI changed, and
-    whether the delivery was new."""
+    whether the delivery was new. With `again`, raises Stale, having recorded nothing, when an item was
+    judged against a row that has moved since."""
     conn = store.connect(db_path)
     try:
         with store.transaction(conn):
             if not store.record_delivery(conn, source, signed, delivery.event):
                 return [], False
+            if again and any(_moved(conn, item) for item in delivery.intake):
+                raise Stale
             commits = [ci.record(conn, update, source) for update in delivery.ci]
             for item in delivery.intake:
                 intake.upsert(conn, item)
@@ -201,11 +229,19 @@ async def webhook(request: Request, forge: str) -> WebhookAck:
     except ValueError as error:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(error)) from error
     signed = digest(adapter.name, delivery.event, body)
-    if delivery.intake:
-        state = request.app.state
-        access = Access(state.forge_tokens.get(forge, ""), state.forge_authors.get(forge, frozenset()))
-        delivery = await run_in_threadpool(_judged, state.db_path, adapter, access, signed, delivery)
-    commits, new = await run_in_threadpool(_apply, request.app.state.db_path, adapter.name, signed, delivery)
+    state = request.app.state
+    access = Access(state.forge_tokens.get(forge, ""), state.forge_authors.get(forge, frozenset()))
+    parsed, tries = delivery, 0
+    while True:
+        if parsed.intake:
+            delivery = await run_in_threadpool(_judged, state.db_path, adapter, access, signed, parsed)
+        try:
+            commits, new = await run_in_threadpool(
+                _apply, state.db_path, adapter.name, signed, delivery, again=tries < RETRIES
+            )
+            break
+        except Stale:
+            tries += 1
     request.app.state.waiters.notify(commits)
     return WebhookAck(duplicate=not new, handled=bool(delivery.ci or delivery.intake))
 

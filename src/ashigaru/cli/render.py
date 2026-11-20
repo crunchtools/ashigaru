@@ -425,7 +425,7 @@ def view(command: str, result: Any) -> str:
         return VIEWS[command](result)
     if command in LISTS:
         return table(result, LISTS[command])
-    return table([_row(result)], ROW)
+    return table([_row(result)], ROW + [("VERSION", lambda r: r.get("version"))])
 
 
 USAGE: list[Column] = [

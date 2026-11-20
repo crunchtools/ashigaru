@@ -66,6 +66,10 @@ class IntakeItem:
     """When the forge last changed the subject (UTC), so an older delivery never overwrites a newer."""
     opened_at: str | None = None
     """When the subject was opened (UTC), where the forge says."""
+    body: str = ""
+    """The subject's text (an issue's or a PR's description), empty when it has none."""
+    head_ref: str | None = None
+    """A PR's head branch name, where the forge says."""
     author_writes: bool = False
     """Set by the Desk, never by an adapter's parse: the author may write to the repo."""
     approved: bool = False

@@ -122,6 +122,23 @@ def line_time(line: dict[str, Any]) -> str | None:
     return None
 
 
+def _one_per_seat(
+    conn: sqlite3.Connection,
+    item_id: str,
+    merged: dict[str, Any],
+    patch: dict[str, Any],
+    extra: dict[str, Any],
+) -> None:
+    """A seat holds one open item: a line that would give a second its seat keeps the name under
+    `extra.ledger_seat` and leaves it seatless."""
+    seat = merged["seat"]
+    if not seat or merged["state"] in CLOSED or merged["wrap"] == "cleared":
+        return
+    if store.seat_holder(conn, seat, item_id) is not None:
+        patch["seat"] = None
+        extra["ledger_seat"] = seat
+
+
 def apply(conn: sqlite3.Connection, number: int, raw: str, summary: Summary) -> None:
     line = json.loads(raw)
     summary.last_seen = max(filter(None, (summary.last_seen, line_time(line))), default=None)
@@ -131,6 +148,9 @@ def apply(conn: sqlite3.Connection, number: int, raw: str, summary: Summary) -> 
         return
     patch, extra = to_patch(line)
     item = store.get_item(conn, line["id"])
+    _one_per_seat(
+        conn, line["id"], {**store.ITEM_DEFAULTS, "state": "queued", **(item or {}), **patch}, patch, extra
+    )
     at = line_time(line) or (item["updated_at"] if item else summary.last_seen)
     if item is None:
         store.insert_item(conn, {"id": line["id"], **patch, "extra": extra, "at": at}, ACTOR, "ledger")

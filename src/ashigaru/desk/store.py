@@ -234,6 +234,81 @@ MIGRATIONS: tuple[str, ...] = (
     """
     ALTER TABLE seats ADD COLUMN silent_since TEXT;
     """,
+    # 5.0.0. A seat session's epoch, which every write a seat makes must match, and its lease, until
+    # when the seat counts as up; the epoch of the session that took an item; a subject intake did not
+    # queue because a seat may be working it. Then the data the 4.x races left: a queued or proposed
+    # item holds no seat; a seat holds one open item (the one its row names, else its newest), and each
+    # other one leaves it, back to the queue if it was Josui's and under way, else blocked saying why,
+    # so NEEDS YOU shows it; and the seat row's status, item and owner are what its items say. Each
+    # moved item gets an event.
+    """
+    ALTER TABLE seats ADD COLUMN epoch INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE seats ADD COLUMN lease_until TEXT;
+    ALTER TABLE items ADD COLUMN epoch INTEGER;
+    ALTER TABLE subjects ADD COLUMN unlinked_at TEXT;
+    UPDATE seats SET lease_until = strftime(
+        '%Y-%m-%dT%H:%M:%SZ', updated_at, CASE turn WHEN 'active' THEN '+60 minutes' ELSE '+10 minutes' END
+    );
+    CREATE TEMP TABLE keepers AS
+        SELECT s.name AS seat, coalesce(
+            (SELECT k.id FROM items k
+             WHERE k.id = s.item AND k.seat = s.name AND coalesce(k.wrap, '') != 'cleared'
+               AND k.state NOT IN ('done', 'wontdo', 'abandoned', 'queued', 'proposed')),
+            (SELECT k.id FROM items k
+             WHERE k.seat = s.name AND coalesce(k.wrap, '') != 'cleared'
+               AND k.state NOT IN ('done', 'wontdo', 'abandoned', 'queued', 'proposed')
+             ORDER BY k.updated_at DESC, k.id DESC LIMIT 1)
+        ) AS id
+        FROM (SELECT DISTINCT i.seat AS name, (SELECT item FROM seats WHERE name = i.seat) AS item
+              FROM items i WHERE i.seat IS NOT NULL) s;
+    CREATE TEMP TABLE unseated AS
+        SELECT i.id, i.seat,
+               CASE WHEN i.state IN ('queued', 'proposed') THEN i.state
+                    WHEN i.mode = 'auto' AND i.state IN ('assigned', 'working') THEN 'queued'
+                    ELSE 'blocked' END AS state,
+               CASE WHEN i.state IN ('queued', 'proposed')
+                    THEN 'a waiting item holds no seat (was ' || i.seat || ')'
+                    ELSE 'seat ' || i.seat || ' holds ' || k.id || ', so 5.0.0 took this one off it'
+                    END AS why
+        FROM items i JOIN keepers k ON k.seat = i.seat
+        WHERE coalesce(i.wrap, '') != 'cleared' AND i.state NOT IN ('done', 'wontdo', 'abandoned')
+          AND (i.state IN ('queued', 'proposed') OR i.id != k.id);
+    INSERT INTO events (item_id, at, actor, source, patch)
+        SELECT id, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'), 'desk', 'migration',
+               json_object(
+                   'seat', NULL, 'state', state,
+                   CASE state WHEN 'blocked' THEN 'blocked_reason' ELSE 'note' END, why
+               )
+        FROM unseated;
+    UPDATE items SET
+        seat = NULL,
+        state = (SELECT state FROM unseated u WHERE u.id = items.id),
+        note = CASE WHEN (SELECT state FROM unseated u WHERE u.id = items.id) = 'blocked' THEN note
+               ELSE (SELECT why FROM unseated u WHERE u.id = items.id) END,
+        blocked_reason = CASE WHEN (SELECT state FROM unseated u WHERE u.id = items.id) = 'blocked'
+                         THEN (SELECT why FROM unseated u WHERE u.id = items.id) ELSE blocked_reason END,
+        updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
+    WHERE id IN (SELECT id FROM unseated);
+    DROP TABLE unseated;
+    DROP TABLE keepers;
+    CREATE UNIQUE INDEX items_one_per_seat ON items(seat)
+        WHERE seat IS NOT NULL AND coalesce(wrap, '') != 'cleared'
+          AND state NOT IN ('done', 'wontdo', 'abandoned');
+    UPDATE seats SET
+        item = (
+            SELECT id FROM items WHERE seat = seats.name AND coalesce(wrap, '') != 'cleared'
+              AND state NOT IN ('done', 'wontdo', 'abandoned')
+        ),
+        since = CASE
+            WHEN (status = 'busy') != EXISTS (
+                SELECT 1 FROM items WHERE seat = seats.name AND coalesce(wrap, '') != 'cleared'
+                  AND state NOT IN ('done', 'wontdo', 'abandoned')
+            ) THEN strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
+            ELSE since END;
+    UPDATE seats SET
+        status = CASE WHEN item IS NULL THEN 'free' ELSE 'busy' END,
+        owner = (SELECT CASE mode WHEN 'manual' THEN 'Scott' END FROM items WHERE id = seats.item);
+    """,
 )
 
 ITEM_DEFAULTS: dict[str, Any] = {
@@ -242,7 +317,7 @@ ITEM_DEFAULTS: dict[str, Any] = {
     "result": None, "next": None, "learned": None, "note": None, "blocked_reason": None, "memorized": False,
     "verified_by": None, "priority": 0, "wrap": None, "filed_by": None, "filed_under": None,
     "assigned_at": None, "queued_at": None, "closed_at": None, "cleared_at": None, "expires_at": None,
-    "extra": {}, "pr": None, "landed_at": None,
+    "extra": {}, "pr": None, "landed_at": None, "epoch": None,
 }  # fmt: skip
 """Every column but the four insert_item always sets: id, state, created_at, updated_at."""
 
@@ -251,12 +326,12 @@ INSERT_ITEM = """
         id, kind, parent, subject_key, task, done_when, ref, repo, lane, seat, mode, state, after,
         check_after, result, next, learned, note, blocked_reason, memorized, verified_by, priority, wrap,
         filed_by, filed_under, created_at, updated_at, assigned_at, queued_at, closed_at, cleared_at,
-        expires_at, extra, pr, landed_at
+        expires_at, extra, pr, landed_at, epoch
     ) VALUES (
         :id, :kind, :parent, :subject_key, :task, :done_when, :ref, :repo, :lane, :seat, :mode, :state,
         :after, :check_after, :result, :next, :learned, :note, :blocked_reason, :memorized, :verified_by,
         :priority, :wrap, :filed_by, :filed_under, :created_at, :updated_at, :assigned_at, :queued_at,
-        :closed_at, :cleared_at, :expires_at, :extra, :pr, :landed_at
+        :closed_at, :cleared_at, :expires_at, :extra, :pr, :landed_at, :epoch
     )
 """
 
@@ -269,12 +344,15 @@ UPDATE_ITEM = """
         priority = :priority, wrap = :wrap, filed_by = :filed_by, filed_under = :filed_under,
         created_at = :created_at, updated_at = :updated_at, assigned_at = :assigned_at,
         queued_at = :queued_at, closed_at = :closed_at, cleared_at = :cleared_at,
-        expires_at = :expires_at, extra = :extra, pr = :pr, landed_at = :landed_at
+        expires_at = :expires_at, extra = :extra, pr = :pr, landed_at = :landed_at, epoch = :epoch
     WHERE id = :id
 """
 
-LIST_ITEMS = """
-    SELECT * FROM items
+VERSION = "(SELECT coalesce(max(seq), 0) FROM events WHERE item_id = items.id) AS version"
+"""An item's version: its newest event's seq, which moves with every write to the row."""
+
+LIST_ITEMS = f"""
+    SELECT *, {VERSION} FROM items
     WHERE (:state IS NULL OR state IN (SELECT value FROM json_each(:state)))
       AND (:seat IS NULL OR seat = :seat)
       AND (:lane IS NULL OR lane = :lane) AND (:kind IS NULL OR kind = :kind)
@@ -302,11 +380,11 @@ UPSERT_SEAT = """
     INSERT INTO seats (
         name, lane, status, owner, turn, task, item, since, updated_at, model, billing, context_used,
         context_window, session_id, session_tokens, session_cost_usd, session_booked_usd, turn_started_at,
-        waiting_on, turn_reconciled_at, silent_since
+        waiting_on, turn_reconciled_at, silent_since, epoch, lease_until
     ) VALUES (
         :name, :lane, :status, :owner, :turn, :task, :item, :since, :updated_at, :model, :billing,
         :context_used, :context_window, :session_id, :session_tokens, :session_cost_usd, :session_booked_usd,
-        :turn_started_at, :waiting_on, :turn_reconciled_at, :silent_since
+        :turn_started_at, :waiting_on, :turn_reconciled_at, :silent_since, :epoch, :lease_until
     )
     ON CONFLICT (name) DO UPDATE SET
         lane = excluded.lane, status = excluded.status, owner = excluded.owner, turn = excluded.turn,
@@ -316,24 +394,32 @@ UPSERT_SEAT = """
         session_tokens = excluded.session_tokens, session_cost_usd = excluded.session_cost_usd,
         session_booked_usd = excluded.session_booked_usd, turn_started_at = excluded.turn_started_at,
         waiting_on = excluded.waiting_on, turn_reconciled_at = excluded.turn_reconciled_at,
-        silent_since = excluded.silent_since
+        silent_since = excluded.silent_since, epoch = excluded.epoch, lease_until = excluded.lease_until
 """
 
 SEAT_DEFAULTS: dict[str, Any] = {
     "lane": None, "status": "free", "owner": None, "turn": "idle", "task": None, "item": None,
     "model": None, "billing": None, "context_used": None, "context_window": None, "session_id": None,
     "session_tokens": None, "session_cost_usd": 0.0, "session_booked_usd": 0.0, "turn_started_at": None,
-    "waiting_on": None, "turn_reconciled_at": None, "silent_since": None,
+    "waiting_on": None, "turn_reconciled_at": None, "silent_since": None, "epoch": 0, "lease_until": None,
 }  # fmt: skip
-
-RELEASE_SEAT = """
-    UPDATE seats SET status = 'free', owner = NULL, item = NULL, since = :at, updated_at = :at
-    WHERE item = :item
-"""
 
 # Scott's hold follows the mode of the item a seat holds: `manual` hands it to him, `auto` to Josui.
 MANUAL_OWNER = "Scott"
-HOLD_SEAT = "UPDATE seats SET owner = :owner, updated_at = :at WHERE item = :item"
+OCCUPY_SEAT = """
+    UPDATE seats SET
+        status = CASE WHEN :item IS NULL THEN 'free' ELSE 'busy' END,
+        since = CASE WHEN (status = 'busy') != (:item IS NOT NULL) THEN :at ELSE since END,
+        item = :item,
+        owner = :owner
+    WHERE name = :seat
+"""
+"""A seat row's status, item and owner, as its open item says. Not a write by the seat: `updated_at`
+and `silent_since` stay as the seat left them."""
+OCCUPANCY_FIELDS = frozenset({"seat", "state", "wrap", "mode"})
+"""The item fields a seat row's occupancy follows: a write to any of them occupies its seats anew."""
+SEATLESS = frozenset({State.QUEUED, State.PROPOSED})
+"""States an item waits in for a seat, so it holds none."""
 
 WRITE_CHECK = """
     INSERT INTO ci_checks (repo, sha, key, name, verdict, run, url, source, updated_at, received_at)
@@ -364,7 +450,12 @@ TIMESTAMP_FOR_STATE = {State.ASSIGNED: "assigned_at", State.QUEUED: "queued_at"}
 
 
 class Conflict(Exception):
-    """A write that would break a uniqueness rule (id, subject_key, one child)."""
+    """A write that would break a uniqueness rule (id, subject_key, one child, one item per seat), or
+    an item or seat not in a state for it. `code` says which, where a client acts on it."""
+
+    def __init__(self, message: str, code: str | None = None) -> None:
+        super().__init__(message)
+        self.code = code
 
 
 def now() -> str:
@@ -439,8 +530,16 @@ def _unknown(fields: dict[str, Any]) -> None:
 
 
 def get_item(conn: sqlite3.Connection, item_id: str) -> dict[str, Any] | None:
-    row = conn.execute("SELECT * FROM items WHERE id = ?", (item_id,)).fetchone()
+    row = conn.execute(f"SELECT *, {VERSION} FROM items WHERE id = ?", (item_id,)).fetchone()
     return decode(row) if row else None
+
+
+def seat_holder(conn: sqlite3.Connection, seat: str, other_than: str | None = None) -> str | None:
+    """The open item the seat holds, other than `other_than`; a seat holds at most one."""
+    row = conn.execute(
+        f"SELECT id FROM items WHERE seat = ? AND id IS NOT ? AND {OPEN}", (seat, other_than)
+    ).fetchone()
+    return str(row[0]) if row else None
 
 
 def list_items(
@@ -495,46 +594,79 @@ def _taken(conn: sqlite3.Connection, fields: dict[str, Any]) -> str | None:
     return f"subject_key {key} is taken by {row[0]}" if row else None
 
 
+def _seated(current: dict[str, Any], fields: dict[str, Any]) -> dict[str, Any]:
+    """The patch, with the rule that a waiting item holds no seat: a move to a SEATLESS state drops the
+    seat, and giving a waiting item a seat assigns it."""
+    state, seat = fields.get("state", current["state"]), fields.get("seat", current["seat"])
+    if seat is None or state not in SEATLESS:
+        return fields
+    if "state" in fields:
+        return {**fields, "seat": None}
+    return {**fields, "state": State.ASSIGNED}
+
+
+def _busy(conn: sqlite3.Connection, item: dict[str, Any]) -> None:
+    """Raise Conflict (busy) when the item would be a second open item on its seat."""
+    if not item["seat"] or item["state"] in CLOSED or item["wrap"] == Wrap.CLEARED:
+        return
+    holder = seat_holder(conn, item["seat"], item["id"])
+    if holder is not None:
+        raise Conflict(f"seat {item['seat']!r} is busy with {holder}", "busy")
+
+
+def occupy(conn: sqlite3.Connection, seat: str | None, at: str | None = None) -> None:
+    """Set the seat row's status, item and owner from the open item it holds (OCCUPY_SEAT); the caller
+    holds the transaction. Every item write that can move a seat calls it, so the row never disagrees."""
+    if seat is None:
+        return
+    row = conn.execute(f"SELECT id, mode FROM items WHERE seat = ? AND {OPEN}", (seat,)).fetchone()
+    owner = MANUAL_OWNER if row and row["mode"] == "manual" else None
+    held = row["id"] if row else None
+    conn.execute(OCCUPY_SEAT, {"seat": seat, "item": held, "owner": owner, "at": at or now()})
+
+
 def insert_item(conn: sqlite3.Connection, fields: dict[str, Any], actor: str, source: str = "api") -> str:
-    """Insert one item; the caller holds the transaction. Raises Conflict on a taken id or subject_key."""
+    """Insert one item; the caller holds the transaction. Raises Conflict on a taken id or subject_key,
+    or a seat that already holds an open item."""
     fields = dict(fields)
     at = fields.pop("at", None) or now()
     _unknown(fields)
     fields.setdefault("id", next_id(conn))
     fields.setdefault("state", State.QUEUED)
     fields.setdefault("created_at", at)
-    fields = _stamp(fields, at)
+    fields = _stamp(_seated({**ITEM_DEFAULTS, **fields}, fields), at)
+    _busy(conn, {**ITEM_DEFAULTS, **fields})
     try:
         conn.execute(INSERT_ITEM, _encode({**ITEM_DEFAULTS, **fields}))
     except sqlite3.IntegrityError as error:
         raise Conflict(_taken(conn, fields) or str(error)) from error
     _record(conn, fields["id"], actor, source, fields)
+    occupy(conn, fields.get("seat"), at)
     return str(fields["id"])
 
 
 def update_item(
     conn: sqlite3.Connection, item_id: str, fields: dict[str, Any], actor: str, source: str = "api"
 ) -> None:
-    """Apply a patch to the stored row; the caller holds the transaction. KeyError if no such item."""
-    fields = dict(fields)
-    at = fields.pop("at", None) or now()
-    _unknown(fields)
-    current = get_item(conn, item_id)
-    if current is None:
+    """Apply a patch to the stored row; the caller holds the transaction. KeyError if no such item.
+    Conflict (busy) when it would give a seat a second open item. The seats it leaves and takes are
+    occupied anew (`occupy`)."""
+    found = get_item(conn, item_id)
+    if found is None:
         raise KeyError(item_id)
-    fields = _stamp(fields, at)
+    current = {key: value for key, value in found.items() if key != "version"}
+    at, patch = fields.get("at") or now(), {key: value for key, value in fields.items() if key != "at"}
+    _unknown(patch)
+    patch = _stamp(_seated(current, patch), at)
+    after = {**current, **patch, "id": item_id}
+    _busy(conn, after)
     try:
-        conn.execute(UPDATE_ITEM, _encode({**current, **fields, "id": item_id}))
+        conn.execute(UPDATE_ITEM, _encode(after))
     except sqlite3.IntegrityError as error:
         raise Conflict(str(error)) from error
-    _record(conn, item_id, actor, source, fields)
-    closed = fields.get("state") in CLOSED or fields.get("wrap") == Wrap.CLEARED
-    reassigned = "seat" in fields and fields["seat"] != current["seat"]
-    if closed or reassigned:
-        conn.execute(RELEASE_SEAT, {"at": at, "item": item_id})
-    elif fields.get("mode", current["mode"]) != current["mode"]:
-        owner = MANUAL_OWNER if fields["mode"] == "manual" else None
-        conn.execute(HOLD_SEAT, {"owner": owner, "at": at, "item": item_id})
+    _record(conn, item_id, actor, source, patch)
+    for seat in dict.fromkeys((current["seat"], after["seat"]) if set(patch) & OCCUPANCY_FIELDS else ()):
+        occupy(conn, seat, at)
 
 
 def file_child(conn: sqlite3.Connection, story: dict[str, Any], fields: dict[str, Any], actor: str) -> str:
@@ -774,7 +906,7 @@ def ci_checks(conn: sqlite3.Connection, repo: str, sha: str) -> list[dict[str, A
 
 
 def item_by_subject(conn: sqlite3.Connection, subject_key: str) -> dict[str, Any] | None:
-    row = conn.execute("SELECT * FROM items WHERE subject_key = ?", (subject_key,)).fetchone()
+    row = conn.execute(f"SELECT *, {VERSION} FROM items WHERE subject_key = ?", (subject_key,)).fetchone()
     return decode(row) if row else None
 
 

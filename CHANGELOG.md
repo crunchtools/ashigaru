@@ -6,6 +6,92 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### BREAKING
+- Seats have sessions, epochs and leases. A seat registers each session with
+  `POST /v1/seats/{name}/session`, and every request it makes carries
+  `X-Ashigaru-Epoch`, and each hook its Claude Code session as
+  `X-Ashigaru-Session`; one from a session the Desk has ended, or another
+  session's hook on the seat, is 409 `stale-session` and changes nothing. A
+  seat is `missing` (never picked or assigned) when its lease is not live (10
+  minutes idle, 60 mid-turn), where it was "no write for 24 hours"; that alone
+  keeps its session and its work. A seat that never registered a session (a 4.x
+  seat, epoch 0) is still served without an epoch, and its first resume adopts
+  its session and keeps its work; once it has registered one, a REST request
+  without an epoch is 409 `stale-session`. MCP tool calls name no session and
+  are not fenced.
+- Rollout: the Desk and Prime's skill together, then the seat images
+  immediately; a seat on a 4.x image is refused once its first 5.0 session
+  registers. Rolling back to 4.3 keeps migration 12's unique index, so a 4.3
+  reopen or seat change onto an occupied seat is a 409; leases recorded under
+  5.0 are stale on the roll forward, so every seat is `missing` until its next
+  request.
+- Seat occupancy is derived. A seat holds at most one open item, and its row's
+  `status`, `item` and `owner` are recomputed from that item on every item
+  write. An admin `PATCH /v1/seats/{name}` that would change one of them is 409
+  `derived`: assign, claim, update or wrap the item instead.
+- `desk_wrap` and `desk_report` take their body as `fields` (a WrapUp or a
+  Report object), not as loose arguments.
+- Migration 12 changes stored rows: it drops the seat of queued and proposed
+  items, and where a seat held several open items keeps the one its row named
+  (else the newest) and requeues or unseats the others, each with an event from
+  source `migration`: Josui's `assigned` or `working` item goes back to the
+  queue, any other goes `blocked` with the reason, under NEEDS YOU.
+
+### Added
+- PRs are linked by construction. A brief now tells the seat to branch
+  `fix/aN-<short-slug>` (the gateways take only typed prefixes) and end the PR
+  body with `Ashigaru-Item: aN`. Intake, webhook and sweep alike, links a
+  writer's PR to the open, pr-less item in its repo that it names (trailer, else
+  a head branch `aN-` or `aN/` after one type prefix or none, else `(aN)` in the
+  title or body) and inserts no item. A PR an item already names never queues
+  another. A writer's PR that names nothing while a seat holds an open pr-less
+  item in its repo is recorded with `unlinked_at` and listed under NEEDS YOU as
+  `unlinked` until `ashigaru update aN --pr <url>` names it.
+- Versioned writes. Items carry `version` (their last event's seq), and PATCH,
+  report, file, wrap, assign and claim take `If-Match: <version>`, answering
+  412 `version` when the item moved. The CLI takes `--if-version N` on update,
+  report, wrap, assign, claim and file, prints the Desk's reason and the item
+  as it now stands, and exits 1; item tables show VERSION. The MCP tools take
+  `if_version`.
+- 409 and 412 bodies carry a `code`: `stale-session`, `busy`, `held`, `unseen`,
+  `no-lane`, `missing`, `derived`, `not-ready`, `version`.
+- A seat's turn starting on Josui's item still `assigned` moves it to
+  `working`. When that turn is Scott's first typed prompt instead, the item goes
+  back to the queue and the seat becomes his, with a new manual item.
+- NEEDS YOU lists blocked items no seat holds, such as one cleared before its
+  wrap.
+
+### Changed
+- `session-start` registers the session and writes the epoch to
+  `~/.local/state/ashigaru/epoch`; on a 4.x Desk it falls back to the old PATCH,
+  and on a stale resume it prints a notice on stdout. `next` retries `busy` and
+  `held` with backoff instead of stopping, wakes the seat on `stale-session`
+  (silently stops when a newer session superseded it), and stops on any other
+  409 as before.
+- Startup and `/clear` end the seat's previous session: Josui's `assigned` or
+  `working` item leaves the seat `blocked`, any other state as it stands; a
+  wrapping item stays for `wrap`; Scott's manual item is wrap-cleared on clear
+  and left open and seatless on startup. A resume of the seat's current
+  session keeps its epoch and its work however long it was idle. Reconcile ends
+  a session whose lease ran out a day ago (`STALE_SEAT`, counting no silence
+  from before the Desk came up) and requeues Josui's `assigned` and `working`
+  items.
+- Assign never picks a missing, held, busy or mid-turn seat; naming a missing
+  one is 409 `missing`. Moving an item to another seat takes that seat (409
+  `busy`, 409 `unseen`) and frees the old; a move to queued or proposed frees
+  the seat, and giving a queued item a seat makes it `assigned`.
+- An item `next` handed a seat that is still `assigned` after 10 minutes goes
+  back to the queue. An item Josui assigned is never handed back.
+- Intake judges a delivery against the row as it was; one that moved before it
+  applied is rolled back and judged again, up to 3 times, instead of dropping an
+  approval. An older delivery by the forge's `updated_at` no longer rewrites the
+  item's source title, labels, state or ref.
+- The ledger importer keeps a seat on one open item; a later line that would seat
+  a second leaves the name in `extra.ledger_seat`.
+
+### Removed
+- The sweep's `(aN)` LINK block; intake links PRs for the sweep and the webhook.
+
 ## [4.3.2] - 2026-11-20
 
 ### Fixed

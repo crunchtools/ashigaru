@@ -7,7 +7,7 @@ from http.client import CONFLICT, CREATED, FORBIDDEN, NOT_FOUND, OK, UNPROCESSAB
 from pathlib import Path
 
 import pytest
-from conftest import Keys
+from conftest import Keys, up_seat
 from fastapi.testclient import TestClient
 
 from ashigaru.desk import __main__ as desk_main
@@ -135,8 +135,10 @@ def test_queue_names_the_state_of_what_each_item_waits_on(client: TestClient, ke
     assert [row["id"] for row in view["proposed"]] == ["a3"]
 
 
-def test_wrap_marks_wrapping_then_clears_once_memorized_and_idle(client: TestClient, keys: Keys) -> None:
-    client.patch(f"/v1/seats/{SEAT}", headers=keys[JOSUI], json={"lane": "exedore-max"})
+def test_wrap_marks_wrapping_then_clears_once_memorized_and_idle(
+    client: TestClient, keys: Keys, conn: sqlite3.Connection
+) -> None:
+    up_seat(conn, SEAT, lane="exedore-max")
     item = client.post("/v1/items", headers=keys[JOSUI], json={"task": "t", "lane": "exedore-max"}).json()
     path = f"/v1/items/{item['id']}"
     client.post(f"{path}/assign", headers=keys[JOSUI], json={"seat": SEAT})
@@ -229,8 +231,11 @@ def test_seats_show_the_missing(client: TestClient, keys: Keys, conn: sqlite3.Co
     assert set(rows) == {SEAT, "Exedore 2 - Max"}
     assert rows[SEAT]["missing"] is False
     assert rows["Exedore 2 - Max"]["missing"] is True and rows["Exedore 2 - Max"]["updated_at"] is None
-    conn.execute("UPDATE seats SET updated_at = '2000-01-01T00:00:00Z' WHERE name = ?", (SEAT,))
+    assert rows[SEAT]["lease_until"] is not None
+    conn.execute("UPDATE seats SET lease_until = '2000-01-01T00:00:00Z' WHERE name = ?", (SEAT,))
     assert client.get(f"/v1/seats/{SEAT}", headers=keys["ci"]).json()["missing"] is True
+    client.patch(f"/v1/seats/{SEAT}", headers=keys[SEAT], json={"turn": "idle"})
+    assert client.get(f"/v1/seats/{SEAT}", headers=keys["ci"]).json()["missing"] is False
 
 
 def test_marks_are_read_by_all_and_set_by_an_admin(client: TestClient, keys: Keys) -> None:

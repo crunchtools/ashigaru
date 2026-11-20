@@ -24,6 +24,7 @@ def items(client: TestClient, keys: Keys) -> list[dict[str, Any]]:
 def free_seat(client: TestClient, keys: Keys) -> None:
     body = {"lane": "exedore-max", "status": "free"}
     assert client.patch(f"/v1/seats/{MINE}", headers=keys[JOSUI], json=body).status_code == OK
+    report(client, keys, turn="idle")
 
 
 def test_a_typed_first_prompt_on_a_free_seat_is_scotts_manual_work(client: TestClient, keys: Keys) -> None:
@@ -54,12 +55,26 @@ def test_claude_codes_own_turns_never_start_a_hold(client: TestClient, keys: Key
     assert seat["hold"] == "free" and items(client, keys) == []
 
 
-def test_a_seat_on_an_assigned_item_stays_on_it(client: TestClient, keys: Keys) -> None:
+def test_a_typed_first_prompt_hands_back_an_assigned_item_it_has_not_started(
+    client: TestClient, keys: Keys
+) -> None:
     free_seat(client, keys)
     item = client.post("/v1/items", headers=keys[JOSUI], json={"task": "t"}).json()["id"]
     assert client.post(f"/v1/items/{item}/assign", headers=keys[JOSUI], json={"seat": MINE}).status_code == OK
     seat = report(client, keys, turn="active", task="a typed prompt")
+    assert (seat["owner"], seat["hold"]) == ("Scott", "busy-manual") and seat["item"] != item
+    handed_back = client.get(f"/v1/items/{item}", headers=keys[JOSUI]).json()
+    assert (handed_back["state"], handed_back["seat"]) == ("queued", None)
+    assert {work["id"] for work in items(client, keys)} == {item, seat["item"]}
+
+
+def test_a_turn_starting_on_an_assigned_item_acknowledges_it(client: TestClient, keys: Keys) -> None:
+    free_seat(client, keys)
+    item = client.post("/v1/items", headers=keys[JOSUI], json={"task": "t"}).json()["id"]
+    assert client.post(f"/v1/items/{item}/assign", headers=keys[JOSUI], json={"seat": MINE}).status_code == OK
+    seat = report(client, keys, turn="active")
     assert (seat["item"], seat["owner"], seat["hold"]) == (item, None, "busy-auto")
+    assert client.get(f"/v1/items/{item}", headers=keys[JOSUI]).json()["state"] == "working"
     assert len(items(client, keys)) == 1
 
 

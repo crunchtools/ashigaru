@@ -22,7 +22,7 @@ from pydantic import BaseModel
 from ashigaru.cli import hooks
 from ashigaru.cli.__main__ import parser
 from ashigaru.desk.mcp.server import mcp
-from ashigaru.desk.model import ItemCreate, ItemFilter, ItemPatch, NewItem
+from ashigaru.desk.model import ItemCreate, ItemFilter, ItemPatch, NewItem, Report, WrapUp
 
 ROOT = Path(__file__).resolve().parents[1]
 SKILL = (ROOT / "skills" / "ashigaru" / "SKILL.md").read_text()
@@ -111,6 +111,8 @@ MODELS: dict[str, type[BaseModel]] = {
     "record": NewItem,
     "desk_create": ItemCreate,
     "desk_update": ItemPatch,
+    "desk_wrap": WrapUp,
+    "desk_report": Report,
 }
 """A tool argument that carries a model's fields, as the CLI's flags do one by one: by its name, or
 for `fields`, by the tool's."""

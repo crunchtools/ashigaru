@@ -5,6 +5,8 @@ draft, review, title, labels) in the same transaction as intake, then settles
 every item whose subject_key or pr names it. A merged change never goes back to
 open or closed, and an older delivery (by the forge's `updated_at`) never
 overwrites a newer one.
+A subject intake did not queue because a seat may have opened it carries `unlinked_at`
+(intake.unlinked lists those no item names); recording never touches it.
 
 Settling never touches what a person holds. A seat's item whose subject or PR
 merged is marked `landed_at` and waits for its wrap. A seatless item nobody has

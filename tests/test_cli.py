@@ -15,7 +15,7 @@ from fake_desk import FakeDesk, Seen, serve
 from ashigaru import __version__
 from ashigaru.cli import commands, config, hooks, render
 from ashigaru.cli.__main__ import main
-from ashigaru.cli.client import Desk, DeskError, Unreachable
+from ashigaru.cli.client import Desk, DeskError, Send, Unreachable
 from ashigaru.cli.wait import CIWaiter, PollWaiter
 
 KEY = "ash_k1_secret"
@@ -729,7 +729,7 @@ def test_a_long_poll_outlasts_the_clients_timeout(desk: FakeDesk) -> None:
     client = Desk(config.load(), timeout=0.1)
     with pytest.raises(Unreachable):
         client.request("GET", "/v1/ci/wait")
-    assert client.request("GET", "/v1/ci/wait", timeout=2.0)["status"] == "success"
+    assert client.request("GET", "/v1/ci/wait", send=Send(timeout=2.0))["status"] == "success"
 
 
 def test_wait_on_a_commit_pauses_no_longer_than_its_deadline(desk: FakeDesk) -> None:
@@ -841,6 +841,53 @@ def patches(desk: FakeDesk) -> list[Any]:
 def test_session_start(seat: FakeDesk, source: str, sent: list[Any]) -> None:
     assert hook("session-start", {"hook_event_name": "SessionStart", "source": source}) == 0
     assert patches(seat) == sent
+
+
+SESSION = "/v1/seats/Max%201/session"
+
+
+def test_session_start_registers_the_session_and_keeps_the_epoch(seat: FakeDesk) -> None:
+    seat.on("POST", SESSION, (200, {"epoch": 4, "seat": SEAT}))
+    assert hook("session-start", {"session_id": "s1", "source": "clear"}) == 0
+    assert seat.calls("POST", SESSION)[0].body == {"session_id": "s1", "source": "clear"}
+    assert patches(seat) == [] and hooks.epoch_file().read_text() == "4\n"
+    assert not hooks.epoch_file().with_suffix(".tmp").exists()
+    hook("stop", {})
+    assert seat.calls("PATCH", "/v1/seats/Max%201")[0].headers["X-Ashigaru-Epoch"] == "4"
+
+
+@pytest.mark.parametrize("missing", [404, 405])
+def test_session_start_falls_back_to_the_patch_on_an_old_desk(seat: FakeDesk, missing: int) -> None:
+    hooks.epoch_file().parent.mkdir(parents=True)
+    hooks.epoch_file().write_text("3\n")
+    seat.on("POST", SESSION, (missing, {"detail": "nope"}))
+    assert hook("session-start", {"session_id": "s1", "source": "clear"}) == 0
+    assert patches(seat) == [{"turn": "idle", "task": None}] and not hooks.epoch_file().exists()
+
+
+def test_a_hook_names_its_session_and_the_cli_none(seat: FakeDesk) -> None:
+    hook("stop", {"session_id": "s1"})
+    assert seat.calls("PATCH", "/v1/seats/Max%201")[0].headers["X-Ashigaru-Session"] == "s1"
+    hook("stop", {})
+    assert "X-Ashigaru-Session" not in seat.calls("PATCH", "/v1/seats/Max%201")[1].headers
+
+
+def test_session_start_does_not_register_a_compact(seat: FakeDesk) -> None:
+    seat.on("POST", SESSION, (200, {"epoch": 4, "seat": SEAT}))
+    hook("session-start", {"session_id": "s1", "source": "compact"})
+    assert not seat.seen
+
+
+def test_session_start_tells_the_model_a_resumed_session_is_stale(
+    seat: FakeDesk, capsys: pytest.CaptureFixture[str]
+) -> None:
+    hooks.epoch_file().parent.mkdir(parents=True)
+    hooks.epoch_file().write_text("2\n")
+    seat.on("POST", SESSION, (409, {"detail": "its lease lapsed", "code": "stale-session"}))
+    assert hook("session-start", {"session_id": "s1", "source": "resume"}) == 0
+    out = capsys.readouterr().out
+    assert out.startswith("Ashigaru Desk: this session is stale: its lease lapsed.") and "/clear" in out
+    assert patches(seat) == [] and hooks.epoch_file().read_text() == "2\n"
 
 
 def test_the_first_typed_prompt_is_the_task(seat: FakeDesk, capsys: pytest.CaptureFixture[str]) -> None:
@@ -1060,13 +1107,82 @@ def test_next_wakes_the_seat_with_the_brief_on_stderr(
     assert len(asks) == len(["204", "204", "200"]) and asks[0].query == {"wait": [str(hooks.NEXT_WAIT)]}
 
 
-@pytest.mark.parametrize("final", [401, 403, 404, 409])
+@pytest.mark.parametrize(
+    "final",
+    [(401, None), (403, None), (404, None), (409, None), (409, "unseen"), (409, "no-lane")],
+)
 def test_next_stops_quietly_when_the_seat_will_not_get_work(
-    waking: FakeDesk, capsys: pytest.CaptureFixture[str], final: int
+    waking: FakeDesk, capsys: pytest.CaptureFixture[str], final: tuple[int, str | None]
 ) -> None:
-    waking.on("POST", NEXT, (final, {"detail": "seat 'Max 1' is busy with a3"}))
+    status, code = final
+    waking.on("POST", NEXT, (status, {"detail": "seat 'Max 1' is busy with a3", "code": code}))
     assert hook("next", {}) == 0
     assert capsys.readouterr().out == "" and len(waking.calls("POST", NEXT)) == 1
+
+
+@pytest.mark.parametrize("code", ["busy", "held"])
+def test_next_asks_again_of_a_seat_that_is_busy_for_now(
+    waking: FakeDesk, capsys: pytest.CaptureFixture[str], code: str
+) -> None:
+    """Race R2: a /clear lands before Prime's wrap, so the seat is still busy with the old item."""
+    busy = (409, {"detail": "seat is busy with a3", "code": code})
+    answers = iter([busy, busy, (200, {"brief": "Desk assignment a7"})])
+    waking.on("POST", NEXT, lambda seen: next(answers))
+    assert hook("next", {}) == hooks.WAKE
+    assert capsys.readouterr().err.strip() == "Desk assignment a7"
+    assert len(waking.calls("POST", NEXT)) == len(["busy", "busy", "brief"])
+
+
+def stale() -> tuple[int, Any]:
+    return 409, {"detail": "the Desk ended it", "code": "stale-session"}
+
+
+def keep_epoch(number: int) -> None:
+    hooks.epoch_file().parent.mkdir(parents=True, exist_ok=True)
+    hooks.epoch_file().write_text(f"{number}\n")
+
+
+def test_next_tells_the_model_its_session_was_ended(
+    waking: FakeDesk, capsys: pytest.CaptureFixture[str]
+) -> None:
+    keep_epoch(7)
+    waking.on("POST", NEXT, stale())
+    assert hook("next", {}) == hooks.WAKE
+    captured = capsys.readouterr()
+    assert captured.out == "" and captured.err.startswith("Ashigaru Desk: this session is stale: the Desk")
+    assert "Ask for /clear to rejoin." in captured.err and len(waking.calls("POST", NEXT)) == 1
+
+
+def test_next_stops_silently_when_a_newer_session_took_the_seat(
+    waking: FakeDesk, capsys: pytest.CaptureFixture[str]
+) -> None:
+    keep_epoch(7)
+
+    def cleared(seen: Seen) -> tuple[int, Any]:
+        keep_epoch(8)
+        return stale()
+
+    waking.on("POST", NEXT, cleared)
+    assert hook("next", {}) == 0
+    captured = capsys.readouterr()
+    assert captured.out == "" and captured.err == ""
+
+
+def test_every_request_carries_the_epoch_when_there_is_one(seat: FakeDesk) -> None:
+    hook("stop", {})
+    keep_epoch(7)
+    hook("stop", {})
+    hooks.epoch_file().write_text("junk\n")
+    hook("stop", {})
+    held = [s.headers.get("X-Ashigaru-Epoch") for s in seat.calls("PATCH", "/v1/seats/Max%201")]
+    assert held == [None, "7", None]
+
+
+def test_the_cli_carries_the_epoch_too(desk: FakeDesk) -> None:
+    keep_epoch(3)
+    desk.on("PATCH", "/v1/items/a1", (200, item()))
+    assert main(["update", "a1", "--note", "x"]) == 0
+    assert desk.seen[0].headers["X-Ashigaru-Epoch"] == "3"
 
 
 @pytest.mark.parametrize("passing", [500, 502, 503, 504, 429])
@@ -1627,3 +1743,56 @@ def test_shown_width_counts_a_link_by_its_label_an_escape_once_and_an_emoji_twic
     assert render._shown("[RT#1](https://x)") == len("RT#1")
     assert render._shown(r"a\*b") == len("a*b")
     assert render._shown("🟢 x") == len("🟢 x") + 1
+
+
+# Versioned writes
+
+
+def test_if_version_sends_if_match(desk: FakeDesk) -> None:
+    desk.on("PATCH", "/v1/items/a1", (200, item(version=5)))
+    desk.on("POST", "/v1/items/a1/report", (200, item(version=6)))
+    for path in ("wrap", "assign", "claim", "file"):
+        desk.on("POST", f"/v1/items/a1/{path}", (200, item(version=7)))
+    for argv in (
+        ["update", "a1", "--note", "x"],
+        ["report", "a1", "DONE", "--text", "t"],
+        ["wrap", "a1"],
+        ["assign", "a1", "--seat", "Vertex 1"],
+        ["claim", "a1"],
+        ["file", "a1", "--task", "t"],
+    ):
+        assert main([*argv, "--if-version", "4"]) == 0
+    assert [s.headers.get("If-Match") for s in desk.seen] == ["4"] * 6
+    assert main(["update", "a1", "--note", "x"]) == 0
+    assert "If-Match" not in desk.seen[-1].headers
+
+
+def test_a_stale_version_prints_the_desks_reason_and_the_item_as_it_stands(
+    desk: FakeDesk, capsys: pytest.CaptureFixture[str]
+) -> None:
+    desk.on("PATCH", "/v1/items/a1", (412, {"detail": "a1 moved on to version 6", "code": "version"}))
+    desk.on("GET", "/v1/items/a1", (200, item(version=6, state="review")))
+    assert main(["update", "a1", "--note", "x", "--if-version", "4"]) == 1
+    captured = capsys.readouterr()
+    lines = captured.out.splitlines()
+    assert "a1 moved on to version 6" in captured.err
+    assert lines[0].split()[-1] == "VERSION" and lines[1].split()[-1] == "6" and "review" in lines[1]
+
+
+def test_get_shows_the_version(desk: FakeDesk, capsys: pytest.CaptureFixture[str]) -> None:
+    desk.on("GET", "/v1/items/a1", (200, item(version=9)))
+    assert main(["get", "a1"]) == 0
+    lines = capsys.readouterr().out.splitlines()
+    assert lines[0].split()[-1] == "VERSION" and lines[1].split()[-1] == "9"
+
+
+def test_a_desk_error_carries_its_code(desk: FakeDesk) -> None:
+    desk.on("GET", "/v1/items/a1", (409, {"detail": "busy", "code": "busy"}))
+    desk.on("GET", "/v1/items/a2", (409, {"detail": "old desk"}))
+    client = Desk(config.load())
+    with pytest.raises(DeskError) as busy:
+        client.get("/v1/items/a1")
+    with pytest.raises(DeskError) as old:
+        client.get("/v1/items/a2")
+    client.close()
+    assert (busy.value.code, old.value.code) == ("busy", None)
