@@ -13,7 +13,7 @@ from fastapi import Request
 from fastapi.testclient import TestClient
 
 from ashigaru.desk import api, auth, dispatch, store
-from ashigaru.desk.model import NextWait, Role
+from ashigaru.desk.model import NextItem, NextWait, Role
 
 MONTHLY_LIMIT = 500
 WAIT = 1
@@ -176,6 +176,32 @@ def test_next_refuses_a_seat_that_cannot_take_work(client: TestClient, keys: Key
     assert next_item(client, keys, OTHER, who=CI).status_code == FORBIDDEN
 
 
+def test_next_waits_out_a_wrap_until_the_item_closes(client: TestClient, keys: Keys) -> None:
+    seat(client, keys, MINE)
+    switch(client, keys, "on")
+    first = item(client, keys, lane="exedore-max")
+    second = item(client, keys, lane="exedore-max")
+    assert next_item(client, keys, MINE).json()["item"]["id"] == first
+    assert next_item(client, keys, MINE).status_code == CONFLICT
+    client.post(f"/v1/items/{first}/wrap", headers=keys[JOSUI], json={"stage": "wrapping"})
+    assert next_item(client, keys, MINE).status_code == NO_CONTENT
+    client.post(f"/v1/items/{first}/report", headers=keys[MINE], json={"verb": "CC-DONE"})
+    assert client.post(f"/v1/items/{first}/wrap", headers=keys[JOSUI], json={}).status_code == OK
+    assert next_item(client, keys, MINE).json()["item"]["id"] == second
+
+
+def test_next_is_busy_while_a_wrapping_seat_is_mid_turn(client: TestClient, keys: Keys) -> None:
+    seat(client, keys, MINE)
+    switch(client, keys, "on")
+    first = item(client, keys, lane="exedore-max")
+    assert next_item(client, keys, MINE).json()["item"]["id"] == first
+    client.post(f"/v1/items/{first}/wrap", headers=keys[JOSUI], json={"stage": "wrapping"})
+    client.patch(f"/v1/seats/{MINE}", headers=keys[MINE], json={"turn": "active"})
+    assert next_item(client, keys, MINE).status_code == CONFLICT
+    client.patch(f"/v1/seats/{MINE}", headers=keys[MINE], json={"turn": "idle"})
+    assert next_item(client, keys, MINE).status_code == NO_CONTENT
+
+
 def test_next_never_hands_a_mid_turn_seat_a_second_brief(client: TestClient, keys: Keys) -> None:
     seat(client, keys, MINE)
     switch(client, keys, "on")
@@ -242,6 +268,34 @@ def test_a_claim_made_as_the_client_leaves_is_handed_back(
     left, freed = store.get_item(conn, work), store.get_seat(conn, MINE)
     assert left is not None and (left["seat"], left["state"]) == (None, "queued")
     assert freed is not None and (freed["status"], freed["item"]) == ("free", None)
+
+
+def test_one_long_poll_rides_out_a_wrap_and_claims_once_the_item_closes(
+    client: TestClient, keys: Keys, conn: sqlite3.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    class Wrapped:
+        """Listening throughout; Prime closes the wrapping item between the first look and the second."""
+
+        looks = 0
+        closed = False
+
+        async def is_disconnected(self) -> bool:
+            self.looks += 1
+            if self.looks > 1 and not self.closed:
+                self.closed = True
+                dispatch.wrap(conn, first, {"stage": "cleared", "state": "done", "force": True}, JOSUI)
+            return False
+
+    monkeypatch.setattr(api, "NEXT_TICK", 0.05)
+    seat(client, keys, MINE)
+    switch(client, keys, "on")
+    first = item(client, keys, lane="exedore-max")
+    second = item(client, keys, lane="exedore-max")
+    assert dispatch.next_item(conn, MINE) is not None
+    client.post(f"/v1/items/{first}/wrap", headers=keys[JOSUI], json={"stage": "wrapping"})
+    caller = auth.Caller(name=MINE, role=Role.SEAT, key_id="k")
+    answer = asyncio.run(api.next_item(cast(Request, Wrapped()), conn, caller, MINE, NextWait(wait=WAIT)))
+    assert isinstance(answer, NextItem) and answer.item.id == second
 
 
 def test_unclaim_leaves_work_that_moved_on_alone(

@@ -214,12 +214,17 @@ def autodispatch(conn: sqlite3.Connection) -> bool:
 
 def _waiting_seat(conn: sqlite3.Connection, seat: str) -> sqlite3.Row | None:
     """The item a free seat would claim now, or None to keep waiting: the switch is off, the seat is
-    mid-turn (a brief it is reading arrived another way), or nothing in its lane is ready. Raises
-    Conflict when the seat cannot take work at all (busy, held, unseen or laneless)."""
-    row = _free(store.get_seat(conn, seat), seat)
+    mid-turn (a brief it is reading arrived another way), its item is still wrapping, or nothing in
+    its lane is ready. Raises Conflict when the seat cannot take work at all (busy, held, unseen or
+    laneless). /clear comes before `wrap` closes a wrapping item, so the hook /clear starts waits;
+    a wrapping seat still mid-turn is not that race and is busy."""
+    current = store.get_seat(conn, seat)
+    item_id = current["item"] if current and not current["owner"] else None
+    wrapping = item_id is not None and (store.get_item(conn, item_id) or {}).get("wrap") == Wrap.WRAPPING
+    row = current if current and wrapping and current["turn"] == Turn.IDLE else _free(current, seat)
     if row["lane"] is None:
         raise store.Conflict(f"seat {seat!r} has no lane; Josui sets it before it can claim")
-    if row["turn"] != Turn.IDLE or not autodispatch(conn):
+    if wrapping or row["turn"] != Turn.IDLE or not autodispatch(conn):
         return None
     found: sqlite3.Row | None = conn.execute(NEXT_READY, {"lane": row["lane"]}).fetchone()
     return found
