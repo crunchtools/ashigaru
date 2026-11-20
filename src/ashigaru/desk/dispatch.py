@@ -383,6 +383,35 @@ def check_in(conn: sqlite3.Connection, name: str, own: Own) -> None:
         store.write_seat(conn, name, lease((current or {}).get("turn")))
 
 
+RENEW = """
+    UPDATE seats SET lease_until = :until
+    WHERE name = :name AND epoch = :epoch AND lease_until IS NOT NULL AND lease_until < :due
+"""
+"""Renew a lease the Desk has not ended (NULL), in the session the request was checked against, and
+only once RENEW_EVERY has passed since the last renewal, so a seat's reads write at most that often."""
+
+RENEW_EVERY = timedelta(minutes=1)
+
+
+def renew(conn: sqlite3.Connection, name: str, own: Own) -> None:
+    """Any authenticated request from the identity a seat is named for proves the seat up: Josui
+    Prime's CLI calls as much as a worker's hooks. Renews its lease without the side effects of a
+    write to its row, and refuses nothing: a request from a session the Desk has ended (`fence`), or
+    for a seat whose session the Desk ended, which only a new session revives, renews nothing."""
+    seat = store.get_seat(conn, name)
+    if seat is None or seat["lease_until"] is None:
+        return
+    try:
+        fence(seat, name, own)
+    except store.Conflict:
+        return
+    span = LEASE_ACTIVE if seat["turn"] == Turn.ACTIVE else LEASE
+    at = datetime.now(UTC)
+    until = {"until": stamp(at + span), "due": stamp(at + span - RENEW_EVERY)}
+    if seat["lease_until"] < until["due"]:  # an UPDATE that matches nothing still takes the write lock
+        conn.execute(RENEW, {"name": name, "epoch": seat["epoch"], **until})
+
+
 def _cleared(
     conn: sqlite3.Connection, held: dict[str, Any] | None, name: str, actor: str, source: str
 ) -> None:

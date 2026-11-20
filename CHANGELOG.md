@@ -6,6 +6,16 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+- An idle seat, and Josui Prime while it works, stay on the board instead of
+  showing `missing` (a831). `ashigaru hook next` no longer exits when the Desk
+  says the seat cannot take work (a seat outside autodispatch, no lane, a
+  refused key): it checks in every 3 minutes, inside the 10-minute idle lease,
+  and exits only to hand over a brief or on a stale session. The Desk renews a
+  seat's lease on any authenticated request from the identity the seat is named
+  for, so Prime's CLI calls on its admin key count, where only a `seat` key's
+  own reports did; a request from an ended session still renews nothing.
+
 ## [5.0.0] - 2026-11-20
 
 ### BREAKING

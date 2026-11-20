@@ -17,6 +17,7 @@ from ashigaru.cli import commands, config, hooks, render
 from ashigaru.cli.__main__ import main
 from ashigaru.cli.client import Desk, DeskError, Send, Unreachable
 from ashigaru.cli.wait import CIWaiter, PollWaiter
+from ashigaru.desk.model import LEASE
 
 KEY = "ash_k1_secret"
 USAGE_ERROR = 2
@@ -1108,16 +1109,46 @@ def test_next_wakes_the_seat_with_the_brief_on_stderr(
 
 
 @pytest.mark.parametrize(
-    "final",
+    "refused",
     [(401, None), (403, None), (404, None), (409, None), (409, "unseen"), (409, "no-lane")],
 )
-def test_next_stops_quietly_when_the_seat_will_not_get_work(
-    waking: FakeDesk, capsys: pytest.CaptureFixture[str], final: tuple[int, str | None]
+def test_next_keeps_checking_in_while_the_seat_cannot_take_work(
+    waking: FakeDesk,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    refused: tuple[int, str | None],
 ) -> None:
-    status, code = final
-    waking.on("POST", NEXT, (status, {"detail": "seat 'Max 1' is busy with a3", "code": code}))
-    assert hook("next", {}) == 0
-    assert capsys.readouterr().out == "" and len(waking.calls("POST", NEXT)) == 1
+    """a831: its asks are all that keeps an idle seat's lease, so a seat outside autodispatch (no lane,
+    the switch off) that stopped asking went missing while up."""
+    pauses: list[float] = []
+    monkeypatch.setattr(hooks.time, "sleep", pauses.append)
+    status, code = refused
+    no = (status, {"detail": "seat 'Max 1' has no lane", "code": code})
+    answers = iter([no, no, (200, {"brief": "Desk assignment a7"})])
+    waking.on("POST", NEXT, lambda seen: next(answers))
+    assert hook("next", {}) == hooks.WAKE
+    captured = capsys.readouterr()
+    assert captured.out == "" and captured.err.strip() == "Desk assignment a7"
+    assert len(waking.calls("POST", NEXT)) == len(["refused", "refused", "brief"])
+    assert pauses.count(hooks.NEXT_CHECK_IN) == len(["refused", "refused"])
+
+
+def test_next_checks_in_well_inside_the_idle_lease() -> None:
+    assert LEASE.total_seconds() / 2 >= hooks.NEXT_CHECK_IN
+    assert LEASE.total_seconds() / 2 >= hooks.NEXT_BACKOFF
+    assert LEASE.total_seconds() / 2 >= hooks.NEXT_WAIT + hooks.NEXT_GRACE
+
+
+def test_next_keeps_checking_in_for_a_key_the_desk_refuses(
+    desk: FakeDesk, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(hooks, "NEXT_SETTLE", 0)
+    monkeypatch.setattr(hooks, "NEXT_CHECK_IN", 0)
+    monkeypatch.delenv("ASHIGARU_SEAT", raising=False)
+    answers = iter([(401, {"detail": "revoked"}), (200, {"name": "Max 1", "role": "seat", "key_id": "k"})])
+    desk.on("GET", "/v1/me", lambda seen: next(answers))
+    desk.on("POST", NEXT, (200, {"brief": "b"}))
+    assert hook("next", {}) == hooks.WAKE and len(desk.calls("GET", "/v1/me")) == len(["401", "200"])
 
 
 @pytest.mark.parametrize("code", ["busy", "held"])
