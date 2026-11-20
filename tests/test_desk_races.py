@@ -674,6 +674,15 @@ def test_a_request_naming_neither_is_refused_once_the_seat_registered_a_session(
     assert refused(client.post(f"/v1/seats/{MINE}/next?wait=0", headers=keys[MINE]))
 
 
+def test_a_seat_that_never_registered_a_session_takes_any_session_it_names(
+    client: TestClient, keys: Keys
+) -> None:
+    up(client, keys, MINE)
+    answer = client.patch(f"/v1/seats/{MINE}", headers=only(keys, MINE, "s1"), json={"turn": "idle"})
+    assert answer.status_code == OK
+    assert seat_row(client, keys, MINE)["epoch"] == 0, "naming a session is not registering one"
+
+
 def test_an_ended_session_is_refused_by_its_id_and_does_not_revive_the_lease(
     client: TestClient, keys: Keys, conn: sqlite3.Connection
 ) -> None:
