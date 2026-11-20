@@ -551,6 +551,7 @@ def test_brief_ends_with_the_limits_a_hand_brief_carries() -> None:
     text = dispatch.brief({"id": "a7", "lane": "exedore-max", "task": "Do it"})
     assert "Don't merge, tag, release or deploy; Josui Prime does that." in text
     assert "Don't message other seats." in text
+    assert "Branch as `a7/<short-slug>`" in text and "`Ashigaru-Item: a7`" in text
     assert "Sonnet subagents" in text
     assert "Report with `ashigaru report a7 <verb>`" in text
     assert '"DONE a7: <result, links>"' in text and '"BLOCKED a7: <what you need>"' in text
