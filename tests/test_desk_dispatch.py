@@ -190,6 +190,18 @@ def test_next_waits_out_a_wrap_until_the_item_closes(client: TestClient, keys: K
     assert next_item(client, keys, MINE).json()["item"]["id"] == second
 
 
+def test_next_is_busy_while_a_wrapping_seat_is_mid_turn(client: TestClient, keys: Keys) -> None:
+    seat(client, keys, MINE)
+    switch(client, keys, "on")
+    first = item(client, keys, lane="exedore-max")
+    assert next_item(client, keys, MINE).json()["item"]["id"] == first
+    client.post(f"/v1/items/{first}/wrap", headers=keys[JOSUI], json={"stage": "wrapping"})
+    client.patch(f"/v1/seats/{MINE}", headers=keys[MINE], json={"turn": "active"})
+    assert next_item(client, keys, MINE).status_code == CONFLICT
+    client.patch(f"/v1/seats/{MINE}", headers=keys[MINE], json={"turn": "idle"})
+    assert next_item(client, keys, MINE).status_code == NO_CONTENT
+
+
 def test_next_never_hands_a_mid_turn_seat_a_second_brief(client: TestClient, keys: Keys) -> None:
     seat(client, keys, MINE)
     switch(client, keys, "on")
