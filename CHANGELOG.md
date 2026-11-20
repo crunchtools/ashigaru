@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [5.1.0] - 2026-11-20
+
 ### Changed
 - The seat-side CLI keeps no local state (a837): `~/.local/state/ashigaru/epoch`
   and `task-session` are gone, so a seat whose `~/.local` it cannot write (podman
