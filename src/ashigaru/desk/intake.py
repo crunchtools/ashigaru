@@ -23,12 +23,12 @@ for good: nothing it carries can trust it again.
 
 A subject an item already names in `pr` is never queued again, and a writer's PR is linked, not queued,
 when it names an open item of its repo that has no `pr` (`link`): by a body line `Ashigaru-Item: aN`,
-else its head branch `aN/...` or `aN-...`, else `(aN)` in its title or body; the item gets the PR as its
-`pr`. A stranger's PR links nothing. A writer's PR that names nothing, in a repo where a seat holds an
-open item with no `pr`, is not queued either (a bot's still is): a seat opened it as the writer, and
-Josui links it (`unlinked` lists them, until an item names one). The same rules serve a webhook and the
-sweep's search. A delivery older than the last one seen by the forge's `updated_at` leaves the source's
-title, labels, state and ref as they were.
+else its head branch `fix/aN-...` (any one type prefix, or none, and `/` or `-`), else `(aN)` in its
+title or body; the item gets the PR as its `pr`. A stranger's PR links nothing. A writer's PR that names
+nothing, in a repo where a seat holds an open item with no `pr`, is not queued either (a bot's still
+is): a seat opened it as the writer, and Josui links it (`unlinked` lists them, until an item names
+one). The same rules serve a webhook and the sweep's search. A delivery older than the last one seen by
+the forge's `updated_at` leaves the source's title, labels, state and ref as they were.
 """
 
 import dataclasses
@@ -45,7 +45,8 @@ SOURCE = "webhook"
 RECORDS = frozenset({"ashigaru-inbox", "ashigaru-releases", "ashigaru-red", "ashigaru-observe"})
 """The labels of the issues the sweep keeps as records (scripts/common.py), which are never work."""
 TRAILER = re.compile(r"^Ashigaru-Item:[ \t]*(a\d+)[ \t]*$", re.IGNORECASE | re.MULTILINE)
-BRANCH = re.compile(r"^(a\d+)[/-]", re.IGNORECASE)
+BRANCH = re.compile(r"^(?:[a-z]+/)?(a\d+)[/-]", re.IGNORECASE)
+"""A head branch naming an item: `aN-...` or `aN/...`, after one type prefix (`fix/aN-...`) or none."""
 PARENTHESIZED = re.compile(r"\((a\d+)\)", re.IGNORECASE)
 REPO_OF = """lower(coalesce(repo, CASE WHEN instr(subject_key, '#') > 1
     THEN substr(subject_key, 1, instr(subject_key, '#') - 1) END))"""

@@ -334,8 +334,8 @@ BRIEF_FIELDS = (("done_when", "Done when"), ("ref", "Ref"), ("repo", "Repo"), ("
 
 BRIEF_LIMITS = """\
 Don't merge, tag, release or deploy; Josui Prime does that. Don't message other seats.
-Branch as `{id}/<short-slug>` and end each PR body with the line `Ashigaru-Item: {id}`, so the Desk \
-links the PR to {id} instead of queuing it again.
+Branch as `fix/{id}-<short-slug>` (feat/, docs/, chore/, refactor/ or test/ as fits) and end each PR \
+body with the line `Ashigaru-Item: {id}`, so the Desk links the PR to {id} instead of queuing it again.
 Fan out with Sonnet subagents (Agent tool, model sonnet) wherever the work splits; you stay the integrator.
 Report with `ashigaru report {id} <verb>`, and SendMessage to Josui Prime "DONE {id}: <result, links>" \
 or "BLOCKED {id}: <what you need>", then "Filed: <urls or none>"; end with "Learned: <gotcha>" \

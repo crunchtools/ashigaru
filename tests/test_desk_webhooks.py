@@ -1254,6 +1254,8 @@ def all_items(conn: sqlite3.Connection) -> list[str]:
         {"body": "ashigaru-item:   {id}"},
         {"ref": "{id}/fix-thing"},
         {"ref": "{id}-fix-thing"},
+        {"ref": "fix/{id}-thing"},
+        {"ref": "docs/{id}/thing"},
         {"title": "fix the thing ({id})"},
         {"body": "closes ({id})"},
     ],

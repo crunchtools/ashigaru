@@ -279,16 +279,18 @@ ci` is not `sdlc ci`). A check required from an App (the ruleset's
 `integration_id`, protection's `app_id`) counts only that App's check runs, as
 GitHub's merge gate does; without one, any run or status of that name counts.
 
-**Linking.** A seat's brief says to branch `aN/<short-slug>` and end the PR body
-with `Ashigaru-Item: aN`. Intake, by webhook and by sweep alike, links a
-writer's PR to the open, pr-less item in its repo that it names, by the trailer
-line, else a head branch `aN/` or `aN-`, else `(aN)` in the title or body, by
-setting that item's `pr` and inserting no item. A PR an item already names in
-`pr` never queues one again, and a stranger's PR never links. A writer's PR (not
-a bot's) that names nothing while a seat holds an open pr-less item in its repo
-is not queued: it is recorded as a subject with `unlinked_at` and listed under
-NEEDS YOU as `unlinked` until an item names it (`ashigaru update aN --pr <url>`).
-The app's own bot PRs queue as before.
+**Linking.** A seat's brief says to branch `fix/aN-<short-slug>` (or another
+type prefix) and end the PR body with `Ashigaru-Item: aN`. Intake, by webhook
+and by sweep alike, links a writer's PR to the open, pr-less item in its repo
+that it names, by the trailer line, else a head branch `aN-` or `aN/` after one
+type prefix (`fix/aN-...`) or none, else `(aN)` in the title or body, by setting
+that item's `pr` and inserting no item. A PR an item already names in `pr` never
+queues one again, and a stranger's PR never links. A writer's PR (not a bot's)
+that names nothing while a seat holds an open pr-less item in its repo is not
+queued: it is recorded as a subject with `unlinked_at` and listed under NEEDS
+YOU as `unlinked` until an item names it (`ashigaru update aN --pr <url>`). The
+app's own bot PRs queue as before.
+
 
 **Intake.** An issue or PR becomes an item keyed `owner/repo#N`, lower case as
 GitHub's names are case-insensitive (`crunchtools/ashigaru#190`): an issue a

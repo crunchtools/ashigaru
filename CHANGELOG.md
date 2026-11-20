@@ -27,13 +27,14 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 - PRs are linked by construction. A brief now tells the seat to branch
-  `aN/<short-slug>` and end the PR body with `Ashigaru-Item: aN`. Intake,
-  webhook and sweep alike, links a writer's PR to the open, pr-less item in its
-  repo that it names (trailer, else head branch `aN/` or `aN-`, else `(aN)` in
-  the title or body) and inserts no item. A PR an item already names never
-  queues another. A writer's PR that names nothing while a seat holds an open
-  pr-less item in its repo is recorded with `unlinked_at` and listed under
-  NEEDS YOU as `unlinked` until `ashigaru update aN --pr <url>` names it.
+  `fix/aN-<short-slug>` (the gateways take only typed prefixes) and end the PR
+  body with `Ashigaru-Item: aN`. Intake, webhook and sweep alike, links a
+  writer's PR to the open, pr-less item in its repo that it names (trailer, else
+  a head branch `aN-` or `aN/` after one type prefix or none, else `(aN)` in the
+  title or body) and inserts no item. A PR an item already names never queues
+  another. A writer's PR that names nothing while a seat holds an open pr-less
+  item in its repo is recorded with `unlinked_at` and listed under NEEDS YOU as
+  `unlinked` until `ashigaru update aN --pr <url>` names it.
 - Versioned writes. Items carry `version` (their last event's seq), and PATCH,
   report, file, wrap, assign and claim take `If-Match: <version>`, answering
   412 `version` when the item moved. The CLI takes `--if-version N` on update,

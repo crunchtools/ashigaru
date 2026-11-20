@@ -313,7 +313,7 @@ item's learnings memorized. A Learned of `none` records nothing.
    ```
    [a7] <objective in one sentence>
    Context: <what is known, what was ruled out, links/paths/ticket>
-   Scope: <repo; files or areas in bounds>. Branch `a7/<short-slug>` and end the PR body with `Ashigaru-Item: a7`. Out of bounds: <what not to touch>.
+   Scope: <repo; files or areas in bounds>. Branch `fix/a7-<short-slug>` (or feat/, docs/, chore/, refactor/, test/) and end the PR body with `Ashigaru-Item: a7`. Out of bounds: <what not to touch>.
    Use: <tools, hosts, skills that fit>. Don't: <deploy / merge / message others / restart X> unless stated.
    Use: Fan out with Sonnet subagents (Agent tool, model sonnet) wherever the work splits; you stay the integrator: judgment, edits and final verification are yours.
    Done when: <the observable result, e.g. "PR open with CI green", "root cause named with evidence">.
