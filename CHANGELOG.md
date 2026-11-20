@@ -6,6 +6,16 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [4.3.1] - 2026-11-20
+
+### Fixed
+- A seat cleared at the end of an auto wrap now gets its next item. The /clear
+  lands before `ashigaru wrap` closes the item, so the seat's `next` hook found
+  it busy, took the 409 as final and never asked again. The Desk now answers
+  204 while the seat is idle and busy only with an item at wrap stage
+  `wrapping`, and the hook claims once the item closes; a wrapping seat still
+  mid-turn gets the 409 as before.
+
 ## [4.3.0] - 2026-11-19
 
 ### Changed
@@ -18,12 +28,6 @@ All notable changes to this project are documented here. The format follows
   `note` when set, not only its task.
 
 ### Fixed
-- A seat cleared at the end of an auto wrap now gets its next item. The /clear
-  lands before `ashigaru wrap` closes the item, so the seat's `next` hook found
-  it busy, took the 409 as final and never asked again. The Desk now answers
-  204 while the seat is idle and busy only with an item at wrap stage
-  `wrapping`, and the hook claims once the item closes; a wrapping seat still
-  mid-turn gets the 409 as before.
 - A seatless item nobody has started (`manual` and still `queued` or
   `proposed`, such as a held PR) now closes when its subject or PR merges or
   closes, as a seatless `auto` one did; before, it stayed queued.
