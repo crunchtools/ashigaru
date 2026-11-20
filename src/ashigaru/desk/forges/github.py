@@ -360,6 +360,8 @@ def _item(thing: Mapping[str, Any], repo: str, kind: Kind, what: str, *, merged_
         updated_at=updated if isinstance(updated := thing.get("updated_at"), str) else None,
         opened_at=opened if isinstance(opened := thing.get("created_at"), str) else None,
         head=head.lower() if isinstance(head := payload_get(thing, "head", "sha"), str) else None,
+        body=body if isinstance(body := thing.get("body"), str) else "",
+        head_ref=ref if isinstance(ref := payload_get(thing, "head", "ref"), str) else None,
     )
 
 
@@ -385,13 +387,11 @@ def _hit(thing: Mapping[str, Any]) -> Found | None:
     pull = thing.get("pull_request")
     if not REPO.match(repo):
         return None
-    kind = Kind.STORY if isinstance(pull, Mapping) else Kind.OUTCOME
-    association, body = thing.get("author_association"), thing.get("body")
-    return Found(
-        item=_item(thing, repo, kind, "issue", merged_in=pull),
-        association=association if isinstance(association, str) else "",
-        body=body if isinstance(body, str) else "",
+    association = thing.get("author_association")
+    found = _item(
+        thing, repo, Kind.STORY if isinstance(pull, Mapping) else Kind.OUTCOME, "issue", merged_in=pull
     )
+    return Found(found, association if isinstance(association, str) else "", found.body)
 
 
 class GitHub:

@@ -80,3 +80,12 @@ def keys(conn: sqlite3.Connection) -> Keys:
         _, token = auth.mint(conn, name)
         out[name] = {"Authorization": f"Bearer {token}"}
     return out
+
+
+def up_seat(conn: sqlite3.Connection, name: str, **fields: object) -> None:
+    """A seat row that is up, as if a request of its own had just renewed its lease; `fields` as the
+    seat or Josui would write them (lane, turn, task), never its occupancy, which its items decide."""
+    from ashigaru.desk import dispatch
+
+    with store.transaction(conn):
+        store.write_seat(conn, name, {**fields, **dispatch.lease(str(fields.get("turn") or "idle"))})

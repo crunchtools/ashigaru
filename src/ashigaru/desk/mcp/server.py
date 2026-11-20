@@ -17,7 +17,7 @@ import time
 from collections.abc import AsyncIterator, Iterator
 from contextlib import asynccontextmanager, contextmanager
 from pathlib import Path
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any
 
 from fastapi import HTTPException
 from fastmcp import FastMCP
@@ -55,8 +55,6 @@ from ..model import (
     Seat,
     Sweep,
     Usage,
-    Verb,
-    Wrap,
     WrapUp,
 )
 from . import codes
@@ -70,6 +68,9 @@ DB = "desk_db"
 WAITERS = "desk_waiters"
 SWEEPER = "desk_sweeper"
 ItemId = Annotated[str, Field(description="An item id, e.g. a204.")]
+IfVersion = Annotated[
+    int | None, Field(description="The item's version the write was decided on; refused (412) once it moved.")
+]
 
 mcp = FastMCP(
     "ashigaru-desk",
@@ -227,6 +228,7 @@ def desk_assign(
     record: Annotated[
         NewItem | None, Field(description="Record this new item first, then assign it.")
     ] = None,
+    if_version: IfVersion = None,
 ) -> Item:
     """`ashigaru assign`, admin only: give the item to `seat`, or to the seat in `lane` (default: the
     item's) that has been free longest and is not held by Scott. With `record` (`assign --task`) the
@@ -241,7 +243,7 @@ def desk_assign(
             item_id = api.create_item(conn, admin, ItemCreate.model_validate(new)).id
         if item_id is None:
             raise ToolError("422: name an item_id, or give a record to create one")
-        return api.assign(conn, admin, item_id, Assign(seat=seat, lane=lane))
+        return api.assign(conn, admin, item_id, Assign(seat=seat, lane=lane), api.Guard(version=if_version))
 
 
 @mcp.tool
@@ -261,19 +263,20 @@ def desk_manual(item_id: ItemId) -> Item:
 @mcp.tool
 def desk_wrap(
     item_id: ItemId,
-    stage: Annotated[
-        Wrap, Field(description="wrapping once /cc seat is sent; cleared closes.")
-    ] = Wrap.CLEARED,
-    learned: Annotated[str | None, Field(description="The report's Learned: line.")] = None,
-    state: Literal["done", "wontdo", "abandoned"] = "done",
-    force: Annotated[bool, Field(description="Skip the CC-DONE and idle checks.")] = False,
+    fields: Annotated[
+        WrapUp | None,
+        Field(
+            description="stage (wrapping once /cc seat is sent; cleared, the default, closes), learned, "
+            "state, force: as `ashigaru wrap`."
+        ),
+    ] = None,
+    if_version: IfVersion = None,
 ) -> Item:
     """`ashigaru wrap`, admin only. `wrapping` records that /cc seat was sent. `cleared` refuses until
     CC-DONE (or a `learned`) and an idle turn, unless `force`; then clears the wrap and closes the
     item in `state`, which frees the seat."""
     with desk() as (conn, who):
-        body = WrapUp(stage=stage, learned=learned, state=state, force=force)
-        return api.wrap(conn, api.admin(who), item_id, body)
+        return api.wrap(conn, api.admin(who), item_id, fields or WrapUp(), api.Guard(version=if_version))
 
 
 @mcp.tool
@@ -306,10 +309,10 @@ def desk_mark(
 
 
 @mcp.tool
-def desk_claim(item_id: ItemId) -> Item:
+def desk_claim(item_id: ItemId, if_version: IfVersion = None) -> Item:
     """`ashigaru claim`: a seat takes a queued, unowned, auto item in its lane whose `after` are done."""
     with desk() as (conn, who):
-        return api.claim(conn, who, item_id)
+        return api.claim(conn, who, item_id, api.Guard(version=if_version))
 
 
 @mcp.tool
@@ -322,31 +325,45 @@ def desk_update(
             "blocked), result, next, learned, note, blocked_reason, memorized and check_after."
         ),
     ],
+    if_version: IfVersion = None,
 ) -> Item:
     """`ashigaru update`: change an item's fields, as PATCH /v1/items/{id}."""
     with desk() as (conn, who):
-        return api.patch_item(conn, who, item_id, ItemPatch.model_validate(fields))
+        return api.patch_item(
+            conn, who, item_id, ItemPatch.model_validate(fields), api.Guard(version=if_version)
+        )
 
 
 @mcp.tool
 def desk_report(
     item_id: ItemId,
-    verb: Verb,
-    text: Annotated[str | None, Field(description="The result, the blocker, or the progress note.")] = None,
-    next: str | None = None,
-    learned: Annotated[str | None, Field(description="The Learned: line; 'none' when nothing was.")] = None,
+    fields: Annotated[
+        Report,
+        Field(
+            description="verb (DONE, BLOCKED, WORKING, CC-DONE), text (the result, the blocker or the "
+            "progress note), next, learned ('none' when nothing was): as `ashigaru report`."
+        ),
+    ],
+    if_version: IfVersion = None,
 ) -> Item:
     """`ashigaru report`, the report contract: DONE moves to review, BLOCKED to blocked, WORKING to
     working; CC-DONE marks the learnings memorized."""
     with desk() as (conn, who):
-        return api.report(conn, who, item_id, Report(verb=verb, text=text, next=next, learned=learned))
+        return api.report(conn, who, item_id, fields, api.Guard(version=if_version))
 
 
 @mcp.tool
-def desk_file(item_id: ItemId, task: str, done_when: str | None = None, note: str | None = None) -> Item:
+def desk_file(
+    item_id: ItemId,
+    task: str,
+    done_when: str | None = None,
+    note: str | None = None,
+    if_version: IfVersion = None,
+) -> Item:
     """`ashigaru file`: file one child of this story as proposed, under its outcome; one per assignment."""
     with desk() as (conn, who):
-        return api.file(conn, who, item_id, FileChild(task=task, done_when=done_when, note=note))
+        body = FileChild(task=task, done_when=done_when, note=note)
+        return api.file(conn, who, item_id, body, api.Guard(version=if_version))
 
 
 @mcp.tool

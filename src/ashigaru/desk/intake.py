@@ -20,20 +20,49 @@ the trusted authors (dependabot's PRs are its own to land), nor is one of the re
 the sweep keeps (RECORDS): the inbox and the red issue carry strangers' text, and their author, the
 app's bot, would make them trusted and claimable. One queued before that is held on its next delivery,
 for good: nothing it carries can trust it again.
+
+A subject an item already names in `pr` is never queued again, and a writer's PR is linked, not queued,
+when it names an open item of its repo that has no `pr` (`link`): by a body line `Ashigaru-Item: aN`,
+else its head branch `aN/...` or `aN-...`, else `(aN)` in its title or body; the item gets the PR as its
+`pr`. A stranger's PR links nothing. A writer's PR that names nothing, in a repo where a seat holds an
+open item with no `pr`, is not queued either (a bot's still is): a seat opened it as the writer, and
+Josui links it (`unlinked` lists them, until an item names one). The same rules serve a webhook and the
+sweep's search. A delivery older than the last one seen by the forge's `updated_at` leaves the source's
+title, labels, state and ref as they were.
 """
 
 import dataclasses
+import re
 import sqlite3
 from typing import Any
 
-from . import store
+from . import store, subjects
 from .forges import IntakeItem
-from .model import Kind, Lane, Mode, State
+from .model import CLOSED, Kind, Lane, Mode, State, Wrap
 
 ACTOR = "intake"
 SOURCE = "webhook"
 RECORDS = frozenset({"ashigaru-inbox", "ashigaru-releases", "ashigaru-red", "ashigaru-observe"})
 """The labels of the issues the sweep keeps as records (scripts/common.py), which are never work."""
+TRAILER = re.compile(r"^Ashigaru-Item:[ \t]*(a\d+)[ \t]*$", re.IGNORECASE | re.MULTILINE)
+BRANCH = re.compile(r"^(a\d+)[/-]", re.IGNORECASE)
+PARENTHESIZED = re.compile(r"\((a\d+)\)", re.IGNORECASE)
+REPO_OF = """lower(coalesce(repo, CASE WHEN instr(subject_key, '#') > 1
+    THEN substr(subject_key, 1, instr(subject_key, '#') - 1) END))"""
+AWAITING = f"""
+    SELECT 1 FROM items
+    WHERE seat IS NOT NULL AND pr IS NULL AND {store.OPEN} AND {REPO_OF} = lower(:repo) LIMIT 1
+"""
+"""A seat holds an open item in the repo that has no PR yet: a writer's PR there may be the seat's."""
+MARK_UNLINKED = "UPDATE subjects SET unlinked_at = coalesce(unlinked_at, :at) WHERE subject_key = :key"
+UNLINKED = """
+    SELECT s.subject_key, s.repo, s.title, s.author, s.unlinked_at AS since FROM subjects s
+    WHERE s.state = 'open' AND s.unlinked_at IS NOT NULL AND NOT EXISTS (
+        SELECT 1 FROM items i WHERE s.subject_key IN (i.subject_key, i.pr)
+    )
+    ORDER BY s.unlinked_at, s.subject_key
+"""
+"""Open subjects a writer's seat may have opened that no item names: NEEDS YOU's to link."""
 
 
 def held(existing: dict[str, Any]) -> bool:
@@ -73,7 +102,76 @@ def _seen(item: IntakeItem) -> dict[str, Any]:
         "title": item.title,
         "labels": list(item.labels),
         "source_state": "closed" if item.closed else "open",
+        **({"source_updated_at": item.updated_at} if item.updated_at else {}),
     }
+
+
+def _older(existing: dict[str, Any], item: IntakeItem) -> bool:
+    """The delivery is older, by the forge's clock, than the last one the item took."""
+    stored = existing["extra"].get("source_updated_at")
+    return bool(item.updated_at and stored and item.updated_at < stored)
+
+
+def by_pr(conn: sqlite3.Connection, key: str) -> str | None:
+    """The id of an item, open or closed, whose `pr` is the subject."""
+    row = conn.execute("SELECT id FROM items WHERE pr = ? LIMIT 1", (key,)).fetchone()
+    return str(row[0]) if row else None
+
+
+def _repo(found: dict[str, Any]) -> str:
+    """The item's repo: its column, else the repo part of its subject_key."""
+    owner_repo = (found["subject_key"] or "").partition("#")[0]
+    return (found["repo"] or (owner_repo if "/" in owner_repo else "")).lower()
+
+
+def _named(item: IntakeItem) -> list[str]:
+    """The item ids a PR names, in the order they count: trailer lines, head branch, then `(aN)`."""
+    branch = BRANCH.match(item.head_ref or "")
+    found = [
+        *TRAILER.findall(item.body),
+        *([branch[1]] if branch else []),
+        *PARENTHESIZED.findall(f"{item.title}\n{item.body}"),
+    ]
+    return [name.lower() for name in found]
+
+
+def link(conn: sqlite3.Connection, item: IntakeItem) -> str | None:
+    """The id of the item the subject belongs to: the one whose `pr` it already is, else (for a PR
+    whose author the Desk judged a writer, never a stranger's) the first item `_named` that is open, has
+    no `pr` and is in the PR's repo."""
+    known = by_pr(conn, item.subject_key)
+    if known or item.kind != Kind.STORY or not item.author_writes:
+        return known
+    for name in _named(item):
+        found = store.get_item(conn, name)
+        if (
+            found
+            and _repo(found) == (item.repo or "").lower()
+            and not found["pr"]
+            and found["state"] not in CLOSED
+            and found["wrap"] != Wrap.CLEARED
+        ):
+            return name
+    return None
+
+
+def unlinked(conn: sqlite3.Connection) -> list[dict[str, Any]]:
+    """The open subjects a seat may have opened that no item names, oldest first."""
+    return [dict(row) for row in conn.execute(UNLINKED)]
+
+
+def _awaiting(conn: sqlite3.Connection, item: IntakeItem) -> bool:
+    """A writer's open PR, in a repo where a seat holds an open item with no `pr`, that names none. A
+    bot's (the app's own fixes) is never a seat's: seats push as a person."""
+    person = not (item.author or "").endswith("[bot]")
+    mine = item.kind == Kind.STORY and item.author_writes and person and not item.closed and item.repo
+    return bool(mine and conn.execute(AWAITING, {"repo": item.repo}).fetchone())
+
+
+def _mark_unlinked(conn: sqlite3.Connection, item: IntakeItem) -> None:
+    """Record the subject, which the delivery's own record may refuse as older, and flag it."""
+    subjects.record(conn, item, SOURCE)
+    conn.execute(MARK_UNLINKED, {"at": store.now(), "key": item.subject_key})
 
 
 def _approval(item: IntakeItem) -> dict[str, Any]:
@@ -158,7 +256,14 @@ def upsert(conn: sqlite3.Connection, item: IntakeItem) -> str | None:
     The caller holds the transaction; an item is written only when something changed."""
     existing = store.item_by_subject(conn, item.subject_key)
     if existing is None:
+        if (linked := link(conn, item)) is not None:
+            if not (store.get_item(conn, linked) or {}).get("pr"):
+                store.update_item(conn, linked, {"pr": item.subject_key}, ACTOR, SOURCE)
+            return linked
         if item.closed or RECORDS & set(item.labels) or _untrusted_bot(item):
+            return None
+        if _awaiting(conn, item):
+            _mark_unlinked(conn, item)
             return None
         return store.insert_item(
             conn,
@@ -192,14 +297,15 @@ def upsert(conn: sqlite3.Connection, item: IntakeItem) -> str | None:
         )
     item = _unless_moved(conn, existing, item)
     patch: dict[str, Any] = {}
-    extra = {**existing["extra"], **_seen(item)}
+    older = _older(existing, item)
+    extra = {**existing["extra"], **({} if older else _seen(item))}
     if RECORDS & set(item.labels):
         patch.update(_unrecord(conn, existing, item, extra))
     else:
         patch.update(_trust(conn, existing, item, extra))
     if extra != existing["extra"]:
         patch["extra"] = extra
-    if item.ref != existing["ref"]:
+    if item.ref != existing["ref"] and not older:
         patch["ref"] = item.ref
     if patch:
         store.update_item(conn, existing["id"], patch, ACTOR, SOURCE)

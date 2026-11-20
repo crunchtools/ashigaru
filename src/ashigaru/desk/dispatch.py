@@ -5,21 +5,36 @@ Assign and claim run in one BEGIN IMMEDIATE transaction each, so two callers
 racing for one item or one seat get one winner and one Conflict.
 """
 
+import dataclasses
 import json
 import sqlite3
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+from . import intake, store, subjects, sweep
 from . import outcomes as served
-from . import store, subjects, sweep
-from .model import CLOSED, SEAT_ROW_FIELDS, STALE_SEAT, Billing, Lane, Role, SeatStatus, State, Turn, Wrap
+from .model import (
+    CLOSED,
+    LEASE,
+    LEASE_ACTIVE,
+    SEAT_ROW_FIELDS,
+    Billing,
+    Lane,
+    Mode,
+    Role,
+    SeatStatus,
+    State,
+    Turn,
+    Wrap,
+)
 
 PICK_SEAT = """
     SELECT name FROM seats
-    WHERE lane = :lane AND status = 'free' AND owner IS NULL
+    WHERE lane = :lane AND status = 'free' AND owner IS NULL AND turn = 'idle' AND lease_until >= :now
     ORDER BY since, name
     LIMIT 1
 """
+"""The seat an assign picks: free, unheld, idle and up (its lease live), free longest."""
 
 WAITING_ON = """
     SELECT value FROM json_each(:after)
@@ -92,11 +107,12 @@ CATCH_UP_DEFAULT = timedelta(days=1)
 NEEDS_YOU = f"""
     SELECT * FROM items
     WHERE {store.OPEN} AND seat IS NULL AND state = 'queued' AND json_extract(extra, '$.trusted') = 0
-       OR {store.OPEN} AND mode = 'manual' AND state = 'blocked'
+       OR {store.OPEN} AND state = 'blocked' AND (mode = 'manual' OR seat IS NULL)
     ORDER BY state = 'blocked' DESC, updated_at DESC, id DESC
     LIMIT :limit
 """
-"""Scott's blocked work, then the subjects intake holds for a maintainer's approval."""
+"""Scott's blocked work and blocked work no seat holds (one cleared before its wrap), then the subjects
+intake holds for a maintainer's approval."""
 
 UNSEEN_SEATS = """
     SELECT name FROM identities
@@ -140,36 +156,83 @@ def _ready(conn: sqlite3.Connection, item: dict[str, Any]) -> None:
         raise store.Conflict(f"{item['id']} waits on {', '.join(waiting)}")
 
 
+@dataclasses.dataclass(frozen=True)
+class Own:
+    """A request from the seat itself, in the session that sent `epoch` (None from a 4.x client)."""
+
+    epoch: int | None = None
+
+
+def live(seat: dict[str, Any]) -> bool:
+    """The seat is up: a request from it renewed its lease, which has not run out."""
+    return bool(seat.get("lease_until")) and seat["lease_until"] >= store.now()
+
+
+def lease(turn: str | None) -> dict[str, Any]:
+    """The lease a request from the seat renews: LEASE while idle, LEASE_ACTIVE mid-turn."""
+    span = LEASE_ACTIVE if turn == Turn.ACTIVE else LEASE
+    return {"lease_until": stamp(datetime.now(UTC) + span)}
+
+
+def fence(seat: dict[str, Any] | None, name: str, epoch: int | None) -> None:
+    """Raise Conflict (stale-session) when a request names an epoch that is not the seat's current
+    one: the session that sent it has ended. A request naming none (a 4.x client) passes."""
+    if epoch is not None and (seat or {}).get("epoch", 0) != epoch:
+        current = (seat or {}).get("epoch", 0)
+        raise store.Conflict(
+            f"seat {name!r} is at epoch {current}; this session's ({epoch}) has ended: /clear to rejoin",
+            "stale-session",
+        )
+
+
+def unmoved(item: dict[str, Any], version: int | None) -> None:
+    """Raise Conflict (version) when the caller read the item at another version than it now has."""
+    if version is not None and item["version"] != version:
+        raise store.Conflict(
+            f"{item['id']} moved: it is at version {item['version']}, not {version}; read it again", "version"
+        )
+
+
 def _free(seat: dict[str, Any] | None, name: str) -> dict[str, Any]:
     if seat is None:
-        raise store.Conflict(f"seat {name!r} has not reported")
+        raise store.Conflict(f"seat {name!r} has not reported", "unseen")
     if seat["owner"]:
-        raise store.Conflict(f"seat {name!r} is held by {seat['owner']}")
+        raise store.Conflict(f"seat {name!r} is held by {seat['owner']}", "held")
     if seat["status"] != "free":
-        raise store.Conflict(f"seat {name!r} is busy with {seat['item'] or 'something'}")
+        raise store.Conflict(f"seat {name!r} is busy with {seat['item'] or 'something'}", "busy")
+    if not live(seat):
+        raise store.Conflict(f"seat {name!r} is missing: no word since {seat['updated_at']}", "missing")
     return seat
 
 
-def _take(conn: sqlite3.Connection, item: dict[str, Any], seat: dict[str, Any], actor: str) -> None:
-    fields = {"seat": seat["name"], "state": State.ASSIGNED}
+def _take(
+    conn: sqlite3.Connection, item: dict[str, Any], seat: dict[str, Any], actor: str, source: str = "api"
+) -> None:
+    """The seat takes the item, in its current session's epoch; `source` says how (`next` for a claim
+    the seat's next turn must acknowledge)."""
+    fields = {"seat": seat["name"], "state": State.ASSIGNED, "epoch": seat["epoch"]}
     if item["lane"] is None and seat["lane"] is not None:
         fields["lane"] = seat["lane"]
-    store.update_item(conn, item["id"], fields, actor)
-    store.write_seat(conn, seat["name"], {"status": "busy", "item": item["id"]})
+    store.update_item(conn, item["id"], fields, actor, source)
 
 
-def assign(conn: sqlite3.Connection, item_id: str, seat: str | None, lane: str | None, actor: str) -> str:
-    """Give the item to the named seat, or to the longest-free unheld seat in the lane. Returns the seat."""
+def assign(
+    conn: sqlite3.Connection, item_id: str, target: dict[str, Any], actor: str, version: int | None = None
+) -> str:
+    """Give the item to the target's seat, or to the longest-free unheld seat that is up in its lane
+    (default the item's). Returns the seat."""
+    seat, lane = target.get("seat"), target.get("lane")
     with store.transaction(conn):
         item = store.get_item(conn, item_id)
         if item is None:
             raise KeyError(item_id)
+        unmoved(item, version)
         _ready(conn, item)
         lane = lane or item["lane"]
         if seat is None:
             if lane is None:
                 raise store.Conflict(f"{item_id} has no lane to pick a seat by; name a seat or a lane")
-            picked = conn.execute(PICK_SEAT, {"lane": lane}).fetchone()
+            picked = conn.execute(PICK_SEAT, {"lane": lane, "now": store.now()}).fetchone()
             if picked is None:
                 raise store.Conflict(f"no free seat in lane {lane}")
             seat = str(picked[0])
@@ -181,14 +244,18 @@ def assign(conn: sqlite3.Connection, item_id: str, seat: str | None, lane: str |
     return seat
 
 
-def claim(conn: sqlite3.Connection, item_id: str, seat: str) -> None:
+def claim(
+    conn: sqlite3.Connection, item_id: str, seat: str, epoch: int | None = None, version: int | None = None
+) -> None:
     """desk_claim: a free seat takes a queued, unowned, auto item in its lane. Fails closed: a seat
     with no lane claims nothing, and an item with no lane is claimed by no seat; Josui sets its lane
-    or assigns it."""
+    or assigns it. A session the Desk has ended claims nothing (`fence`)."""
     with store.transaction(conn):
         item = store.get_item(conn, item_id)
         if item is None:
             raise KeyError(item_id)
+        fence(store.get_seat(conn, seat), seat, epoch)
+        unmoved(item, version)
         _ready(conn, item)
         if item["state"] != State.QUEUED or item["seat"] is not None:
             raise store.Conflict(
@@ -198,12 +265,12 @@ def claim(conn: sqlite3.Connection, item_id: str, seat: str) -> None:
             raise store.Conflict(f"{item_id} is manual: Scott's to hand out")
         row = _free(store.get_seat(conn, seat), seat)
         if row["lane"] is None:
-            raise store.Conflict(f"seat {seat!r} has no lane; Josui sets it before it can claim")
+            raise store.Conflict(f"seat {seat!r} has no lane; Josui sets it before it can claim", "no-lane")
         if item["lane"] is None:
             raise store.Conflict(f"{item_id} has no lane; Josui sets it or assigns the item")
         if item["lane"] != row["lane"]:
             raise store.Conflict(f"{item_id} is in lane {item['lane']}, seat {seat!r} in {row['lane']}")
-        _take(conn, item, row, seat)
+        _take(conn, item, row, seat, "claim")
 
 
 def autodispatch(conn: sqlite3.Connection) -> bool:
@@ -212,38 +279,41 @@ def autodispatch(conn: sqlite3.Connection) -> bool:
     return mark is not None and mark["value"] == "on"
 
 
-def _waiting_seat(conn: sqlite3.Connection, seat: str) -> sqlite3.Row | None:
+def _waiting_seat(conn: sqlite3.Connection, seat: str, epoch: int | None = None) -> sqlite3.Row | None:
     """The item a free seat would claim now, or None to keep waiting: the switch is off, the seat is
     mid-turn (a brief it is reading arrived another way), its item is still wrapping, or nothing in
     its lane is ready. Raises Conflict when the seat cannot take work at all (busy, held, unseen or
-    laneless). /clear comes before `wrap` closes a wrapping item, so the hook /clear starts waits;
-    a wrapping seat still mid-turn is not that race and is busy."""
+    laneless, each with its code), or stale-session for a session the Desk has ended. /clear comes
+    before `wrap` closes a wrapping item, so the hook /clear starts waits; a wrapping seat still
+    mid-turn is not that race and is busy."""
     current = store.get_seat(conn, seat)
+    fence(current, seat, epoch)
     item_id = current["item"] if current and not current["owner"] else None
     wrapping = item_id is not None and (store.get_item(conn, item_id) or {}).get("wrap") == Wrap.WRAPPING
     row = current if current and wrapping and current["turn"] == Turn.IDLE else _free(current, seat)
     if row["lane"] is None:
-        raise store.Conflict(f"seat {seat!r} has no lane; Josui sets it before it can claim")
+        raise store.Conflict(f"seat {seat!r} has no lane; Josui sets it before it can claim", "no-lane")
     if wrapping or row["turn"] != Turn.IDLE or not autodispatch(conn):
         return None
     found: sqlite3.Row | None = conn.execute(NEXT_READY, {"lane": row["lane"]}).fetchone()
     return found
 
 
-def next_item(conn: sqlite3.Connection, seat: str) -> dict[str, Any] | None:
+def next_item(conn: sqlite3.Connection, seat: str, epoch: int | None = None) -> dict[str, Any] | None:
     """`POST /seats/{name}/next`: the free, idle seat claims the oldest queued auto item in its lane
     whose `after` items are done, or None to keep waiting. Raises Conflict when the seat cannot take
     work at all, so its hook stops asking. Reads first and takes the write lock only to claim, so a
-    waiting seat's looks cost no lock while the switch is off or the lane is empty."""
-    if _waiting_seat(conn, seat) is None:
+    waiting seat's looks cost no lock while the switch is off or the lane is empty. The claim waits
+    for the seat's next turn to acknowledge it (ACK_AFTER)."""
+    if _waiting_seat(conn, seat, epoch) is None:
         return None
     with store.transaction(conn):
-        found = _waiting_seat(conn, seat)
+        found = _waiting_seat(conn, seat, epoch)
         if found is None:
             return None
         item = store.decode(found)
         _ready(conn, item)
-        _take(conn, item, _free(store.get_seat(conn, seat), seat), seat)
+        _take(conn, item, _free(store.get_seat(conn, seat), seat), seat, "next")
         return store.get_item(conn, item["id"])
 
 
@@ -256,8 +326,6 @@ def unclaim(conn: sqlite3.Connection, item_id: str, seat: str) -> None:
         if item is None or row is None or item["seat"] != seat or item["state"] != State.ASSIGNED:
             return
         store.update_item(conn, item_id, {"seat": None, "state": State.QUEUED}, seat)
-        if row["item"] == item_id:
-            store.write_seat(conn, seat, {"status": "free", "item": None})
 
 
 BRIEF_FIELDS = (("done_when", "Done when"), ("ref", "Ref"), ("repo", "Repo"), ("note", "Note"))
@@ -291,55 +359,165 @@ def brief(item: dict[str, Any]) -> str:
     )
 
 
-SEAT_MANUAL = f"""
-    SELECT id FROM items WHERE seat = :seat AND mode = 'manual' AND {store.OPEN}
-    ORDER BY updated_at DESC, id DESC LIMIT 1
-"""
-"""The open manual item a free seat already carries, which its next typed prompt takes back."""
+def check_in(conn: sqlite3.Connection, name: str, epoch: int | None, turn: str | None = None) -> None:
+    """A request from the seat itself: refused when its session has ended (`fence`), else proof the
+    seat is up, which renews its lease. A seat's first request creates its row."""
+    with store.transaction(conn):
+        current = store.get_seat(conn, name)
+        fence(current, name, epoch)
+        store.write_seat(conn, name, lease(turn or (current or {}).get("turn")))
 
 
-def report_seat(conn: sqlite3.Connection, name: str, fields: dict[str, Any], actor: str) -> dict[str, Any]:
-    """PATCH /seats/{name}, and how the Desk sees Scott's hand on a seat, which no seat can claim or drop.
+def _cleared(
+    conn: sqlite3.Connection, held: dict[str, Any] | None, name: str, actor: str, source: str
+) -> None:
+    """The session holding `held` is gone (a /clear, or a new session started): nothing in the seat
+    remembers the work. Scott's hold ends with a /clear, as it always has; a new session leaves his
+    item open and seatless. Josui's item, unless it is wrapping (`wrap` settles that one), leaves the
+    seat: blocked when it was under way, so NEEDS YOU shows it, else as it stands."""
+    if held is None:
+        return
+    gone = f"seat {name} was {'cleared' if source == 'clear' else 'restarted'} before the wrap"
+    if held["mode"] == Mode.MANUAL:
+        fields: dict[str, Any] = {"wrap": Wrap.CLEARED} if source == "clear" else {"seat": None, "note": gone}
+    elif held["wrap"] is None and held["state"] in (State.ASSIGNED, State.WORKING):
+        fields = {"seat": None, "state": State.BLOCKED, "blocked_reason": f"{gone}: its context is gone"}
+    elif held["wrap"] is None:
+        fields = {"seat": None, "note": gone}
+    else:
+        return
+    store.update_item(conn, held["id"], fields, actor, source=source)
 
-    A seat's report of its session's first typed prompt (turn active with a task) while it holds no item
-    makes it busy and manual, holding a new manual item with that task, the way /agents ledgered
-    untracked manual work, unless an open manual item already names the seat (one imported, or one left
-    blocked), in any state: the seat takes that one back as it stands. A /clear (task back to null)
-    clears that item, which frees the seat; a wrap does the same. A seat holding an item stays on it.
-    Turn changes without a task (Claude Code's own turns: an assignment arriving, a background task's
-    result) never start a hold.
+
+def _prompted(
+    conn: sqlite3.Connection, held: dict[str, Any] | None, seat: dict[str, Any], task: str | None, actor: str
+) -> None:
+    """A turn starting on the seat. Josui's item still `assigned` was not started: Scott's typed prompt
+    (a task) hands it back to the queue; any other turn (the brief arriving) acknowledges it, so it is
+    working. Scott's typed prompt on a seat then holding nothing opens his manual item, holding it."""
+    if held and held["mode"] == Mode.AUTO and held["state"] == State.ASSIGNED:
+        if task:
+            back = {
+                "seat": None,
+                "state": State.QUEUED,
+                "note": f"{seat['name']}: Scott typed before it started",
+            }
+            store.update_item(conn, held["id"], back, actor, source="prompt")
+            held = None
+        else:
+            store.update_item(conn, held["id"], {"state": State.WORKING}, actor, source="ack")
+    if task and held is None:
+        work = {"task": task, "mode": Mode.MANUAL, "state": State.WORKING, "seat": seat["name"]}
+        store.insert_item(
+            conn, {**work, "lane": seat["lane"], "epoch": seat["epoch"]}, actor, source="prompt"
+        )
+
+
+def _report_seat(
+    conn: sqlite3.Connection, name: str, fields: dict[str, Any], actor: str, own: Own | None
+) -> dict[str, Any]:
+    before = store.get_seat(conn, name)
+    if own:
+        fence(before, name, own.epoch)
+        fields = {**fields, **lease(fields.get("turn") or (before or {}).get("turn"))}
+    seat = store.write_seat(conn, name, fields)
+    if not set(fields) - {"lease_until"} <= SEAT_ROW_FIELDS:
+        return seat
+    held = store.get_item(conn, before["item"]) if before and before["item"] else None
+    if "task" in fields and fields["task"] is None:
+        _cleared(conn, held, name, actor, "clear")
+    elif fields.get("turn") == Turn.ACTIVE:
+        _prompted(conn, held, seat, fields.get("task"), actor)
+    return store.get_seat(conn, name) or seat
+
+
+def report_seat(
+    conn: sqlite3.Connection, name: str, fields: dict[str, Any], actor: str, own: Own | None = None
+) -> dict[str, Any]:
+    """PATCH /seats/{name}, and how the Desk sees what happens in a seat, which no seat can claim or drop.
+
+    `own` is the seat reporting for itself: refused for an ended session (`fence`), and renewing its
+    lease. A seat's turn starting acknowledges Josui's item it has not started, unless the turn is
+    Scott's first typed prompt (turn active with a task): that hands the item back and makes the seat
+    his, holding a new manual item with that task, the way /agents ledgered untracked manual work. A
+    /clear (task back to null) ends what the session held (`_cleared`). Turn changes without a task
+    (Claude Code's own turns: an assignment arriving, a background task's result) never start a hold.
     """
     with store.transaction(conn):
-        before = store.get_seat(conn, name)
-        seat = store.write_seat(conn, name, fields)
-        if not set(fields) <= SEAT_ROW_FIELDS:
-            return seat
-        held = before["item"] if before and before["owner"] else None
-        if held and "task" in fields and fields["task"] is None:
-            store.update_item(conn, held, {"wrap": Wrap.CLEARED}, actor, source="clear")
-        elif fields.get("turn") == Turn.ACTIVE and fields.get("task") and seat["status"] == SeatStatus.FREE:
-            kept = conn.execute(SEAT_MANUAL, {"seat": name}).fetchone()
-            if kept:
-                item_id = kept[0]
-            else:
-                work = {"task": fields["task"], "mode": "manual", "state": State.WORKING, "seat": name}
-                item_id = store.insert_item(conn, {**work, "lane": seat["lane"]}, actor, source="prompt")
-            store.write_seat(
-                conn, name, {"status": SeatStatus.BUSY, "owner": store.MANUAL_OWNER, "item": item_id}
-            )
-        return store.get_seat(conn, name) or seat
+        return _report_seat(conn, name, fields, actor, own)
+
+
+def end_session(conn: sqlite3.Connection, name: str, actor: str, why: str) -> list[str]:
+    """End the seat's session, the caller holding the transaction: the next epoch, which no session
+    holds, and no lease, so the seat is missing until a new session starts. Josui's work leaves the
+    seat: queued again when it was assigned or working, else as it stands, each with `why` as its
+    note. Scott's hold and a wrapping item stay for a person. Returns the items moved."""
+    conn.execute("UPDATE seats SET epoch = epoch + 1, lease_until = NULL WHERE name = ?", (name,))
+    moved = []
+    for item in store.list_items(conn, seat=name, mode=Mode.AUTO):
+        if item["state"] in CLOSED or item["wrap"] is not None:
+            continue
+        fields: dict[str, Any] = {"seat": None, "note": why}
+        if item["state"] in (State.ASSIGNED, State.WORKING):
+            fields["state"] = State.QUEUED
+        store.update_item(conn, item["id"], fields, actor, source="session")
+        moved.append(item["id"])
+    return moved
+
+
+def start_session(
+    conn: sqlite3.Connection, name: str, session_id: str, source: str, actor: str
+) -> tuple[int, dict[str, Any]]:
+    """POST /seats/{name}/session: the seat's SessionStart. A new session (startup, clear) gets the
+    next epoch, which ends the one before it (`_cleared`: its context is gone). A resume keeps the
+    epoch when it is the seat's current session and its lease is live; else it is refused, Conflict
+    (stale-session): what it remembers is no longer its own. A resume of the current session whose
+    lease ran out ends it first (`end_session`), as reconcile would have. Returns the epoch and the
+    seat."""
+    with store.transaction(conn):
+        current = store.get_seat(conn, name)
+        resumed = source == "resume" and current is not None and current["epoch"] > 0
+        if current and resumed and current["session_id"] == session_id and live(current):
+            seat = _report_seat(conn, name, {"turn": Turn.IDLE}, actor, Own(current["epoch"]))
+            return current["epoch"], seat
+        if current and resumed and current["session_id"] == session_id:
+            end_session(conn, name, actor, f"seat {name}'s session {session_id} lapsed")
+        if not resumed:
+            epoch = (current["epoch"] if current else 0) + 1
+            same = current is not None and current["session_id"] == session_id
+            fresh = {} if same else {"session_cost_usd": 0.0, "session_booked_usd": 0.0}
+            store.write_seat(conn, name, {"epoch": epoch, "session_id": session_id, **fresh})
+            held = store.get_item(conn, current["item"]) if current and current["item"] else None
+            _cleared(conn, held, name, actor, "clear" if source == "clear" else "startup")
+            fields = {"turn": Turn.IDLE, "task": None} if source == "clear" else {"turn": Turn.IDLE}
+            return epoch, _report_seat(conn, name, fields, actor, Own(epoch))
+    raise store.Conflict(
+        f"seat {name!r}: session {session_id} has ended (the seat is at epoch "
+        f"{(store.get_seat(conn, name) or {}).get('epoch')}); /clear to rejoin",
+        "stale-session",
+    )
 
 
 def report_usage(
-    conn: sqlite3.Connection, seat: str, report: dict[str, Any], lane_first: bool = False
+    conn: sqlite3.Connection,
+    seat: str,
+    report: dict[str, Any],
+    lane_first: bool = False,
+    epoch: int | None = None,
 ) -> dict[str, Any]:
     """Record a seat's usage and book whatever of the session's cost is not yet in spend. Billing is
     the report's, else the seat's lane's, else what the row had; with `lane_first` (a seat reporting
-    for itself) the lane's comes before the report's. Until one is known the cost waits."""
+    for itself) the lane's comes before the report's, the session must be current (`fence`), and the
+    report renews the seat's lease. Until a billing is known the cost waits."""
     with store.transaction(conn):
-        current = store.get_seat(conn, seat) or {**store.SEAT_DEFAULTS, "session_id": None}
+        found = store.get_seat(conn, seat)
+        if lane_first:
+            fence(found, seat, epoch)
+        current = found or {**store.SEAT_DEFAULTS, "session_id": None}
         cost = report.pop("cost_usd", None)
         fields = {key: value for key, value in report.items() if value is not None}
+        if lane_first:
+            fields.update(lease(current["turn"]))
         lane = LANE_BILLING.get(current["lane"])
         reported = fields.get("billing")
         billing = ((lane or reported) if lane_first else (reported or lane)) or current["billing"]
@@ -389,7 +567,9 @@ class Refused(Exception):
     """An action the item's state does not allow yet; nothing changed."""
 
 
-def wrap(conn: sqlite3.Connection, item_id: str, request: dict[str, Any], actor: str) -> None:
+def wrap(
+    conn: sqlite3.Connection, item_id: str, request: dict[str, Any], actor: str, version: int | None = None
+) -> None:
     """`wrap`, for the CLI and MCP alike. `wrapping` records that /cc seat was sent. `cleared` refuses
     (Refused) until the item is memorized or a Learned line comes with the request, and while its
     seat's turn is active, unless forced; then it clears the wrap and closes an open item, which
@@ -398,6 +578,7 @@ def wrap(conn: sqlite3.Connection, item_id: str, request: dict[str, Any], actor:
         item = store.get_item(conn, item_id)
         if item is None:
             raise KeyError(item_id)
+        unmoved(item, version)
         fields: dict[str, Any] = {"wrap": request["stage"]}
         if request.get("learned"):
             fields["learned"] = request["learned"]
@@ -438,18 +619,16 @@ def queue(conn: sqlite3.Connection) -> dict[str, Any]:
 
 def seats(conn: sqlite3.Connection) -> list[dict[str, Any]]:
     """`ashigaru agents`: every seat row, then every seat identity that never checked in. A seat is
-    missing when it never did, or its row has not changed in STALE_SEAT."""
-    stale = (datetime.now(UTC) - STALE_SEAT).strftime("%Y-%m-%dT%H:%M:%SZ")
-    rows = [{**seat, "missing": seat["updated_at"] < stale} for seat in store.list_seats(conn)]
+    missing when it never did, or its lease has run out (`live`)."""
+    rows = [{**seat, "missing": not live(seat)} for seat in store.list_seats(conn)]
     unseen = conn.execute(UNSEEN_SEATS, {"role": Role.SEAT})
     return rows + [{**store.SEAT_DEFAULTS, "name": row[0], "missing": True} for row in unseen]
 
 
 def seat(conn: sqlite3.Connection, name: str) -> dict[str, Any] | None:
-    """One seat row, `missing` when it has not changed in STALE_SEAT."""
+    """One seat row, `missing` when its lease has run out."""
     found = store.get_seat(conn, name)
-    stale = (datetime.now(UTC) - STALE_SEAT).strftime("%Y-%m-%dT%H:%M:%SZ")
-    return {**found, "missing": found["updated_at"] < stale} if found else None
+    return {**found, "missing": not live(found)} if found else None
 
 
 def stamp(when: datetime) -> str:
@@ -617,7 +796,8 @@ def _silent_seat(seat: dict[str, Any], busy: dict[str, Any]) -> dict[str, Any]:
 def status(conn: sqlite3.Connection) -> dict[str, Any]:
     """`ashigaru status`, the board a person reads: each busy seat with its work in full, the free and
     missing seats by name, the tally, and NEEDS YOU: each manual seat idle on what it last said, then
-    each busy seat gone silent, then Scott's blocked work, then subjects held for his approval."""
+    each busy seat gone silent, then blocked work (Scott's, and any no seat holds), then subjects held
+    for his approval, outsiders' subjects, and writers' PRs that name no item (`unlinked`)."""
     subjects.hygiene(conn)
     served.close_finished(conn)
     roster = seats(conn)
@@ -657,6 +837,18 @@ def status(conn: sqlite3.Connection) -> dict[str, Any]:
             "text": f"{found['ref'] or found['subject_key']} by {found['author']}: not queued",
         }
         for found in sweep.outsiders(conn)
+    ]
+    needs += [
+        {
+            "why": "unlinked",
+            "work": None,
+            "mode": None,
+            "state": None,
+            "text": f"{found['subject_key']} by {found['author']}: names no item; link it with update --pr",
+            "task": found["title"],
+            "since": found["since"],
+        }
+        for found in intake.unlinked(conn)
     ]
     return {
         "busy": busy,

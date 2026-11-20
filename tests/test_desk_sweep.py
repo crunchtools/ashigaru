@@ -18,7 +18,7 @@ from conftest import Keys
 from fastapi.testclient import TestClient
 
 from ashigaru.desk import __main__ as desk_main
-from ashigaru.desk import dispatch, store, sweep
+from ashigaru.desk import dispatch, intake, store, subjects, sweep
 from ashigaru.desk.api import create_app
 from ashigaru.desk.forges import Found, IntakeItem, Search
 from ashigaru.desk.model import Kind
@@ -154,14 +154,15 @@ def test_a_writers_pr_naming_an_item_becomes_its_pr(
     other = create(client, keys, repo="crunchtools/x")
     elsewhere = create(client, keys, repo="crunchtools/y")
     hits = [
-        Found(subject(9, closed=True, merged=True), "MEMBER", f"Does ({story}) ({keyed}) ({elsewhere})"),
-        Found(subject(10), "CONTRIBUTOR", f"Hijack ({other})"),
+        Found(subject(9, closed=True, merged=True), "MEMBER", f"Does ({elsewhere}) ({story})"),
+        Found(subject(10, closed=True, merged=True), "MEMBER", f"Does ({keyed})"),
+        Found(subject(11), "CONTRIBUTOR", f"Hijack ({other})"),
     ]
     sweeping(db, FakeForge({77: subject(77)}, hits))
     assert item(conn, story)["pr"] == "crunchtools/x#9" and item(conn, story)["state"] == "done"
     assert item(conn, other)["pr"] is None
     assert item(conn, elsewhere)["pr"] is None, "a PR links only to work in its own repo"
-    assert item(conn, keyed)["pr"] == "crunchtools/x#9", "a repo-less item's repo is its subject's"
+    assert item(conn, keyed)["pr"] == "crunchtools/x#10", "a repo-less item's repo is its subject's"
 
 
 def test_a_subject_it_cannot_read_is_reported_and_the_rest_still_settle(
@@ -567,3 +568,63 @@ def test_the_backfill_reads_old_runs_once(conn: sqlite3.Connection, db: Path) ->
     assert store.get_mark(conn, sweep.BACKFILLED) is None
     sweeping(db, FakeForge(subjects={1: bump(1, timedelta(hours=1), closed=True)}))
     assert store.get_mark(conn, sweep.BACKFILLED) is not None
+
+
+def seated(conn: sqlite3.Connection, **fields: Any) -> str:
+    row = {"task": "work", "repo": "crunchtools/x", "seat": SEAT, "state": "working", "mode": "manual"}
+    with store.transaction(conn):
+        return store.insert_item(conn, row | fields, "test")
+
+
+def test_a_hit_with_a_trailer_links_to_its_item_and_is_not_new(conn: sqlite3.Connection, db: Path) -> None:
+    work = seated(conn)
+    hits = [Found(subject(9), "MEMBER", f"Ashigaru-Item: {work}")]
+    run = sweeping(db, FakeForge(hits=hits))
+    assert run["new"] == 0 and run["subjects"] == 1
+    assert [row["id"] for row in store.list_items(conn)] == [work]
+    assert item(conn, work)["pr"] == "crunchtools/x#9"
+    assert (subjects.get(conn, "crunchtools/x#9") or {})["state"] == "open"
+
+
+def test_a_hit_for_a_merged_pr_with_a_trailer_settles_the_item_it_links(
+    conn: sqlite3.Connection, db: Path
+) -> None:
+    work = seated(conn, seat=None, state="queued", mode="auto")
+    text = f"Ashigaru-Item: {work}"
+    hit = Found(subject(9, closed=True, merged=True), "MEMBER", text)
+    run = sweeping(db, FakeForge(hits=[hit]))
+    assert (item(conn, work)["pr"], item(conn, work)["state"], run["new"]) == ("crunchtools/x#9", "done", 0)
+
+
+def test_a_hit_for_a_pr_an_item_names_is_not_queued_again(conn: sqlite3.Connection, db: Path) -> None:
+    work = seated(conn, seat=None, state="done", pr="crunchtools/x#9")
+    run = sweeping(db, FakeForge(hits=[Found(subject(9), "MEMBER", "")]))
+    assert run["new"] == 0 and [row["id"] for row in store.list_items(conn)] == [work]
+
+
+def test_a_hit_a_seat_may_be_working_is_recorded_unlinked_and_not_queued(
+    conn: sqlite3.Connection, db: Path
+) -> None:
+    work = seated(conn)
+    run = sweeping(db, FakeForge(hits=[Found(subject(9), "MEMBER", "")]))
+    assert run["new"] == 0 and [row["id"] for row in store.list_items(conn)] == [work]
+    assert [row["subject_key"] for row in intake.unlinked(conn)] == ["crunchtools/x#9"]
+
+
+def test_a_non_writers_hit_with_a_trailer_is_held_not_linked(conn: sqlite3.Connection, db: Path) -> None:
+    work = seated(conn)
+    hits = [Found(subject(9, author="reader"), "MEMBER", f"Ashigaru-Item: {work}")]
+    run = sweeping(db, FakeForge(hits=hits))
+    assert run["new"] == 1 and item(conn, work)["pr"] is None
+    held = store.item_by_subject(conn, "crunchtools/x#9") or {}
+    assert held["extra"]["trusted"] is False
+
+
+def test_a_row_that_moved_since_it_was_judged_loses_what_the_judging_granted(
+    conn: sqlite3.Connection,
+) -> None:
+    stranger = subject(5, kind=Kind.OUTCOME, author="stranger")
+    with store.transaction(conn):
+        assert intake.upsert(conn, stranger)
+        intake.upsert(conn, dataclasses.replace(stranger, author_writes=True, judged_at=0))
+    assert (store.item_by_subject(conn, "crunchtools/x#5") or {})["extra"]["trusted"] is False

@@ -15,8 +15,9 @@ startup, and as soon as an admin asks (POST /v1/sweep), one run:
    is recorded, read back every run while it is open, and once it has been open
    `dependabot_after` it is queued, auto on exedore-max, to land or close (a
    green one the repo's own automation merges first). A
-   writer's PR whose title or body names an open item in its repo, `(a676)`,
-   becomes that item's `pr`. The mark moves to this run's start once the search
+   writer's PR is linked or queued by intake's rules, as a webhook's is (it
+   becomes the `pr` of the open item it names, `Ashigaru-Item: a676`, rather
+   than a second item). The mark moves to this run's start once the search
    was read whole, or to the last hit's time when the forge's cap cut it short,
    but never past a hit it could not judge, which the next run reads again;
 3. settles every item against the subjects (subjects.hygiene).
@@ -39,7 +40,6 @@ import http.client
 import itertools
 import json
 import logging
-import re
 import sqlite3
 import threading
 import urllib.error
@@ -52,7 +52,7 @@ from starlette.concurrency import run_in_threadpool
 
 from . import intake, store, subjects
 from .forges import Found, IntakeItem, Search
-from .model import CLOSED, Kind, Lane, Mode, Wrap
+from .model import Kind, Lane, Mode
 
 EVERY = 600.0
 """Seconds between runs; ASHIGARU_SWEEP_EVERY."""
@@ -81,7 +81,6 @@ WRITERS = frozenset({"OWNER", "MEMBER"})
 DEPENDABOT = "dependabot[bot]"
 DEPENDABOT_AFTER = timedelta(days=1)
 """How long a Dependabot PR may stay open before it is queued; ASHIGARU_DEPENDABOT_AFTER."""
-LINK = re.compile(r"\((a\d+)\)")
 ACTOR = "desk"
 SOURCE = "sweep"
 LOG = logging.getLogger(__name__)
@@ -276,37 +275,26 @@ def _outsider(
 def _found(
     conn: sqlite3.Connection, settings: Settings, hit: Found, counts: Counts, started: datetime
 ) -> None:
-    """A search hit. A member's or trusted author's new subject is queued: claimable only when the
-    forge says its author may write to the repo (org membership is not write access), else held;
-    anyone else's is an `_outsider`. A writer's PR becomes the `pr` of each open item its title
-    or body names that has none. A subject with an item is recorded and settled."""
-    item = hit.item
+    """A search hit. A member's or trusted author's new subject goes through intake as a delivery's
+    does: linked to the item it names, held back for Josui when a seat may have opened it, else queued,
+    claimable only when the forge says its author may write to the repo (org membership is not write
+    access), else held; anyone else's is an `_outsider`. A subject with an item, or linked to one,
+    is recorded and settled."""
+    item = dataclasses.replace(hit.item, body=hit.body)
     member = hit.association in WRITERS or item.author in settings.authors
-    known = store.item_by_subject(conn, item.subject_key) is not None
-    if not member and not known:
+    if not member and store.item_by_subject(conn, item.subject_key) is None:
         _outsider(conn, settings, item, counts, started)
         return
-    named = LINK.findall(f"{item.title}\n{hit.body}") if member and item.kind == Kind.STORY else []
     asked = (item.repo or "", item.author or "")
     if asked in counts.unasked:
         raise Unanswered(f"may {item.author} write? {counts.unasked[asked]}")
     writes = item.author in settings.authors or (member and counts.writers.get(asked, False))
     with store.transaction(conn):
+        placed: str | None = None
         if store.item_by_subject(conn, item.subject_key) is None:
-            judged = dataclasses.replace(item, author_writes=writes, judged_at=0)
-            counts.new += intake.upsert(conn, judged) is not None
-        for work in named if writes else []:
-            found = store.get_item(conn, work)
-            if (
-                found
-                and (found["repo"] or (_number(found["subject_key"] or "") or ("",))[0]).lower()
-                == (item.repo or "").lower()
-                and not found["pr"]
-                and found["state"] not in CLOSED
-                and found["wrap"] != Wrap.CLEARED
-            ):
-                store.update_item(conn, work, {"pr": item.subject_key}, ACTOR, SOURCE)
-        if store.item_by_subject(conn, item.subject_key) is not None or (named and writes):
+            placed = intake.upsert(conn, dataclasses.replace(item, author_writes=writes, judged_at=0))
+            counts.new += placed is not None and store.item_by_subject(conn, item.subject_key) is not None
+        if placed is not None or store.item_by_subject(conn, item.subject_key) is not None:
             subjects.record(conn, item, SOURCE)
             counts.closed += len(subjects.settle(conn, item.subject_key))
         counts.subjects += 1
@@ -399,10 +387,10 @@ def _read(
 
 
 def _ask(conn: sqlite3.Connection, settings: Settings, hits: list[Found], counts: Counts) -> None:
-    """Ask the forge, FETCHERS at a time, whether each member who authored a hit that needs a
-    decision (a new subject, or a PR naming an item) may write to its repo, once per (repo, author),
-    so `_found` reads the answers from `counts.writers`. A failed check is a no, as the forge's own
-    permission check makes it. Org members are few, so this is a handful of calls."""
+    """Ask the forge, FETCHERS at a time, whether each member who authored a new subject
+    (a hit with no item) may write to its repo, once per (repo, author), so `_found` reads the answers
+    from `counts.writers`. A failed check is a no, as the forge's own permission check makes it.
+    Org members are few, so this is a handful of calls."""
     asked = json.dumps(sorted({hit.item.subject_key for hit in hits}))
     known = {row[0] for row in conn.execute(KNOWN, (asked,))}
     pairs = {
@@ -412,7 +400,7 @@ def _ask(conn: sqlite3.Connection, settings: Settings, hits: list[Found], counts
         and hit.item.repo
         and hit.item.author
         and hit.item.author not in settings.authors
-        and (LINK.search(f"{hit.item.title}\n{hit.body}") or hit.item.subject_key not in known)
+        and hit.item.subject_key not in known
     }
     with ThreadPoolExecutor(FETCHERS) as pool:
         answers = {

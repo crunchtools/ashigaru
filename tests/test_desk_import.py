@@ -57,8 +57,11 @@ def test_newest_value_of_each_field_wins(conn: sqlite3.Connection) -> None:
         assert got is not None
         assert got["state"] == want.get("state", "queued"), item_id
         assert got["task"] == want.get("task", ""), item_id
-        for key in ("seat", "result", "learned", "done_when", "note"):
+        for key in ("result", "learned", "done_when", "note"):
             assert got[key] == want.get(key), (item_id, key)
+        if got["seat"] != want.get("seat"):
+            # a seat holds one open item: a later line for a second one leaves it seatless
+            assert got["seat"] is None and got["extra"]["ledger_seat"] == want["seat"], item_id
         assert got["memorized"] is bool(want.get("memorized")), item_id
         assert got["after"] == (want.get("after") or []), item_id
 

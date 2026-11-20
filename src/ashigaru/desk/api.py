@@ -7,13 +7,15 @@ SEAT_STATES; Josui verifies and closes. A ci identity reads.
 
 import asyncio
 import contextlib
+import dataclasses
 import sqlite3
 from collections.abc import AsyncIterator, Iterator, Mapping, Sequence
 from pathlib import Path
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query, Request, Response, status
+from fastapi import APIRouter, Depends, FastAPI, Header, HTTPException, Query, Request, Response, status
 from fastapi import Path as PathParam
+from fastapi.responses import JSONResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from starlette.concurrency import run_in_threadpool
 from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
@@ -56,6 +58,8 @@ from .model import (
     Round,
     Seat,
     SeatPatch,
+    SessionStart,
+    SessionStarted,
     State,
     Subject,
     Sweep,
@@ -110,20 +114,97 @@ def _found(value: dict[str, Any] | None, what: str) -> dict[str, Any]:
     return value
 
 
-def _conflict(error: store.Conflict) -> HTTPException:
-    return HTTPException(status.HTTP_409_CONFLICT, str(error))
+class ProblemError(HTTPException):
+    """A 4xx whose body carries a `code` beside its detail (Problem), for a client that acts on it."""
+
+    def __init__(self, status_code: int, detail: str, code: str | None) -> None:
+        super().__init__(status_code, detail)
+        self.code = code
 
 
-def writable_item(conn: sqlite3.Connection, item_id: str, who: auth.Caller) -> dict[str, Any]:
+async def _problem(request: Request, error: Exception) -> JSONResponse:
+    code = error.code if isinstance(error, ProblemError) else None
+    status_code = (
+        error.status_code if isinstance(error, HTTPException) else status.HTTP_500_INTERNAL_SERVER_ERROR
+    )
+    return JSONResponse(
+        {"detail": getattr(error, "detail", str(error)), "code": code}, status_code=status_code
+    )
+
+
+def _conflict(error: store.Conflict) -> ProblemError:
+    """409 with the Conflict's code; 412 when what conflicts is the version the caller named."""
+    moved = error.code == "version"
+    return ProblemError(
+        status.HTTP_412_PRECONDITION_FAILED if moved else status.HTTP_409_CONFLICT, str(error), error.code
+    )
+
+
+@dataclasses.dataclass(frozen=True)
+class Guard:
+    """What a write names about what it read: the seat session it comes from (X-Ashigaru-Epoch, a seat's
+    only) and the item version it was decided on (If-Match). Either may be absent."""
+
+    epoch: int | None = None
+    version: int | None = None
+
+
+def _number(value: str | None, what: str) -> int | None:
+    """A header that names a number, or None when absent; 422 when it is not one."""
+    if value is None:
+        return None
+    if not value.strip().isdigit():
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, f"{what} is not a number: {value}")
+    return int(value)
+
+
+def guard(
+    if_match: Annotated[
+        str | None, Header(description="The item's `version` the write was decided on.")
+    ] = None,
+    epoch: Annotated[
+        str | None, Header(alias="X-Ashigaru-Epoch", description="The seat session's epoch, from a seat.")
+    ] = None,
+) -> Guard:
+    """The request's Guard. An If-Match may carry an ETag's quotes and W/; either header that is not a
+    number is 422."""
+    tag = None if if_match is None else if_match.strip().removeprefix("W/").strip('"')
+    return Guard(_number(epoch, "X-Ashigaru-Epoch"), _number(tag, "If-Match"))
+
+
+Guarded = Annotated[Guard, Depends(guard)]
+UNGUARDED = Guard()
+"""The Guard of a call that names nothing: an MCP tool's, or an internal one."""
+
+
+def writable_item(
+    conn: sqlite3.Connection, item_id: str, who: auth.Caller, checked: Guard = UNGUARDED
+) -> dict[str, Any]:
     """The item, if `who` may write it: admins any, a seat only its own and only while it is open.
-    Once Josui closes an item (done, wontdo, abandoned) or clears it, a seat cannot reopen it."""
+    Once Josui closes an item (done, wontdo, abandoned) or clears it, a seat cannot reopen it. A seat
+    naming its session's epoch must be in the current one, and the one that took the item; any caller
+    naming a version must have read the item at it."""
     item = _found(store.get_item(conn, item_id), "item")
-    if who.admin:
-        return item
-    if who.role != Role.SEAT or item["seat"] != who.name:
-        raise HTTPException(status.HTTP_403_FORBIDDEN, f"{item_id} belongs to {item['seat'] or 'no seat'}")
-    if item["state"] in CLOSED or item["wrap"] == Wrap.CLEARED:
-        raise HTTPException(status.HTTP_403_FORBIDDEN, f"{item_id} is closed; only an admin may change it")
+    try:
+        dispatch.unmoved(item, checked.version)
+        if who.admin:
+            return item
+        if who.role != Role.SEAT or item["seat"] != who.name:
+            raise HTTPException(
+                status.HTTP_403_FORBIDDEN, f"{item_id} belongs to {item['seat'] or 'no seat'}"
+            )
+        if item["state"] in CLOSED or item["wrap"] == Wrap.CLEARED:
+            raise HTTPException(
+                status.HTTP_403_FORBIDDEN, f"{item_id} is closed; only an admin may change it"
+            )
+        dispatch.fence(store.get_seat(conn, who.name), who.name, checked.epoch)
+        if checked.epoch is not None and item["epoch"] not in (None, checked.epoch):
+            raise store.Conflict(
+                f"{item_id} was taken in session {item['epoch']}, not this one ({checked.epoch})",
+                "stale-session",
+            )
+    except store.Conflict as error:
+        raise _conflict(error) from error
     return item
 
 
@@ -153,14 +234,23 @@ def report_fields(report: Report) -> dict[str, Any]:
     return {key: value for key, value in fields.items() if value is not None}
 
 
-def _patch_item(conn: sqlite3.Connection, item_id: str, fields: dict[str, Any], who: auth.Caller) -> Item:
+def _patch_item(
+    conn: sqlite3.Connection, item_id: str, fields: dict[str, Any], who: auth.Caller, checked: Guard
+) -> Item:
+    """One write to an item. A move to another seat takes that seat's current session (`epoch`); the
+    store refuses a seat that holds another open item (409 busy)."""
     with store.transaction(conn):
-        writable_item(conn, item_id, who)
+        item = writable_item(conn, item_id, who, checked)
         seat_may(who, fields)
         try:
             fields = with_outcome(conn, fields, who.name)
             if fields.get("parent") == item_id:
                 raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "an item cannot serve itself")
+            if fields.get("seat") and fields["seat"] != item["seat"]:
+                taker = store.get_seat(conn, fields["seat"])
+                if taker is None:
+                    raise store.Conflict(f"seat {fields['seat']!r} has not reported", "unseen")
+                fields["epoch"] = taker["epoch"]
             store.update_item(conn, item_id, fields, who.name)
         except store.Conflict as error:
             raise _conflict(error) from error
@@ -173,8 +263,10 @@ ERRORS = {
     404: "No such item, seat, identity or key.",
     409: (
         "A taken id or subject_key (the detail names the item holding it), an existing identity, a"
-        " second child in one assignment, or an item or seat not in a state to assign, claim or wrap."
+        " second child in one assignment, a seat that holds another open item, a seat session the Desk"
+        " has ended (`code` stale-session), or an item or seat not in a state to assign, claim or wrap."
     ),
+    412: "The item moved since the version named in If-Match (`code` version): read it again.",
     422: "A query or body the Desk cannot read, such as a time that is not one.",
 }
 
@@ -237,29 +329,31 @@ def get_item(conn: Conn, who: Who, item_id: str) -> Item:
     return Item.model_validate(_found(store.get_item(conn, item_id), "item"))
 
 
-@router.patch("/v1/items/{item_id}", tags=["items"], responses=errors(401, 403, 404, 409))
-def patch_item(conn: Conn, who: Who, item_id: str, body: ItemPatch) -> Item:
-    return _patch_item(conn, item_id, body.model_dump(exclude_unset=True), who)
+@router.patch("/v1/items/{item_id}", tags=["items"], responses=errors(401, 403, 404, 409, 412))
+def patch_item(conn: Conn, who: Who, item_id: str, body: ItemPatch, checked: Guarded = UNGUARDED) -> Item:
+    """Only the fields sent change. A seat change takes the new seat and frees the old; a move to
+    queued or proposed frees the seat."""
+    return _patch_item(conn, item_id, body.model_dump(exclude_unset=True), who, checked)
 
 
-@router.post("/v1/items/{item_id}/report", tags=["items"], responses=errors(401, 403, 404, 409))
-def report(conn: Conn, who: Who, item_id: str, body: Report) -> Item:
+@router.post("/v1/items/{item_id}/report", tags=["items"], responses=errors(401, 403, 404, 409, 412))
+def report(conn: Conn, who: Who, item_id: str, body: Report, checked: Guarded = UNGUARDED) -> Item:
     """The report contract. DONE moves to review (Josui verifies), BLOCKED to blocked, WORKING to
     working; CC-DONE marks the learnings memorized. Learned: none is not recorded."""
-    return _patch_item(conn, item_id, report_fields(body), who)
+    return _patch_item(conn, item_id, report_fields(body), who, checked)
 
 
 @router.post(
     "/v1/items/{item_id}/file",
     tags=["items"],
     status_code=status.HTTP_201_CREATED,
-    responses=errors(401, 403, 404, 409),
+    responses=errors(401, 403, 404, 409, 412),
 )
-def file(conn: Conn, who: Who, item_id: str, body: FileChild) -> Item:
+def file(conn: Conn, who: Who, item_id: str, body: FileChild, checked: Guarded = UNGUARDED) -> Item:
     """desk_file: record a child of this story as proposed, under the story's outcome. One per
     assignment (409 on the second); abandoned after 14 days unless Josui promotes it."""
     with store.transaction(conn):
-        story = writable_item(conn, item_id, who)
+        story = writable_item(conn, item_id, who, checked)
         try:
             child = store.file_child(conn, story, body.model_dump(exclude_unset=True), who.name)
         except store.Conflict as error:
@@ -433,18 +527,59 @@ def get_seat(conn: Conn, who: Who, name: str) -> Seat:
     return Seat.model_validate(mine(who, _found(dispatch.seat(conn, name), "seat")))
 
 
-@router.patch("/v1/seats/{name}", tags=["seats"], responses=errors(401, 403))
-def patch_seat(conn: Conn, who: Who, name: str, body: SeatPatch) -> Seat:
-    """Created on first report. A seat writes only turn and task on its own row; lane, status, owner
-    (Scott's manual hold) and item are Josui's. `since` is the Desk's: it moves when status does.
-    The Desk infers Scott's hold from the report: a first typed prompt (turn active with a task) on a
-    seat holding no item opens a manual item and holds the seat; a /clear (task null) releases it."""
+OCCUPANCY = ("status", "item", "owner")
+"""A seat row's fields its items decide: no one writes them, so they never disagree with the items."""
+
+
+def _own(who: auth.Caller, name: str, checked: Guard) -> dispatch.Own | None:
+    """The request is the seat's own, from the session named, or None for an admin's."""
+    return dispatch.Own(checked.epoch) if who.role == Role.SEAT and who.name == name else None
+
+
+@router.patch("/v1/seats/{name}", tags=["seats"], responses=errors(401, 403, 409))
+def patch_seat(conn: Conn, who: Who, name: str, body: SeatPatch, checked: Guarded = UNGUARDED) -> Seat:
+    """Created on first report. A seat writes only turn, task and waiting_on on its own row, which
+    renews its lease; Josui sets its lane. Status, item and owner (Scott's manual hold) are what the
+    seat's open item says: a write that would change one is 409 (assign, claim, update or wrap the
+    item instead). `since` is the Desk's: it moves when status does. The Desk infers what happened in
+    the seat from the report: a turn starting acknowledges Josui's item, unless it is Scott's first
+    typed prompt (turn active with a task), which hands an unstarted item back and opens his manual
+    item, holding the seat; a /clear (task null) ends what the session held."""
     own_seat(who, name)
     fields = body.model_dump(exclude_unset=True)
     refused = sorted(set(fields) - SEAT_ROW_FIELDS)
     if refused and not who.admin:
         raise HTTPException(status.HTTP_403_FORBIDDEN, f"a seat may not set: {', '.join(refused)}")
-    return Seat.model_validate(dispatch.report_seat(conn, name, fields, who.name))
+    current = store.get_seat(conn, name) or {**store.SEAT_DEFAULTS, "status": "free"}
+    derived = sorted(key for key in OCCUPANCY if key in fields and fields[key] != current[key])
+    if derived:
+        raise ProblemError(
+            status.HTTP_409_CONFLICT,
+            f"{', '.join(derived)} follow the seat's items: change the item",
+            "derived",
+        )
+    fields = {key: value for key, value in fields.items() if key not in OCCUPANCY}
+    try:
+        return Seat.model_validate(
+            dispatch.report_seat(conn, name, fields, who.name, _own(who, name, checked))
+        )
+    except store.Conflict as error:
+        raise _conflict(error) from error
+
+
+@router.post("/v1/seats/{name}/session", tags=["seats"], responses=errors(401, 403, 409))
+def start_session(conn: Conn, who: Who, name: str, body: SessionStart) -> SessionStarted:
+    """The seat's SessionStart hook. A new session (startup, clear) gets the next epoch, which every
+    request of the session then sends as X-Ashigaru-Epoch, and ends the one before: Josui's item it
+    was working is blocked (cleared before its wrap), Scott's hold ends on a clear. A resume keeps
+    the epoch of the seat's current session while its lease is live; any other resume is 409
+    stale-session, and the session must not act on what it remembers."""
+    own_seat(who, name)
+    try:
+        epoch, seat = dispatch.start_session(conn, name, body.session_id, body.source, who.name)
+    except store.Conflict as error:
+        raise _conflict(error) from error
+    return SessionStarted(epoch=epoch, seat=Seat.model_validate(dispatch.seat(conn, name)))
 
 
 NEXT_TICK = 2.0
@@ -463,16 +598,24 @@ async def next_item(
     """The seat's `next` hook: claim the oldest queued auto item in the seat's lane whose `after` items
     are done, waiting up to `wait` seconds for one while the seat is idle. 204 when none came, the
     `autodispatch` mark is not `on`, or the client went away (nothing is claimed for a seat no longer
-    listening, and a claim made as it left is handed back); 409 when the seat cannot take work (busy,
-    held, unseen or laneless), so the hook stops."""
+    listening, and a claim made as it left is handed back); 409 when the seat cannot take work, its
+    `code` saying why: busy or held (for now: ask again later), unseen or no-lane, or stale-session for
+    a session the Desk has ended. Asking renews the seat's lease. The seat's next turn acknowledges a
+    claim; one not acknowledged in ACK_AFTER goes back to the queue."""
     own_seat(who, name)
+    own = _own(who, name, guard(epoch=request.headers.get("X-Ashigaru-Epoch")))
+    try:
+        if own:
+            await run_in_threadpool(dispatch.check_in, conn, name, own.epoch)
+    except store.Conflict as error:
+        raise _conflict(error) from error
     loop = asyncio.get_running_loop()
     until = loop.time() + query.wait
     while True:
         if await request.is_disconnected():
             return Response(status_code=status.HTTP_204_NO_CONTENT)
         try:
-            item = await run_in_threadpool(dispatch.next_item, conn, name)
+            item = await run_in_threadpool(dispatch.next_item, conn, name, own.epoch if own else None)
         except store.Conflict as error:
             raise _conflict(error) from error
         if item is not None and await request.is_disconnected():
@@ -485,14 +628,19 @@ async def next_item(
         await asyncio.sleep(NEXT_TICK)
 
 
-@router.post("/v1/seats/{name}/usage", tags=["seats"], responses=errors(401, 403))
-def report_usage(conn: Conn, who: Who, name: str, body: UsageReport) -> Seat:
+@router.post("/v1/seats/{name}/usage", tags=["seats"], responses=errors(401, 403, 409))
+def report_usage(conn: Conn, who: Who, name: str, body: UsageReport, checked: Guarded = UNGUARDED) -> Seat:
     """From the seat's hooks and status line: model, billing source, context, session tokens, and the
     session's running cost, of which the increase since the last report is booked to today's spend.
-    A seat's lane decides its billing over the report's, so a seat key cannot pick what it bills."""
+    A seat's lane decides its billing over the report's, so a seat key cannot pick what it bills. A
+    seat's own report renews its lease; from a session the Desk has ended it is 409 stale-session."""
     own_seat(who, name)
     lane_first = who.role == Role.SEAT
-    return Seat.model_validate(dispatch.report_usage(conn, name, body.model_dump(), lane_first))
+    try:
+        found = dispatch.report_usage(conn, name, body.model_dump(), lane_first, checked.epoch)
+    except store.Conflict as error:
+        raise _conflict(error) from error
+    return Seat.model_validate(found)
 
 
 @router.get("/v1/usage", tags=["views"], responses=errors(401))
@@ -515,12 +663,13 @@ def outcomes(conn: Conn, who: Who) -> list[OutcomeRow]:
     return [OutcomeRow.model_validate(row) for row in dispatch.outcomes(conn)]
 
 
-@router.post("/v1/items/{item_id}/assign", tags=["items"], responses=errors(401, 403, 404, 409))
-def assign(conn: Conn, who: Admin, item_id: str, body: Assign) -> Item:
-    """Admin: give an open item whose `after` items are all done to a seat. With no seat named, picks
-    the seat in the lane that has been free longest and is not held by Scott; 409 when none is."""
+@router.post("/v1/items/{item_id}/assign", tags=["items"], responses=errors(401, 403, 404, 409, 412))
+def assign(conn: Conn, who: Admin, item_id: str, body: Assign, checked: Guarded = UNGUARDED) -> Item:
+    """Admin: give an open item whose `after` items are all done to a seat, in the seat's current
+    session. With no seat named, picks the seat in the lane that has been free longest, is idle and
+    up (its lease live) and is not held by Scott; 409 when none is, or the seat named is missing."""
     try:
-        dispatch.assign(conn, item_id, body.seat, body.lane, who.name)
+        dispatch.assign(conn, item_id, body.model_dump(), who.name, checked.version)
     except KeyError as error:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "no such item") from error
     except store.Conflict as error:
@@ -528,29 +677,31 @@ def assign(conn: Conn, who: Admin, item_id: str, body: Assign) -> Item:
     return Item.model_validate(store.get_item(conn, item_id))
 
 
-@router.post("/v1/items/{item_id}/wrap", tags=["items"], responses=errors(401, 403, 404, 409))
-def wrap(conn: Conn, who: Admin, item_id: str, body: WrapUp) -> Item:
+@router.post("/v1/items/{item_id}/wrap", tags=["items"], responses=errors(401, 403, 404, 409, 412))
+def wrap(conn: Conn, who: Admin, item_id: str, body: WrapUp, checked: Guarded = UNGUARDED) -> Item:
     """Admin: `wrapping` records that /cc seat was sent. `cleared` (the default) refuses with 409
     until the item is memorized (CC-DONE) or `learned` is sent, and while its seat is mid-turn,
     unless `force`; then it clears the wrap and closes an open item in `state`, freeing the seat."""
     try:
-        dispatch.wrap(conn, item_id, body.model_dump(), who.name)
+        dispatch.wrap(conn, item_id, body.model_dump(), who.name, checked.version)
     except KeyError as error:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "no such item") from error
     except dispatch.Refused as error:
         raise HTTPException(status.HTTP_409_CONFLICT, str(error)) from error
+    except store.Conflict as error:
+        raise _conflict(error) from error
     return Item.model_validate(store.get_item(conn, item_id))
 
 
-@router.post("/v1/items/{item_id}/claim", tags=["items"], responses=errors(401, 403, 404, 409))
-def claim(conn: Conn, who: Who, item_id: str) -> Item:
+@router.post("/v1/items/{item_id}/claim", tags=["items"], responses=errors(401, 403, 404, 409, 412))
+def claim(conn: Conn, who: Who, item_id: str, checked: Guarded = UNGUARDED) -> Item:
     """desk_claim: the calling seat takes a queued, unowned, auto item in its lane whose `after` items
     are done. Atomic: of two seats claiming one item, one gets 409. The seat must be free, unheld and
     in a lane; an item with no lane is never claimed, only assigned."""
     if who.role != Role.SEAT:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "only a seat claims; an admin assigns")
     try:
-        dispatch.claim(conn, item_id, who.name)
+        dispatch.claim(conn, item_id, who.name, checked.epoch, checked.version)
     except KeyError as error:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "no such item") from error
     except store.Conflict as error:
@@ -695,6 +846,7 @@ def create_app(
     app.state.forge_tokens = dict(forge_tokens or {})
     app.state.forge_authors = {forge: frozenset(names) for forge, names in (forge_authors or {}).items()}
     app.state.waiters = ci.Waiters(ci.from_forge(FORGES[DEFAULT], app.state.forge_tokens.get(DEFAULT, "")))
+    app.add_exception_handler(ProblemError, _problem)
     app.include_router(router)
     app.include_router(webhooks.router)
     app.include_router(mcp_routes.router)

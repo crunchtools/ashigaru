@@ -13,7 +13,7 @@ from typing import Any
 import httpx
 import pytest
 import uvicorn
-from conftest import Keys, RequiredChecks
+from conftest import Keys, RequiredChecks, up_seat
 from fastapi.testclient import TestClient
 
 from ashigaru.desk import mcp as mcp_package
@@ -153,13 +153,14 @@ CASES: list[tuple[str, dict[str, Any], str, str, dict[str, Any] | None, set[str]
     ("desk_update", {"fields": {"result": "r"}}, "PATCH", "/v1/items/{id}", {"result": "r"}, OWNER_OR_ADMIN),
     ("desk_update", {"fields": {"state": "done"}}, "PATCH", "/v1/items/{id}", {"state": "done"}, ADMIN),
     ("desk_update", {"fields": {"seat": OTHER}}, "PATCH", "/v1/items/{id}", {"seat": OTHER}, ADMIN),
-    ("desk_report", {"verb": "DONE", "text": "ok"}, "POST", "/v1/items/{id}/report",
+    ("desk_report", {"fields": {"verb": "DONE", "text": "ok"}}, "POST", "/v1/items/{id}/report",
      {"verb": "DONE", "text": "ok"}, OWNER_OR_ADMIN),
     ("desk_file", {"task": "child"}, "POST", "/v1/items/{id}/file", {"task": "child"}, OWNER_OR_ADMIN),
     ("desk_auto", {}, "PATCH", "/v1/items/{id}", {"mode": "auto"}, ADMIN),
     ("desk_manual", {}, "PATCH", "/v1/items/{id}", {"mode": "manual"}, ADMIN),
-    ("desk_wrap", {"stage": "wrapping"}, "POST", "/v1/items/{id}/wrap", {"stage": "wrapping"}, ADMIN),
-    ("desk_wrap", {"force": True}, "POST", "/v1/items/{id}/wrap", {"force": True}, ADMIN),
+    ("desk_wrap", {"fields": {"stage": "wrapping"}}, "POST", "/v1/items/{id}/wrap", {"stage": "wrapping"},
+     ADMIN),
+    ("desk_wrap", {"fields": {"force": True}}, "POST", "/v1/items/{id}/wrap", {"force": True}, ADMIN),
     ("desk_assign", {"seat": OTHER}, "POST", "/v1/items/{id}/assign", {"seat": OTHER}, ADMIN),
     ("desk_claim", {}, "POST", "/v1/items/{id}/claim", None, SEATS),
 ]  # fmt: skip
@@ -167,14 +168,17 @@ Case = tuple[str, dict[str, Any], str, str, dict[str, Any] | None, set[str]]
 
 
 def arrange(conn: sqlite3.Connection, tool: str, item_id: str) -> None:
-    """An item the action can succeed on for someone: SEAT's working story, or a claimable one."""
+    """An item the action can succeed on for someone: SEAT's working story, or a claimable one. Both
+    seats are live, and the twin leaves whatever seat its action took to this one."""
+    conn.execute("UPDATE items SET seat = NULL WHERE seat IN (?, ?)", (SEAT, OTHER))
     if tool in ("desk_claim", "desk_assign"):
         store.insert_item(conn, {"id": item_id, "task": "t", "lane": "exedore-max", "state": "queued"}, JOSUI)
     else:
         store.insert_item(conn, {"id": item_id, "task": "t", "seat": SEAT, "state": "working"}, JOSUI)
     for seat in (SEAT, OTHER):
+        up_seat(conn, seat, lane="exedore-max")
         with store.transaction(conn):
-            store.write_seat(conn, seat, {"lane": "exedore-max", "status": "free", "item": None})
+            store.occupy(conn, seat)
 
 
 @pytest.mark.parametrize(
@@ -383,8 +387,7 @@ def test_desk_get_by_subject_key_and_ref(
 def test_desk_assign_with_a_task_creates_then_assigns(
     client: TestClient, urls: dict[str, str], conn: sqlite3.Connection
 ) -> None:
-    with store.transaction(conn):
-        store.write_seat(conn, SEAT, {"lane": "exedore-max", "status": "free", "item": None})
+    up_seat(conn, SEAT, lane="exedore-max")
     arguments = {"record": {"task": "do it", "done_when": "merged", "subject_key": "RT#9"}, "seat": SEAT}
     assert mcp_status(call(client, urls[SEAT], "desk_assign", arguments)) == FORBIDDEN
     item = call(client, urls[JOSUI], "desk_assign", arguments)["structuredContent"]
@@ -430,7 +433,7 @@ def test_desk_wait_on_an_item_reads_it(
     store.insert_item(conn, {"id": "a1", "task": "t", "seat": SEAT, "state": "working"}, JOSUI)
     working = call(client, urls[SEAT], "desk_wait", {"item_id": "a1", "timeout": 0})
     assert not working["isError"] and working["structuredContent"]["result"]["state"] == "working"
-    store.insert_item(conn, {"id": "a2", "task": "t", "seat": SEAT, "state": "review"}, JOSUI)
+    store.insert_item(conn, {"id": "a2", "task": "t", "seat": OTHER, "state": "review"}, JOSUI)
     settled = call(client, urls[SEAT], "desk_wait", {"item_id": "a2"})
     assert settled["structuredContent"]["result"]["state"] == "review"
     assert mcp_status(call(client, urls[SEAT], "desk_wait", {"item_id": "zz", "timeout": 0})) == NOT_FOUND

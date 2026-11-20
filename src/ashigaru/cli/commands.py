@@ -28,6 +28,12 @@ def _item(item_id: str) -> str:
     return f"/v1/items/{quote(item_id, safe='')}"
 
 
+def _match(if_version: int | None) -> dict[str, str] | None:
+    """The If-Match header for a write that must find the item at `if_version`, else None. The Desk
+    answers 412 (code "version") when the item has moved since."""
+    return None if if_version is None else {"If-Match": str(if_version)}
+
+
 def _codes_of(name: str) -> str:
     return f"/v1/identities/{quote(name, safe='')}/mcp"
 
@@ -201,25 +207,30 @@ def create(desk: Desk, **fields: Any) -> dict[str, Any]:
     return created
 
 
-def update(desk: Desk, item: str, clear: Sequence[str] = (), **fields: Any) -> dict[str, Any]:
-    """Set the fields given; each name in `clear` is set to null. A seat may set only state
+def update(
+    desk: Desk, item: str, clear: Sequence[str] = (), if_version: int | None = None, **fields: Any
+) -> dict[str, Any]:
+    """Set the fields given; each name in `clear` is set to null; with `if_version`, only if the item
+    is still at that version (else the Desk answers 412). A seat may set only state
     (working, review, blocked), result, next, learned, note, blocked_reason, memorized and
     check_after on its own open item. The MCP tool is desk_update."""
     body = {key: value for key, value in fields.items() if value is not None}
     body |= dict.fromkeys(clear)
     if not body:
         raise CommandError("nothing to update; give a field, or --clear one")
-    result: dict[str, Any] = desk.request("PATCH", _item(item), body=body)
+    result: dict[str, Any] = desk.request("PATCH", _item(item), body=body, headers=_match(if_version))
     return result
 
 
-def report(desk: Desk, item: str, verb: str, **lines: str | None) -> dict[str, Any]:
+def report(
+    desk: Desk, item: str, verb: str, if_version: int | None = None, **lines: str | None
+) -> dict[str, Any]:
     """The report contract, with `text`, `next` and `learned` in `lines`: DONE moves to review with
     the text as the result, BLOCKED to blocked with it as the reason, WORKING to working with it as
-    the note; CC-DONE marks the learnings memorized. A `learned` of none is not recorded. The MCP
-    tool is desk_report."""
+    the note; CC-DONE marks the learnings memorized. A `learned` of none is not recorded. With
+    `if_version`, only if the item is still at that version. The MCP tool is desk_report."""
     body = {"verb": verb.upper(), **{k: v for k, v in lines.items() if v is not None}}
-    result: dict[str, Any] = desk.post(f"{_item(item)}/report", body)
+    result: dict[str, Any] = desk.post(f"{_item(item)}/report", body, _match(if_version))
     return result
 
 
@@ -229,6 +240,7 @@ def assign(
     *,
     seat: str | None = None,
     lane: str | None = None,
+    if_version: int | None = None,
     **record: str | list[str] | None,
 ) -> dict[str, Any]:
     """Assign an item to a seat: `seat` names one, else the Desk picks the seat in `lane` (default:
@@ -236,9 +248,11 @@ def assign(
     done_when, ref, repo, after, mode, subject_key), the item is recorded first, in `lane`; if the
     subject_key is taken, or the assign is refused, Refused carries the item so its id is not lost.
     An `outcome` (or `outcome_text`) given without a task, even empty, is set on the item before
-    it is assigned."""
+    it is assigned. `if_version` guards the assign itself, so it needs an existing item."""
     if seat and lane:
         raise CommandError("name a seat or a lane, not both")
+    if if_version is not None and record.get("task"):
+        raise CommandError("--if-version is for an existing item, not a new one")
     if record.get("task"):
         item = create(desk, id=item, lane=lane, **record)["id"]
     elif not item:
@@ -247,7 +261,7 @@ def assign(
         update(desk, item, (), **serves)
     body = {"seat": seat} if seat else {"lane": lane} if lane else {}
     try:
-        result: dict[str, Any] = desk.post(f"{_item(item)}/assign", body)
+        result: dict[str, Any] = desk.post(f"{_item(item)}/assign", body, _match(if_version))
     except DeskError as exc:
         if not record.get("task") or exc.status >= HTTPStatus.INTERNAL_SERVER_ERROR:
             raise
@@ -284,32 +298,34 @@ def wait(
     return CIWaiter(desk).wait(item_or_repo, sha[0], timeout, branch)
 
 
-def wrap(desk: Desk, item: str, **options: str | bool | None) -> dict[str, Any]:
-    """`options` are stage, learned, state and force. Stage `wrapping` records that /cc seat was sent.
+def wrap(
+    desk: Desk, item: str, if_version: int | None = None, **options: str | bool | None
+) -> dict[str, Any]:
+    """`options` are stage, learned, state and force; `if_version` makes it refuse (412) an item that
+    has moved on. Stage `wrapping` records that /cc seat was sent.
     `cleared`, the default, refuses until CC-DONE (or a `learned`) and an idle turn, unless `force`;
     then clears the wrap and closes the item in `state` (default done), which frees the seat. The
     Desk decides, so the CLI and the MCP tool mean the same thing."""
     body = {k: v for k, v in options.items() if v is not None}
-    result: dict[str, Any] = desk.post(f"{_item(item)}/wrap", body)
+    result: dict[str, Any] = desk.post(f"{_item(item)}/wrap", body, _match(if_version))
     return result
 
 
-def claim(desk: Desk, item: str) -> dict[str, Any]:
-    """A seat takes a queued auto item in its lane whose after items are done. The MCP tool is
-    desk_claim."""
-    result: dict[str, Any] = desk.post(f"{_item(item)}/claim", {})
+def claim(desk: Desk, item: str, if_version: int | None = None) -> dict[str, Any]:
+    """A seat takes a queued auto item in its lane whose after items are done, with `if_version` only
+    if the item is still at that version. The MCP tool is desk_claim."""
+    result: dict[str, Any] = desk.post(f"{_item(item)}/claim", {}, _match(if_version))
     return result
 
 
 def file(
-    desk: Desk, item: str, task: str, done_when: str | None = None, note: str | None = None
+    desk: Desk, item: str, task: str, if_version: int | None = None, **lines: str | None
 ) -> dict[str, Any]:
-    """File one proposed child of this story, under its outcome; one per assignment. The MCP tool is
+    """File one proposed child of this story, under its outcome; one per assignment. `lines` are
+    done_when and note; with `if_version`, only if the story is still at that version. The MCP tool is
     desk_file."""
-    body = {"task": task, "done_when": done_when, "note": note}
-    result: dict[str, Any] = desk.post(
-        f"{_item(item)}/file", {k: v for k, v in body.items() if v is not None}
-    )
+    body = {"task": task, **{k: v for k, v in lines.items() if v is not None}}
+    result: dict[str, Any] = desk.post(f"{_item(item)}/file", body, _match(if_version))
     return result
 
 
