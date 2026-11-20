@@ -6,6 +6,14 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+- A brief the Desk hands a seat on autodispatch now ends with the standing
+  limits a hand-written brief carries: don't merge, tag, release or deploy;
+  don't message other seats; fan out with Sonnet subagents; report DONE or
+  BLOCKED to Josui Prime with Filed and Learned lines; run /cc seat when
+  asked; answer Gatehouse findings in the triage format. Before, a seat given
+  a Desk item merged and released it itself.
+
 ## [4.3.1] - 2026-11-20
 
 ### Fixed

@@ -264,9 +264,22 @@ BRIEF_FIELDS = (("done_when", "Done when"), ("ref", "Ref"), ("repo", "Repo"), ("
 """The item's fields a brief carries after its task, each only when set."""
 
 
+BRIEF_LIMITS = """\
+Don't merge, tag, release or deploy; Josui Prime does that. Don't message other seats.
+Fan out with Sonnet subagents (Agent tool, model sonnet) wherever the work splits; you stay the integrator.
+Report with `ashigaru report {id} <verb>`, and SendMessage to Josui Prime "DONE {id}: <result, links>" \
+or "BLOCKED {id}: <what you need>", then "Filed: <urls or none>"; end with "Learned: <gotcha>" \
+or "Learned: none". If you stop partway, report what is finished and what is left.
+When Prime asks, run /cc seat and reply CC-DONE {id}.
+Gatehouse: answer each finding with a reply whose first line is "Fixed in <sha>", \
+"Not a bug: <20+ chars>" or "Deferred: <open issue URL>"; anything else leaves triage red, \
+and a reply posted just before a push waits for the next retriage."""
+"""The standing limits every brief ends with, the ones Josui Prime's hand briefs carry; {id} is the item's."""
+
+
 def brief(item: dict[str, Any]) -> str:
-    """What a woken seat reads: the item, its task, what else it says (BRIEF_FIELDS), and how to
-    report on it."""
+    """What a woken seat reads: the item, its task, what else it says (BRIEF_FIELDS), and the limits
+    and report contract every brief carries (BRIEF_LIMITS)."""
     said = "".join(f"{label}: {item[key]}\n" for key, label in BRIEF_FIELDS if item.get(key))
     said = f"{said}\n" if said else ""
     return (
@@ -274,7 +287,7 @@ def brief(item: dict[str, Any]) -> str:
         "through the seat's own `ashigaru hook next`. This is your work now, a brief from Josui Prime.\n\n"
         f"{item['task']}\n\n"
         f"{said}"
-        f"Report with `ashigaru report {item['id']} <verb>`."
+        f"{BRIEF_LIMITS.format(id=item['id'])}"
     )
 
 
