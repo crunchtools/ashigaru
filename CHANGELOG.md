@@ -6,6 +6,77 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### BREAKING
+- Seats have sessions, epochs and leases. A seat registers each session with
+  `POST /v1/seats/{name}/session`, and every request it makes carries
+  `X-Ashigaru-Epoch`; one with a stale epoch is 409 `stale-session` and changes
+  nothing. A seat is `missing` when its lease is not live (10 minutes idle, 60
+  mid-turn), where it was "no write for 24 hours". Hooks built before this
+  release send no epoch: the Desk accepts them for 5.0, but the developer
+  image's hooks must be rebuilt to get one.
+- Seat occupancy is derived. A seat holds at most one open item, and its row's
+  `status`, `item` and `owner` are recomputed from that item on every item
+  write. An admin `PATCH /v1/seats/{name}` that would change one of them is 409
+  `derived`: assign, claim, update or wrap the item instead.
+- `desk_wrap` and `desk_report` take their body as `fields` (a WrapUp or a
+  Report object), not as loose arguments.
+- Migration 12 changes stored rows: it drops the seat of queued and proposed
+  items, and where a seat held several open items keeps the one its row named
+  (else the newest) and requeues or unseats the others, each with an event from
+  source `migration`.
+
+### Added
+- PRs are linked by construction. A brief now tells the seat to branch
+  `aN/<short-slug>` and end the PR body with `Ashigaru-Item: aN`. Intake,
+  webhook and sweep alike, links a writer's PR to the open, pr-less item in its
+  repo that it names (trailer, else head branch `aN/` or `aN-`, else `(aN)` in
+  the title or body) and inserts no item. A PR an item already names never
+  queues another. A writer's PR that names nothing while a seat holds an open
+  pr-less item in its repo is recorded with `unlinked_at` and listed under
+  NEEDS YOU as `unlinked` until `ashigaru update aN --pr <url>` names it.
+- Versioned writes. Items carry `version` (their last event's seq), and PATCH,
+  report, file, wrap, assign and claim take `If-Match: <version>`, answering
+  412 `version` when the item moved. The CLI takes `--if-version N` on update,
+  report, wrap, assign, claim and file, prints the Desk's reason and the item
+  as it now stands, and exits 1; item tables show VERSION. The MCP tools take
+  `if_version`.
+- 409 and 412 bodies carry a `code`: `stale-session`, `busy`, `held`, `unseen`,
+  `no-lane`, `missing`, `derived`, `version`.
+- A seat's turn starting on Josui's item still `assigned` moves it to
+  `working`. When that turn is Scott's first typed prompt instead, the item goes
+  back to the queue and the seat becomes his, with a new manual item.
+- NEEDS YOU lists blocked items no seat holds, such as one cleared before its
+  wrap.
+
+### Changed
+- `session-start` registers the session and writes the epoch to
+  `~/.local/state/ashigaru/epoch`; on a 4.x Desk it falls back to the old PATCH,
+  and on a stale resume it prints a notice on stdout. `next` retries `busy` and
+  `held` with backoff instead of stopping, wakes the seat on `stale-session`
+  (silently stops when a newer session superseded it), and stops on any other
+  409 as before.
+- Startup and `/clear` end the seat's previous session: Josui's `assigned` or
+  `working` item leaves the seat `blocked`, any other state as it stands; a
+  wrapping item stays for `wrap`; Scott's manual item is wrap-cleared on clear
+  and left open and seatless on startup. Reconcile ends a session whose lease
+  ran out, after the Desk has itself been up for a lease, and requeues Josui's
+  `assigned` and `working` items.
+- Assign never picks a missing, held, busy or mid-turn seat; naming a missing
+  one is 409 `missing`. Moving an item to another seat takes that seat (409
+  `busy`, 409 `unseen`) and frees the old; a move to queued or proposed frees
+  the seat, and giving a queued item a seat makes it `assigned`.
+- An item `next` handed a seat that is still `assigned` after 10 minutes goes
+  back to the queue. An item Josui assigned is never handed back.
+- Intake judges a delivery against the row as it was; one that moved before it
+  applied is rolled back and judged again, up to 3 times, instead of dropping an
+  approval. An older delivery by the forge's `updated_at` no longer rewrites the
+  item's source title, labels, state or ref.
+- The ledger importer keeps a seat on one open item; a later line that would seat
+  a second leaves the name in `extra.ledger_seat`.
+
+### Removed
+- The sweep's `(aN)` LINK block; intake links PRs for the sweep and the webhook.
+
 ## [4.3.2] - 2026-11-20
 
 ### Fixed
