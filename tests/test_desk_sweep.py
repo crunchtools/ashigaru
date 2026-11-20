@@ -278,20 +278,21 @@ def test_a_permission_check_cut_short_is_that_subjects_error_and_the_search_goes
                 raise http.client.IncompleteRead(b"")
             return super().may_write(repo, account, token)
 
+    # Within the day a deferred hit is held for, so the run waits on it rather than giving up.
+    at = datetime.now(UTC).replace(microsecond=0) - timedelta(hours=1)
+    recent, overlap = (stamp.strftime("%Y-%m-%dT%H:%M:%SZ") for stamp in (at, at - sweep.OVERLAP))
     hits = [
-        Found(subject(1, author="reader", updated_at="2026-11-19T09:00:00Z"), "MEMBER", ""),
+        Found(subject(1, author="reader", updated_at=recent), "MEMBER", ""),
         Found(subject(2, author="fatherlinux"), "MEMBER", ""),
     ]
     run = sweeping(db, Cut(hits=hits))
     assert run["error"] == "crunchtools/x#1: may reader write? IncompleteRead"
     keys = {row["subject_key"] for row in store.list_items(conn)}
     assert keys == {"crunchtools/x#2"}, "the unjudged subject waits for the next run"
-    assert (store.get_mark(conn, sweep.MARK) or {})["value"] == "2026-11-19T09:00:00Z", (
-        "held at the deferred hit"
-    )
+    assert (store.get_mark(conn, sweep.MARK) or {})["value"] == recent, "held at the deferred hit"
     answered = FakeForge({2: hits[1].item}, hits, writers=frozenset({"fatherlinux", "reader"}))
     sweeping(db, answered)
-    assert answered.searched[-1] == "2026-11-19T08:50:00Z", "the next run reads the deferred hit again"
+    assert answered.searched[-1] == overlap, "the next run reads the deferred hit again"
     assert {row["subject_key"] for row in store.list_items(conn)} == {"crunchtools/x#1", "crunchtools/x#2"}
 
 

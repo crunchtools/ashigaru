@@ -2,39 +2,29 @@
 config points."""
 
 import dataclasses
-from pathlib import Path
+import os
 from typing import Any
 
 import httpx
 
 from .config import Config
 
-EPOCH_HEADER = "X-Ashigaru-Epoch"
 SESSION_HEADER = "X-Ashigaru-Session"
-
-
-def epoch_file() -> Path:
-    """The epoch of the session the Desk registered for this seat, "N\n", beside the task marker."""
-    return Path.home() / ".local/state/ashigaru/epoch"
-
-
-def epoch() -> int | None:
-    """The epoch in epoch_file(), or None when it is missing or not an integer."""
-    try:
-        return int(epoch_file().read_text().strip())
-    except (OSError, ValueError):
-        return None
+# What Claude Code puts in the environment of a seat's shell commands: the session they run in.
+SESSION_ENV = "CLAUDE_CODE_SESSION_ID"
 
 
 class DeskError(Exception):
     """The Desk answered with an error; `detail` is its `{"detail": ..., "code": ...}`, and `code` is
-    None when it sent none, as an old Desk does."""
+    None when it sent none, as an old Desk does. `session` is the seat's current session a
+    stale-session answer names, None when it names none."""
 
-    def __init__(self, status: int, detail: str, code: str | None = None) -> None:
+    def __init__(self, status: int, detail: str, code: str | None = None, session: str | None = None) -> None:
         super().__init__(f"{status}: {detail}")
         self.status = status
         self.detail = detail
         self.code = code
+        self.session = session
 
 
 class Unreachable(Exception):
@@ -58,8 +48,10 @@ class Desk:
         transport: httpx.BaseTransport | None = None,
         session: str | None = None,
     ) -> None:
-        """`session` is the Claude Code session a hook runs for, sent on every request so the Desk
-        refuses another session's hooks on the seat; the CLI has none."""
+        """`session` is the Claude Code session a hook runs for, else the one the CLI runs in
+        (SESSION_ENV), sent on every request so the Desk refuses a session it has ended or another
+        session's on the seat. Outside a seat there is none, and nothing is sent."""
+        session = session or os.environ.get(SESSION_ENV) or None
         self._session = {SESSION_HEADER: session} if session else {}
         self._http = httpx.Client(
             base_url=config.url,
@@ -79,12 +71,10 @@ class Desk:
         send: Send | None = None,
     ) -> Any:
         """`send` says how: a timeout replacing the client's, for a long-poll, and headers added to the
-        request, such as If-Match. The seat's epoch, when epoch_file() holds one, and the hook's session
-        go on every request."""
+        request, such as If-Match. The session goes on every request."""
         timeout, headers = (send.timeout, send.headers) if send else (None, {})
         wait = httpx.USE_CLIENT_DEFAULT if timeout is None else httpx.Timeout(timeout)
-        held = epoch()
-        sent = ({EPOCH_HEADER: str(held)} if held is not None else {}) | self._session | (headers or {})
+        sent = self._session | (headers or {})
         try:
             response = self._http.request(method, path, params=params, json=body, timeout=wait, headers=sent)
         except httpx.TransportError as exc:
@@ -92,14 +82,16 @@ class Desk:
         if response.is_redirect:
             raise DeskError(response.status_code, "the Desk redirected; check its URL")
         if response.is_error:
-            code = None
+            code = session = None
             try:
                 answer = response.json()
                 detail = answer.get("detail")
                 code = answer.get("code") if isinstance(answer.get("code"), str) else None
+                session = answer.get("session") if isinstance(answer.get("session"), str) else None
             except (ValueError, AttributeError):
                 detail = response.text[:200] or response.reason_phrase
-            raise DeskError(response.status_code, detail if isinstance(detail, str) else str(detail), code)
+            text = detail if isinstance(detail, str) else str(detail)
+            raise DeskError(response.status_code, text, code, session)
         return response.json() if response.content else None
 
     def get(self, path: str, **params: Any) -> Any:

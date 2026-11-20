@@ -329,6 +329,11 @@ class Problem(BaseModel):
         "missing (the seat's lease ran out), derived (a seat's occupancy follows its items), not-ready (a "
         "wrap before CC-DONE or mid-turn), version (412: the item moved since If-Match).",
     )
+    session: str | None = Field(
+        None,
+        description="On a stale-session 409 only: the seat's current Claude Code session, null once the "
+        "Desk ended it. A session naming another knows a newer one took the seat.",
+    )
 
 
 class Event(BaseModel):
@@ -523,7 +528,7 @@ class SessionStart(BaseModel):
 
 
 class SessionStarted(BaseModel):
-    """The epoch the session sends as X-Ashigaru-Epoch from now on, and the seat as it stands."""
+    """The session's epoch, which a 5.0 client sends as X-Ashigaru-Epoch, and the seat as it stands."""
 
     epoch: int
     seat: "Seat"

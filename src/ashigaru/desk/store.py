@@ -309,6 +309,11 @@ MIGRATIONS: tuple[str, ...] = (
         status = CASE WHEN item IS NULL THEN 'free' ELSE 'busy' END,
         owner = (SELECT CASE mode WHEN 'manual' THEN 'Scott' END FROM items WHERE id = seats.item);
     """,
+    # 5.1.0. A session the Desk ended has no id on its seat, so it cannot pass the fence by naming it:
+    # a 5.0 Desk ended one by moving the epoch and clearing the lease, and left the id.
+    """
+    UPDATE seats SET session_id = NULL WHERE epoch > 0 AND lease_until IS NULL;
+    """,
 )
 
 ITEM_DEFAULTS: dict[str, Any] = {
@@ -451,11 +456,13 @@ TIMESTAMP_FOR_STATE = {State.ASSIGNED: "assigned_at", State.QUEUED: "queued_at"}
 
 class Conflict(Exception):
     """A write that would break a uniqueness rule (id, subject_key, one child, one item per seat), or
-    an item or seat not in a state for it. `code` says which, where a client acts on it."""
+    an item or seat not in a state for it. `code` says which, where a client acts on it; a
+    stale-session one names the seat's current `session`, None once the Desk ended it."""
 
-    def __init__(self, message: str, code: str | None = None) -> None:
+    def __init__(self, message: str, code: str | None = None, session: str | None = None) -> None:
         super().__init__(message)
         self.code = code
+        self.session = session
 
 
 def now() -> str:

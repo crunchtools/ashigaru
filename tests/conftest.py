@@ -36,6 +36,13 @@ class RequiredChecks:
 
 
 @pytest.fixture(autouse=True)
+def no_seat_session(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Claude Code puts CLAUDE_CODE_SESSION_ID in a seat's shell, and the CLI sends it. A test that
+    wants one sets it; no test inherits the developer's."""
+    monkeypatch.delenv("CLAUDE_CODE_SESSION_ID", raising=False)
+
+
+@pytest.fixture(autouse=True)
 def required_checks(monkeypatch: pytest.MonkeyPatch) -> RequiredChecks:
     """No test reaches GitHub for required checks; by default a branch requires none."""
     fake = RequiredChecks()

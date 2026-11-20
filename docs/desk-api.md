@@ -40,12 +40,15 @@ can return. A 409 or 412 body also carries a `code`: `stale-session`, `busy`,
 `held`, `unseen`, `no-lane`, `missing`, `derived`, `not-ready` (a wrap before
 CC-DONE or mid-turn) or `version`.
 
-A seat's requests carry `X-Ashigaru-Epoch`, the epoch its session registered,
-and its hooks `X-Ashigaru-Session`, their Claude Code session id. One that is
-not the seat's current epoch, or names another session, is 409 `stale-session`
-and changes nothing. A REST request without the epoch is accepted only from a
-seat that never registered a session (epoch 0, a 4.x client); MCP tool calls
-name neither and are not fenced.
+A seat's requests carry `X-Ashigaru-Session`, the Claude Code session id its
+hook was handed or its shell sees as `CLAUDE_CODE_SESSION_ID`. One that names
+another session than the seat's current one, or a session the Desk has ended,
+is 409 `stale-session` and changes nothing, its body's `session` naming the
+seat's current session (null once the Desk ended it); the request is in that
+session's epoch. A 5.0 client sends `X-Ashigaru-Epoch`, the epoch its session registered,
+instead or as well, and is held to it. A REST request naming neither is
+accepted only from a seat that never registered a session (epoch 0, a 4.x
+client); MCP tool calls name neither and are not fenced.
 
 Writes to an item take `If-Match: <version>`, where `version` is the item's last
 event's seq. When the item has moved since, the write is 412 `version` and
@@ -85,7 +88,7 @@ changes nothing. Without the header the write applies as before.
 | `PATCH /seats/{name}` | created on first call; a seat sends `turn`, `task` and `waiting_on` (what it last asked before going idle; the `stop` hook sets it, best effort, a new turn or `/clear` clears it; migration 7 adds the column). Only an admin and the seat itself read `waiting_on`: every other caller gets null from `GET /seats`, `GET /seats/{name}` and `GET /work`, and no `waiting` rows in `GET /status`. `since` is server-set when `status` changes, `turn_started_at` when the turn goes active. The Desk infers Scott's hold (below). Any authenticated request from the identity a seat is named for renews its lease, Josui Prime's CLI calls as much as a worker's hooks. An admin PATCH that would change `status`, `item` or `owner` is 409 `derived`; `lane` stays Josui's |
 | `POST /seats/{name}/session` | the seat or an admin: `{session_id, source}` (`startup`, `resume` or `clear`) returns `{epoch, seat}`. `startup` and `clear` take the next epoch and end the previous session (see Seats). `resume` keeps the epoch and the session's work for the seat's current session, however long it was idle, unless the Desk ended it, which is 409 `stale-session`; a seat that never registered a session (epoch 0) adopts the resuming one at epoch 1, its work untouched |
 | `POST /seats/{name}/next?wait=S` | the seat or an admin, for `ashigaru hook next`: when the `autodispatch` mark is `on`, claim the oldest queued auto item in the seat's lane whose `after` items are done, as `desk_claim` would, and return `{item, brief}` (the brief: the task, then `done_when`, `ref`, `repo` and `note` when set, then the standing limits a hand brief ends with: no merge, tag, release or deploy, no messaging other seats, the report contract, /cc seat, Gatehouse replies); waits up to `wait` seconds (at most 90) for one, then 204. Claims only while the seat's turn is idle, and never once the client has gone. 204 also while the switch is off, and while the seat is busy only with an item at wrap stage `wrapping` (the /clear that starts the hook comes before `wrap` closes it); 409 when the seat is otherwise busy (`busy`), held (`held`), unseen (`unseen`) or has no lane (`no-lane`), or the epoch is stale. An item handed to a seat that is still `assigned` after 10 minutes (`ACK_AFTER`) goes back to the queue; an item Josui assigned is never handed back |
-| `POST /seats/{name}/usage` | the seat or an admin: `session_id`, `model`, `billing` (max / vertex / openrouter; else the seat's lane's, else what the row had; from a seat key the lane's comes first), `context_used`, `context_window`, `session_tokens`, `cost_usd` (the session's running total; what of it is not yet booked goes to today's spend, held until billing is known) |
+| `POST /seats/{name}/usage` | the seat or an admin: `session_id`, `model`, `billing` (max / vertex / openrouter; else the seat's lane's, else what the row had; from a seat key the lane's comes first), `context_used`, `context_window`, `session_tokens`, `cost_usd` (the session's running total; what of it is not yet booked goes to today's spend, held until billing is known). Once the seat has registered a session, a report for another is 409 `stale-session` from anyone and never moves the seat's `session_id`; a seat's own must name in its body the session its header does |
 | `GET /usage` | `ashigaru usage`: per seat model, context, session tokens and cost, turn and seconds in it; spend by billing source today and this month (UTC) with limits |
 | `PUT /billing/{billing}` | admin: `daily_usd`, `monthly_usd` limits |
 | `GET /outcomes` | `ashigaru outcomes`: each outcome item with its stories' total, done, blocked and open counts |
@@ -119,7 +122,9 @@ back as a tool error carrying the same status and detail.
 ## Scott's hold
 
 The Desk infers it from a seat's own reports, so no seat can claim or drop one.
-A seat holding no item that reports `turn: active` with a `task` (its
+A seat's own `task` is set once a session: a seat that already has one
+reporting another is reporting only its turn, and `startup` and `clear` drop
+it. A seat holding no item that reports `turn: active` with a `task` (its
 session's first typed prompt) becomes busy, `owner: Scott`, holding a new
 `manual` item in `working` with that task and the seat's lane, unless an open
 `manual` item already names the seat (imported, or left `blocked`): it takes
@@ -153,7 +158,8 @@ nor does any request once the Desk has ended the seat's session; a seat's reads
 write the renewal at most once a minute. A seat is
 `missing` when its lease is not live: never picked or assigned, its session and
 work kept. Seat reconcile ends the session of a seat whose lease ran out
-`STALE_SEAT` (24 hours) ago (the epoch moves on and the lease clears): Josui's
+`STALE_SEAT` (24 hours) ago (the epoch moves on, and the session id and the
+lease clear): Josui's
 `assigned` and `working` items go back to `queued` with the note "seat lease
 lapsed: its session ended", other `auto` items leave the seat as they stand, and
 `wrapping` and `manual` items stay. It counts no silence from before the Desk

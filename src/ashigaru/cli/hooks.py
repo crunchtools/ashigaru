@@ -2,20 +2,19 @@
 seat-state.json hooks and keep their rules.
 
   session-start   SessionStart. Registers the session with POST
-                  /v1/seats/{name}/session (session_id, source), which turns the
-                  seat idle (clear also drops the task) and answers the epoch,
-                  kept in ~/.local/state/ashigaru/epoch for every later request
-                  to send as X-Ashigaru-Epoch. A resume of a session the Desk
-                  ended (409 stale-session) leaves the epoch alone and prints a
-                  notice on stdout, which SessionStart adds to the session's
-                  context: stop work on any earlier assignment. A Desk without
-                  the route (404, 405) gets the old PATCH of turn idle (clear
-                  also task null). compact can come mid-turn and changes
-                  nothing.
-  prompt-submit   UserPromptSubmit. turn active. A prompt a person typed, the
-                  session's first, becomes the task; turns Claude Code starts
-                  itself (a <cross-session-message>, a <task-notification>,
-                  a scheduled task firing) leave the task alone.
+                  /v1/seats/{name}/session (session_id, source), which makes it
+                  the seat's current one and turns the seat idle (startup and
+                  clear also drop the task). A resume of a session the Desk
+                  ended (409 stale-session) prints a notice on stdout, which
+                  SessionStart adds to the session's context: stop work on any
+                  earlier assignment. A Desk without the route (404, 405) gets
+                  the old PATCH of turn idle (clear also task null). compact can
+                  come mid-turn and changes nothing.
+  prompt-submit   UserPromptSubmit. turn active. A prompt a person typed is sent
+                  as the task, which the Desk keeps only from the session's
+                  first; turns Claude Code starts itself (a
+                  <cross-session-message>, a <task-notification>, a scheduled
+                  task firing) send none.
   stop            Stop, StopFailure and the idle_prompt Notification: turn
                   idle. idle_prompt leaves alone a turn that started too
                   recently to be the one it reports on. Stop also sends the
@@ -29,13 +28,17 @@ seat-state.json hooks and keep their rules.
                   busy, held or stale-session) it checks in again every
                   NEXT_CHECK_IN; a busy or held seat is asked again with
                   backoff. On a 409 stale-session it stops silently if the
-                  epoch file now holds a newer session's epoch (a /clear), else
+                  Desk names a newer session as the seat's (a /clear), else
                   exits 2 with a notice that the Desk ended this session.
   statusline      The status line command, not a hook: model, context, session
                   tokens and running cost to POST /v1/seats/{name}/usage. It
                   runs on every refresh, so it posts at most once per
                   STATUSLINE_EVERY per session, keeping its state on tmpfs,
                   and prints nothing, not even its failures.
+
+Every request names the session the hook runs for as X-Ashigaru-Session, which
+is all the Desk fences on: nothing is kept on disk but the status line's tmpfs
+throttle.
 
 A hook must never stand between a person and their prompt: the whole run is
 bounded at HOOK_SECONDS, every failure (no config, no network, a refusal) goes
@@ -61,7 +64,7 @@ from urllib.parse import quote
 
 import httpx
 
-from .client import Desk, DeskError, Send, Unreachable, epoch, epoch_file
+from .client import Desk, DeskError, Send, Unreachable
 from .config import load
 
 EVENTS = ("session-start", "prompt-submit", "stop", "next", "statusline")
@@ -124,11 +127,6 @@ def _alarm(signum: int, frame: FrameType | None) -> None:
     raise _Deadline
 
 
-def task_marker() -> Path:
-    """The session whose task the Desk already has, so a later prompt does not replace it."""
-    return Path.home() / ".local/state/ashigaru/task-session"
-
-
 def _started_within(seat: dict[str, Any], window: timedelta) -> bool:
     try:
         started = datetime.strptime(seat["turn_started_at"], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC)
@@ -145,35 +143,21 @@ def _stale(detail: str) -> str:
     )
 
 
-def _keep_epoch(number: Any) -> None:
-    """Write the epoch the Desk answered to epoch_file(), atomically."""
-    target = epoch_file()
-    target.parent.mkdir(parents=True, exist_ok=True)
-    partial = target.with_suffix(".tmp")
-    partial.write_text(f"{int(number)}\n")
-    partial.replace(target)
-
-
 def _start(event: dict[str, Any], desk: Desk, path: str) -> None:
     source = event.get("source")
     if source == "compact":
         return
-    if source == "clear":
-        task_marker().unlink(missing_ok=True)
     session = event.get("session_id")
     if source in SESSION_SOURCES and isinstance(session, str) and session:
         try:
-            answer = desk.post(f"{path}/session", {"session_id": session, "source": source})
+            desk.post(f"{path}/session", {"session_id": session, "source": source})
         except DeskError as error:
             if error.status == HTTPStatus.CONFLICT and error.code == STALE:
                 print(_stale(error.detail))
                 return
             if error.status not in (HTTPStatus.NOT_FOUND, HTTPStatus.METHOD_NOT_ALLOWED):
                 raise
-            epoch_file().unlink(missing_ok=True)
         else:
-            if isinstance(answer, dict) and isinstance(answer.get("epoch"), int):
-                _keep_epoch(answer["epoch"])
             return
     desk.request(
         "PATCH", path, body={"turn": "idle", "task": None} if source == "clear" else {"turn": "idle"}
@@ -226,19 +210,13 @@ def _scheduled(event: dict[str, Any], prompt: str) -> bool:
 
 
 def _prompt(event: dict[str, Any], desk: Desk, path: str) -> None:
+    """Turn active; a typed prompt is sent as the task, which the Desk keeps only from the session's
+    first (it drops the task on startup and /clear)."""
     prompt = str(event.get("prompt", "")).strip()
-    session = str(event.get("session_id", ""))
-    marker = task_marker()
-    try:
-        kept = marker.read_text().strip() == session
-    except OSError:
-        kept = False
-    if prompt.startswith(HARNESS_MARKS) or kept or not prompt or _scheduled(event, prompt):
+    if prompt.startswith(HARNESS_MARKS) or not prompt or _scheduled(event, prompt):
         desk.request("PATCH", path, body={"turn": "active"})
         return
     desk.request("PATCH", path, body={"turn": "active", "task": prompt[:TASK_LENGTH]})
-    marker.parent.mkdir(parents=True, exist_ok=True)
-    marker.write_text(session + "\n")
 
 
 def _entry_text(entry: Any) -> str | None:
@@ -304,11 +282,18 @@ class _Refused(Exception):
 
 
 class _Stale(Exception):
-    """The Desk said this session is over; `detail` is why."""
+    """The Desk said this session is over; `detail` is why, `session` the seat's current one it
+    named (None once the Desk ended the seat's session)."""
 
-    def __init__(self, detail: str) -> None:
+    def __init__(self, detail: str, session: str | None = None) -> None:
         super().__init__(detail)
         self.detail = detail
+        self.session = session
+
+    def superseded(self, own: str | None) -> bool:
+        """True when the Desk named another session as the seat's: a newer one (a /clear, a restart)
+        took the seat over. False when it named none, which is an ended session."""
+        return self.session is not None and self.session != own
 
 
 def _ask(desk: Desk, method: str, path: str, deadline: float, **params: Any) -> Any:
@@ -331,7 +316,7 @@ def _ask(desk: Desk, method: str, path: str, deadline: float, **params: Any) -> 
             if isinstance(error, DeskError):
                 if error.status == HTTPStatus.CONFLICT:
                     if error.code == STALE:
-                        raise _Stale(error.detail) from error
+                        raise _Stale(error.detail, error.session) from error
                     if error.code not in NEXT_BUSY:
                         raise _Refused from error
                 elif error.status in NEXT_REFUSED:
@@ -340,15 +325,14 @@ def _ask(desk: Desk, method: str, path: str, deadline: float, **params: Any) -> 
         pause = min(pause * 2, NEXT_BACKOFF)
 
 
-def _next(desk: Desk, seat: str | None) -> str | None:
+def _next(desk: Desk, seat: str | None, session: str | None = None) -> str | None:
     """The brief of the item the Desk hands this seat, or None once the wait runs out. Every request
     ends before NEXT_SECONDS, so no claim lands on a hook already gone. While the seat cannot take work
     it checks in every NEXT_CHECK_IN, which keeps its lease. On a stale-session answer it returns the
-    notice for the model, unless the epoch file has moved on since it started: a newer session on this
-    seat took over, and it stops silently."""
+    notice for the model, unless the answer names another session as the seat's: a newer session on
+    this seat (`session` is this one) took over, and it stops silently."""
     deadline = time.monotonic() + NEXT_SECONDS
     time.sleep(NEXT_SETTLE)
-    started = epoch()
     name = seat
     try:
         while True:
@@ -363,7 +347,7 @@ def _next(desk: Desk, seat: str | None) -> str | None:
                 return brief
             time.sleep(NEXT_PAUSE)
     except _Stale as stale:
-        return None if epoch() != started else _stale(stale.detail)
+        return None if stale.superseded(session) else _stale(stale.detail)
     except _Deadline:
         return None
 
@@ -478,10 +462,11 @@ def _report(name: str, stdin: TextIO, env: Mapping[str, str] | None, transport: 
     if name == "statusline" and _throttled(event, os.environ if env is None else env):
         return None
     config = load(env)
-    desk = Desk(config, HOOK_SECONDS, transport, str(event.get("session_id") or "") or None)
+    session = str(event.get("session_id") or "") or None
+    desk = Desk(config, HOOK_SECONDS, transport, session)
     try:
         if name == "next":
-            return _next(desk, config.seat)
+            return _next(desk, config.seat, session)
         seat = config.seat or desk.get("/v1/me")["name"]
         HANDLERS[name](event, desk, f"/v1/seats/{quote(seat, safe='')}")
     finally:

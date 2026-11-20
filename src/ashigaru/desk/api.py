@@ -120,11 +120,13 @@ def _found(value: dict[str, Any] | None, what: str) -> dict[str, Any]:
 
 
 class ProblemError(HTTPException):
-    """A 4xx whose body carries a `code` beside its detail (Problem), for a client that acts on it."""
+    """A 4xx whose body carries a `code` beside its detail (Problem), for a client that acts on it,
+    and for a stale-session one the seat's current `session`."""
 
-    def __init__(self, status_code: int, detail: str, code: str | None) -> None:
+    def __init__(self, status_code: int, detail: str, code: str | None, session: str | None = None) -> None:
         super().__init__(status_code, detail)
         self.code = code
+        self.session = session
 
 
 async def _problem(request: Request, error: Exception) -> JSONResponse:
@@ -132,24 +134,29 @@ async def _problem(request: Request, error: Exception) -> JSONResponse:
     status_code = (
         error.status_code if isinstance(error, HTTPException) else status.HTTP_500_INTERNAL_SERVER_ERROR
     )
-    return JSONResponse(
-        {"detail": getattr(error, "detail", str(error)), "code": code}, status_code=status_code
-    )
+    body = {"detail": getattr(error, "detail", str(error)), "code": code}
+    if code == "stale-session":
+        body["session"] = error.session if isinstance(error, ProblemError) else None
+    return JSONResponse(body, status_code=status_code)
 
 
 def _conflict(error: store.Conflict) -> ProblemError:
     """409 with the Conflict's code; 412 when what conflicts is the version the caller named."""
     moved = error.code == "version"
     return ProblemError(
-        status.HTTP_412_PRECONDITION_FAILED if moved else status.HTTP_409_CONFLICT, str(error), error.code
+        status.HTTP_412_PRECONDITION_FAILED if moved else status.HTTP_409_CONFLICT,
+        str(error),
+        error.code,
+        error.session,
     )
 
 
 @dataclasses.dataclass(frozen=True)
 class Guard:
-    """What a write names about what it read: the seat session it comes from (X-Ashigaru-Epoch and
-    X-Ashigaru-Session, a seat's only) and the item version it was decided on (If-Match). Any may be
-    absent; `sent` is whether it came over REST, where a seat naming no epoch is a 4.x client."""
+    """What a write names about what it read: the seat session it comes from (X-Ashigaru-Session, and
+    X-Ashigaru-Epoch from a 5.0 client; a seat's only) and the item version it was decided on
+    (If-Match). Any may be absent; `sent` is whether it came over REST, where a seat naming neither
+    session nor epoch is a 4.x client."""
 
     epoch: int | None = None
     version: int | None = None
@@ -171,11 +178,14 @@ def guard(
         str | None, Header(description="The item's `version` the write was decided on.")
     ] = None,
     epoch: Annotated[
-        str | None, Header(alias="X-Ashigaru-Epoch", description="The seat session's epoch, from a seat.")
+        str | None, Header(alias="X-Ashigaru-Epoch", description="The seat session's epoch, from a 5.0 seat.")
     ] = None,
     session: Annotated[
         str | None,
-        Header(alias="X-Ashigaru-Session", description="The seat's Claude Code session id, from its hooks."),
+        Header(
+            alias="X-Ashigaru-Session",
+            description="The seat's Claude Code session id, from its hooks and its CLI.",
+        ),
     ] = None,
 ) -> Guard:
     """The request's Guard. An If-Match may carry an ETag's quotes and W/; either header that is not a
@@ -194,7 +204,8 @@ def writable_item(
 ) -> dict[str, Any]:
     """The item, if `who` may write it: admins any, a seat only its own and only while it is open.
     Once Josui closes an item (done, wontdo, abandoned) or clears it, a seat cannot reopen it. A seat
-    naming its session's epoch must be in the current one, and the one that took the item; any caller
+    naming its session (or a 5.0 client its epoch) must be in the current one, and the one that took
+    the item; any caller
     naming a version must have read the item at it."""
     item = _found(store.get_item(conn, item_id), "item")
     try:
@@ -209,10 +220,10 @@ def writable_item(
             raise HTTPException(
                 status.HTTP_403_FORBIDDEN, f"{item_id} is closed; only an admin may change it"
             )
-        dispatch.fence(store.get_seat(conn, who.name), who.name, _own(who, who.name, checked))
-        if checked.epoch is not None and item["epoch"] not in (None, checked.epoch):
+        epoch = dispatch.fence(store.get_seat(conn, who.name), who.name, _own(who, who.name, checked))
+        if epoch is not None and item["epoch"] not in (None, epoch):
             raise store.Conflict(
-                f"{item_id} was taken in session {item['epoch']}, not this one ({checked.epoch})",
+                f"{item_id} was taken in session {item['epoch']}, not this one ({epoch})",
                 "stale-session",
             )
     except store.Conflict as error:
@@ -605,11 +616,12 @@ def patch_seat(conn: Conn, who: Who, name: str, body: SeatPatch, checked: Guarde
     },
 )
 def start_session(conn: Conn, who: Who, name: str, body: SessionStart) -> SessionStarted:
-    """The seat's SessionStart hook. A new session (startup, clear) gets the next epoch, which every
-    request of the session then sends as X-Ashigaru-Epoch, and ends the one before: Josui's item it
-    was working is blocked (cleared before its wrap), Scott's hold ends on a clear. A resume keeps
-    the epoch of the seat's current session while its lease is live; any other resume is 409
-    stale-session, and the session must not act on what it remembers."""
+    """The seat's SessionStart hook. A new session (startup, clear) becomes the seat's current one,
+    which every later request names as X-Ashigaru-Session, at the next epoch, and ends the one
+    before: Josui's item it was working is blocked (cleared before its wrap), Scott's hold ends on a
+    clear, and the task is dropped for the new session's first typed prompt to set. A resume stays
+    the seat's current session while its lease is live; any other resume is 409 stale-session, and
+    the session must not act on what it remembers. The epoch answered is for 5.0 clients."""
     own_seat(who, name)
     try:
         epoch, seat = dispatch.start_session(conn, name, body.session_id, body.source, who.name)

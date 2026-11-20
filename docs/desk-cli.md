@@ -63,9 +63,9 @@ Item tables (`get` and every action's result) show VERSION. `--if-version N`
 sends `If-Match: N`: when the item moved since, the Desk answers 412, and the
 CLI prints its reason on stderr and the item as it now stands, and exits 1. Read
 the version from the row just seen. A seat's requests also carry
-`X-Ashigaru-Epoch`, read from `~/.local/state/ashigaru/epoch`, which
-`session-start` writes (and removes on a 4.x Desk); a hook's also carry
-`X-Ashigaru-Session`, the session id from its event.
+`X-Ashigaru-Session`: a hook's the session id from its event, a command's the
+`CLAUDE_CODE_SESSION_ID` Claude Code gives the seat's shell. The CLI keeps no
+state on disk.
 
 `wait <item>` polls the item every 30 to 60 seconds and rides out a blip.
 `wait <repo> <sha>` long-polls `GET /v1/ci/wait`, which the Desk answers as

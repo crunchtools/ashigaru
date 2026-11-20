@@ -12,7 +12,7 @@ import pytest
 from conftest import Keys
 from fastapi.testclient import TestClient
 
-from ashigaru.desk import reconcile, store, subjects
+from ashigaru.desk import dispatch, reconcile, store, subjects
 
 JOSUI, MINE, OTHER, CI = "Josui Prime", "Exedore 1 - Max", "Exedore 2 - Max", "ci"
 
@@ -417,7 +417,8 @@ def test_the_migration_leaves_one_open_item_per_seat_and_rows_that_agree(
     items (the row's own item kept, the other let go and requeued), and rows saying busy or free
     against their items."""
     old = store.connect(tmp_path / "old.db")
-    monkeypatch.setattr(store, "MIGRATIONS", store.MIGRATIONS[:-1])
+    epochs = next(n for n, script in enumerate(store.MIGRATIONS) if "ADD COLUMN epoch" in script)
+    monkeypatch.setattr(store, "MIGRATIONS", store.MIGRATIONS[:epochs])
     store.migrate(old)
     rows = [
         ("a1", MINE, "queued", "auto"),
@@ -610,3 +611,234 @@ def test_review_3c_a_seat_with_an_epoch_refuses_a_request_without_one(client: Te
     )
     other = client.patch(f"/v1/seats/{OTHER}", headers=keys[OTHER], json={"turn": "idle"})
     assert other.status_code == OK, "a seat that never registered (4.x) still needs no epoch"
+
+
+# The seat's Claude Code session id alone fences its requests; the epoch is derived from the row.
+
+
+def only(keys: Keys, name: str, session_id: str) -> dict[str, str]:
+    return {**keys[name], "X-Ashigaru-Session": session_id}
+
+
+def refused(response: Any) -> bool:
+    return bool(response.status_code == CONFLICT and response.json()["code"] == "stale-session")
+
+
+def test_the_current_session_alone_is_accepted_without_an_epoch(client: TestClient, keys: Keys) -> None:
+    up(client, keys, MINE)
+    session(client, keys, MINE, "s1", "startup")
+    work = item(client, keys, lane="exedore-max")
+    assign(client, keys, work, seat=MINE)
+    sent = only(keys, MINE, "s1")
+    assert client.patch(f"/v1/seats/{MINE}", headers=sent, json={"turn": "idle"}).status_code == OK
+    assert client.patch(f"/v1/items/{work}", headers=sent, json={"note": "mine"}).status_code == OK
+    assert client.post(f"/v1/items/{work}/report", headers=sent, json={"verb": "WORKING"}).status_code == OK
+
+
+def test_another_session_alone_is_refused_and_changes_nothing(client: TestClient, keys: Keys) -> None:
+    up(client, keys, MINE)
+    session(client, keys, MINE, "s1", "startup")
+    work = item(client, keys, lane="exedore-max")
+    assign(client, keys, work, seat=MINE)
+    before, row = get(client, keys, work), seat_row(client, keys, MINE)
+    other = only(keys, MINE, "s0")
+    writes = [
+        client.patch(f"/v1/seats/{MINE}", headers=other, json={"turn": "active", "task": "x"}),
+        client.patch(f"/v1/items/{work}", headers=other, json={"note": "not mine"}),
+        client.post(f"/v1/items/{work}/report", headers=other, json={"verb": "DONE"}),
+    ]
+    assert all(refused(w) for w in writes)
+    assert get(client, keys, work) == before and seat_row(client, keys, MINE) == row
+
+
+def test_a_5_0_client_naming_the_epoch_is_held_to_it_with_or_without_a_session(
+    client: TestClient, keys: Keys
+) -> None:
+    up(client, keys, MINE)
+    old = session(client, keys, MINE, "s1", "startup").json()["epoch"]
+    now = session(client, keys, MINE, "s2", "startup").json()["epoch"]
+    path = f"/v1/seats/{MINE}"
+    for sent in (epoch(keys, MINE, now), headers(keys, MINE, now, "s2")):
+        assert client.patch(path, headers=sent, json={"turn": "idle"}).status_code == OK
+    for sent in (epoch(keys, MINE, old), headers(keys, MINE, old, "s2"), headers(keys, MINE, now, "s1")):
+        assert refused(client.patch(path, headers=sent, json={"turn": "idle"}))
+
+
+def test_a_request_naming_neither_is_refused_once_the_seat_registered_a_session(
+    client: TestClient, keys: Keys
+) -> None:
+    up(client, keys, MINE)
+    up(client, keys, OTHER)
+    assert client.patch(f"/v1/seats/{OTHER}", headers=keys[OTHER], json={"turn": "idle"}).status_code == OK
+    session(client, keys, MINE, "s1", "startup")
+    assert refused(client.patch(f"/v1/seats/{MINE}", headers=keys[MINE], json={"turn": "idle"}))
+    assert refused(client.post(f"/v1/seats/{MINE}/next?wait=0", headers=keys[MINE]))
+
+
+def test_a_stale_answer_names_the_seats_current_session_or_none_once_ended(
+    client: TestClient, keys: Keys, conn: sqlite3.Connection
+) -> None:
+    up(client, keys, MINE)
+    session(client, keys, MINE, "s1", "startup")
+    session(client, keys, MINE, "s2", "clear")
+    answer = client.patch(f"/v1/seats/{MINE}", headers=only(keys, MINE, "s1"), json={"turn": "idle"})
+    assert refused(answer) and answer.json()["session"] == "s2"
+    with store.transaction(conn):
+        dispatch.end_session(conn, MINE, "test", "lapsed")
+    answer = client.patch(f"/v1/seats/{MINE}", headers=only(keys, MINE, "s2"), json={"turn": "idle"})
+    assert refused(answer) and answer.json()["session"] is None
+    resumed = session(client, keys, MINE, "s2", "resume")
+    assert refused(resumed) and resumed.json()["session"] is None
+
+
+def test_a_seat_that_never_registered_a_session_takes_any_session_it_names(
+    client: TestClient, keys: Keys
+) -> None:
+    up(client, keys, MINE)
+    answer = client.patch(f"/v1/seats/{MINE}", headers=only(keys, MINE, "s1"), json={"turn": "idle"})
+    assert answer.status_code == OK
+    assert seat_row(client, keys, MINE)["epoch"] == 0, "naming a session is not registering one"
+
+
+def test_an_ended_session_is_refused_by_its_id_and_does_not_revive_the_lease(
+    client: TestClient, keys: Keys, conn: sqlite3.Connection
+) -> None:
+    up(client, keys, MINE)
+    session(client, keys, MINE, "s1", "startup")
+    conn.execute("UPDATE seats SET lease_until = ? WHERE name = ?", (ago(minutes=1), MINE))
+    with store.transaction(conn):
+        dispatch.end_session(conn, MINE, "test", "lapsed")
+    row = seat_row(client, keys, MINE)
+    assert row["session_id"] is None and row["lease_until"] is None
+    old = only(keys, MINE, "s1")
+    assert refused(client.post(f"/v1/seats/{MINE}/next?wait=0", headers=old))
+    assert refused(client.patch(f"/v1/seats/{MINE}", headers=old, json={"turn": "idle"}))
+    client.get("/v1/items", headers=old)
+    after = seat_row(client, keys, MINE)
+    assert after["lease_until"] is None and after["session_id"] is None
+    assert session(client, keys, MINE, "s1", "resume").status_code == CONFLICT
+
+
+def test_an_item_taken_in_an_earlier_session_is_refused_to_the_current_one(
+    client: TestClient, keys: Keys, conn: sqlite3.Connection
+) -> None:
+    up(client, keys, MINE)
+    first = session(client, keys, MINE, "s1", "startup").json()["epoch"]
+    work = item(client, keys, lane="exedore-max")
+    assign(client, keys, work, seat=MINE)
+    assert get(client, keys, work)["epoch"] == first
+    # A new session takes the seat while the item stays on it: /clear would move it off, so arrange the row.
+    conn.execute("UPDATE seats SET epoch = ?, session_id = 's2' WHERE name = ?", (first + 1, MINE))
+    before = get(client, keys, work)
+    stale = client.patch(f"/v1/items/{work}", headers=only(keys, MINE, "s2"), json={"note": "x"})
+    assert refused(stale) and get(client, keys, work) == before
+    conn.execute("UPDATE items SET epoch = ? WHERE id = ?", (first + 1, work))
+    assert (
+        client.patch(f"/v1/items/{work}", headers=only(keys, MINE, "s2"), json={"note": "x"}).status_code
+        == OK
+    )
+
+
+def test_only_the_sessions_first_typed_prompt_sets_the_task(client: TestClient, keys: Keys) -> None:
+    up(client, keys, MINE)
+    session(client, keys, MINE, "s1", "startup")
+    sent, path = only(keys, MINE, "s1"), f"/v1/seats/{MINE}"
+    first = client.patch(path, headers=sent, json={"turn": "active", "task": "first"})
+    assert first.status_code == OK and first.json()["task"] == "first"
+    opened = client.get("/v1/items", headers=keys[JOSUI]).json()
+    second = client.patch(path, headers=sent, json={"turn": "active", "task": "second"})
+    assert second.status_code == OK and second.json()["task"] == "first"
+    assert client.get("/v1/items", headers=keys[JOSUI]).json() == opened
+    assert seat_row(client, keys, MINE)["item"] == first.json()["item"]
+    admin = client.patch(path, headers=keys[JOSUI], json={"task": "by Josui"})
+    assert admin.status_code == OK and admin.json()["task"] == "by Josui"
+
+
+@pytest.mark.parametrize("source", ["clear", "startup"])
+def test_a_new_session_drops_the_task_for_its_first_prompt_to_set(
+    client: TestClient, keys: Keys, source: str
+) -> None:
+    up(client, keys, MINE)
+    session(client, keys, MINE, "s1", "startup")
+    path = f"/v1/seats/{MINE}"
+    client.patch(path, headers=only(keys, MINE, "s1"), json={"turn": "active", "task": "first"})
+    assert seat_row(client, keys, MINE)["task"] == "first"
+    assert session(client, keys, MINE, "s2", source).status_code == OK
+    assert seat_row(client, keys, MINE)["task"] is None
+    again = client.patch(path, headers=only(keys, MINE, "s2"), json={"turn": "active", "task": "again"})
+    assert again.status_code == OK and again.json()["task"] == "again"
+
+
+def test_the_migration_drops_the_id_of_a_session_a_5_0_desk_ended(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A 5.0 Desk ended a session by moving the epoch and clearing the lease, and kept its id."""
+    old = store.connect(tmp_path / "old.db")
+    monkeypatch.setattr(store, "MIGRATIONS", store.MIGRATIONS[:-1])
+    store.migrate(old)
+    for name, epoch_now, lease_until in ((MINE, 3, None), (OTHER, 2, ago(minutes=-5)), (CI, 0, None)):
+        old.execute(
+            "INSERT INTO seats (name, status, since, updated_at, session_id, epoch, lease_until)"
+            " VALUES (?, 'free', ?, ?, ?, ?, ?)",
+            (name, ago(hours=1), ago(minutes=5), f"{name}-s", epoch_now, lease_until),
+        )
+    monkeypatch.undo()
+    store.migrate(old)
+    kept = {row["name"]: row["session_id"] for row in old.execute("SELECT name, session_id FROM seats")}
+    assert kept == {MINE: None, OTHER: f"{OTHER}-s", CI: f"{CI}-s"}, "only an ended session loses its id"
+
+
+def test_a_session_whose_lease_the_desk_cleared_cannot_resume_or_report(
+    client: TestClient, keys: Keys, conn: sqlite3.Connection
+) -> None:
+    up(client, keys, MINE)
+    session(client, keys, MINE, "s1", "startup")
+    conn.execute("UPDATE seats SET lease_until = NULL WHERE name = ?", (MINE,))
+    assert refused(session(client, keys, MINE, "s1", "resume"))
+    with store.transaction(conn):
+        dispatch.end_session(conn, MINE, "test", "lapsed")
+    assert refused(client.patch(f"/v1/seats/{MINE}", headers=only(keys, MINE, "s1"), json={"turn": "idle"}))
+    assert seat_row(client, keys, MINE)["lease_until"] is None
+
+
+def test_a_resume_after_a_clear_names_the_new_session(client: TestClient, keys: Keys) -> None:
+    up(client, keys, MINE)
+    session(client, keys, MINE, "s1", "startup")
+    session(client, keys, MINE, "s2", "clear")
+    resumed = session(client, keys, MINE, "s1", "resume")
+    assert refused(resumed) and resumed.json()["session"] == "s2"
+
+
+def test_no_usage_report_writes_the_session_of_a_registered_seat(
+    client: TestClient, keys: Keys, conn: sqlite3.Connection
+) -> None:
+    up(client, keys, MINE)
+    session(client, keys, MINE, "s1", "startup")
+    path = f"/v1/seats/{MINE}/usage"
+    moved = client.post(path, headers=only(keys, MINE, "s1"), json={"session_id": "s9", "cost_usd": 1.0})
+    assert refused(moved) and moved.json()["session"] == "s1"
+    assert seat_row(client, keys, MINE)["session_id"] == "s1"
+    with store.transaction(conn):
+        dispatch.end_session(conn, MINE, "test", "lapsed")
+    revived = client.post(path, headers=keys[JOSUI], json={"session_id": "s1", "cost_usd": 1.0})
+    assert refused(revived) and revived.json()["session"] is None
+    assert seat_row(client, keys, MINE)["session_id"] is None
+    assert conn.execute("SELECT coalesce(sum(cost_usd), 0) FROM spend").fetchone()[0] == 0
+    session(client, keys, MINE, "s2", "startup")
+    report = {"session_id": "s2", "cost_usd": 2.0, "billing": "max"}
+    assert client.post(path, headers=keys[JOSUI], json=report).status_code == OK
+    assert seat_row(client, keys, MINE)["session_id"] == "s2"
+
+
+def test_a_seats_usage_report_from_one_session_for_another_is_refused(
+    client: TestClient, keys: Keys, conn: sqlite3.Connection
+) -> None:
+    up(client, keys, MINE)
+    session(client, keys, MINE, "s0", "startup")
+    session(client, keys, MINE, "s1", "clear")
+    soon = ago(minutes=-1)
+    conn.execute("UPDATE seats SET lease_until = ? WHERE name = ?", (soon, MINE))
+    report = {"session_id": "s1", "cost_usd": 1.0}
+    answer = client.post(f"/v1/seats/{MINE}/usage", headers=only(keys, MINE, "s0"), json=report)
+    assert refused(answer) and answer.json()["session"] == "s1"
+    assert seat_row(client, keys, MINE)["lease_until"] == soon
