@@ -504,14 +504,29 @@ def test_an_item_with_no_lane_is_assigned_never_claimed(client: TestClient, keys
 
 def test_brief_carries_each_field_that_is_set_after_the_task() -> None:
     work = {"id": "7", "lane": "exedore-max", "task": "Do it"}
+    limits = dispatch.BRIEF_LIMITS.format(id="7")
     plain = dispatch.brief(work)
     assert "Done when" not in plain and "Ref:" not in plain and "Repo:" not in plain and "Note:" not in plain
-    assert plain.endswith("Do it\n\nReport with `ashigaru report 7 <verb>`.")
+    assert plain.endswith(f"Do it\n\n{limits}")
     some = dispatch.brief({**work, "repo": "crunchtools/x", "ref": "", "note": None})
-    assert some.endswith("Do it\n\nRepo: crunchtools/x\n\nReport with `ashigaru report 7 <verb>`.")
+    assert some.endswith(f"Do it\n\nRepo: crunchtools/x\n\n{limits}")
     full = dispatch.brief({**work, "note": "n", "repo": "r", "ref": "f", "done_when": "d"})
     said = "Done when: d\nRef: f\nRepo: r\nNote: n\n"
-    assert full.endswith(f"Do it\n\n{said}\nReport with `ashigaru report 7 <verb>`.")
+    assert full.endswith(f"Do it\n\n{said}\n{limits}")
+
+
+def test_brief_ends_with_the_limits_a_hand_brief_carries() -> None:
+    text = dispatch.brief({"id": "a7", "lane": "exedore-max", "task": "Do it"})
+    assert "Don't merge, tag, release or deploy; Josui Prime does that." in text
+    assert "Don't message other seats." in text
+    assert "Sonnet subagents" in text
+    assert "Report with `ashigaru report a7 <verb>`" in text
+    assert '"DONE a7: <result, links>"' in text and '"BLOCKED a7: <what you need>"' in text
+    assert '"Filed: <urls or none>"' in text and '"Learned: none"' in text
+    assert "If you stop partway" in text
+    assert "run /cc seat and reply CC-DONE a7." in text
+    assert '"Fixed in <sha>", "Not a bug: <20+ chars>" or "Deferred: <open issue URL>"' in text
+    assert "{id}" not in text
 
 
 def typed(conn: sqlite3.Connection) -> dict[str, Any]:
