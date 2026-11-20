@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [5.0.1] - 2026-11-20
+
 ### Fixed
 - An idle seat, and Josui Prime while it works, stay on the board instead of
   showing `missing` (a831). `ashigaru hook next` no longer exits when the Desk
