@@ -536,7 +536,18 @@ def _own(who: auth.Caller, name: str, checked: Guard) -> dispatch.Own | None:
     return dispatch.Own(checked.epoch) if who.role == Role.SEAT and who.name == name else None
 
 
-@router.patch("/v1/seats/{name}", tags=["seats"], responses=errors(401, 403, 409))
+@router.patch(
+    "/v1/seats/{name}",
+    tags=["seats"],
+    responses={
+        **errors(401, 403),
+        409: {
+            "model": Problem,
+            "description": "`derived`: the write would change status, item or owner, which follow the seat's"
+            " items; `stale-session`: the seat's own write came from a session the Desk has ended.",
+        },
+    },
+)
 def patch_seat(conn: Conn, who: Who, name: str, body: SeatPatch, checked: Guarded = UNGUARDED) -> Seat:
     """Created on first report. A seat writes only turn, task and waiting_on on its own row, which
     renews its lease; Josui sets its lane. Status, item and owner (Scott's manual hold) are what the
@@ -687,7 +698,7 @@ def wrap(conn: Conn, who: Admin, item_id: str, body: WrapUp, checked: Guarded = 
     except KeyError as error:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "no such item") from error
     except dispatch.Refused as error:
-        raise HTTPException(status.HTTP_409_CONFLICT, str(error)) from error
+        raise ProblemError(status.HTTP_409_CONFLICT, str(error), "not-ready") from error
     except store.Conflict as error:
         raise _conflict(error) from error
     return Item.model_validate(store.get_item(conn, item_id))

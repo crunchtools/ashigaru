@@ -37,7 +37,8 @@ identity exists with another role it refuses, unless `--change-role` is given.
 
 Every 4xx body is `{"detail": "..."}`; each route's contract lists the codes it
 can return. A 409 or 412 body also carries a `code`: `stale-session`, `busy`,
-`held`, `unseen`, `no-lane`, `missing`, `derived` or `version`.
+`held`, `unseen`, `no-lane`, `missing`, `derived`, `not-ready` (a wrap before
+CC-DONE or mid-turn) or `version`.
 
 A seat's requests carry `X-Ashigaru-Epoch`, the epoch its session registered.
 One that is not the seat's current epoch is 409 `stale-session` and changes

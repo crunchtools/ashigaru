@@ -41,7 +41,7 @@ All notable changes to this project are documented here. The format follows
   as it now stands, and exits 1; item tables show VERSION. The MCP tools take
   `if_version`.
 - 409 and 412 bodies carry a `code`: `stale-session`, `busy`, `held`, `unseen`,
-  `no-lane`, `missing`, `derived`, `version`.
+  `no-lane`, `missing`, `derived`, `not-ready`, `version`.
 - A seat's turn starting on Josui's item still `assigned` moves it to
   `working`. When that turn is Scott's first typed prompt instead, the item goes
   back to the queue and the seat becomes his, with a new manual item.

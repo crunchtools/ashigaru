@@ -134,8 +134,10 @@ before its wrap: its context is gone, so requeue or reassign the item), writers'
 PRs no item names (`unlinked`: link it with `ashigaru update a7 --pr owner/repo#N`),
 his holds on seats silent for a day (`stale`: the
 Desk never closes them; tell Scott), and subjects intake holds for approval. A
-seat whose `stop` hook never arrived is ended by the Desk itself after three
-hours of silence (`turn_reconciled_at`). Show it
+turn whose `stop` hook never arrived is ended by the Desk after three hours of
+silence (`turn_reconciled_at`); a seat silent past its lease (60 minutes
+mid-turn, 10 idle) has its session ended sooner, and is `missing` until a
+`/clear`. Show it
 for "show the board" or "what needs me"; `work` is the round that acts.
 
 ## `changes`

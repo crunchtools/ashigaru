@@ -326,8 +326,8 @@ class Problem(BaseModel):
         None,
         description="What a 409 or 412 is, for a client that acts on it: stale-session (the seat session "
         "has ended), busy or held (the seat holds an item, or Scott does), unseen (never reported), no-lane, "
-        "missing (the seat's lease ran out), derived (a seat's occupancy follows its items), version (412: "
-        "the item moved since If-Match).",
+        "missing (the seat's lease ran out), derived (a seat's occupancy follows its items), not-ready (a "
+        "wrap before CC-DONE or mid-turn), version (412: the item moved since If-Match).",
     )
 
 

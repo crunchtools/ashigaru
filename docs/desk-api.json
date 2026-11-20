@@ -2630,7 +2630,7 @@
                 "type": "null"
               }
             ],
-            "description": "What a 409 or 412 is, for a client that acts on it: stale-session (the seat session has ended), busy or held (the seat holds an item, or Scott does), unseen (never reported), no-lane, missing (the seat's lease ran out), derived (a seat's occupancy follows its items), version (412: the item moved since If-Match).",
+            "description": "What a 409 or 412 is, for a client that acts on it: stale-session (the seat session has ended), busy or held (the seat holds an item, or Scott does), unseen (never reported), no-lane, missing (the seat's lease ran out), derived (a seat's occupancy follows its items), not-ready (a wrap before CC-DONE or mid-turn), version (412: the item moved since If-Match).",
             "title": "Code"
           },
           "detail": {
@@ -7100,7 +7100,7 @@
                 }
               }
             },
-            "description": "A taken id or subject_key (the detail names the item holding it), an existing identity, a second child in one assignment, a seat that holds another open item, a seat session the Desk has ended (`code` stale-session), or an item or seat not in a state to assign, claim or wrap."
+            "description": "`derived`: the write would change status, item or owner, which follow the seat's items; `stale-session`: the seat's own write came from a session the Desk has ended."
           },
           "422": {
             "content": {

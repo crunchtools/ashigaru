@@ -225,7 +225,7 @@ def update(
 
 
 def report(
-    desk: Desk, item: str, verb: str, if_version: int | None = None, **lines: str | None
+    desk: Desk, item: str, verb: str, *, if_version: int | None = None, **lines: str | None
 ) -> dict[str, Any]:
     """The report contract, with `text`, `next` and `learned` in `lines`: DONE moves to review with
     the text as the result, BLOCKED to blocked with it as the reason, WORKING to working with it as
