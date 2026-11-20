@@ -309,6 +309,11 @@ MIGRATIONS: tuple[str, ...] = (
         status = CASE WHEN item IS NULL THEN 'free' ELSE 'busy' END,
         owner = (SELECT CASE mode WHEN 'manual' THEN 'Scott' END FROM items WHERE id = seats.item);
     """,
+    # 5.1.0. A session the Desk ended has no id on its seat, so it cannot pass the fence by naming it:
+    # a 5.0 Desk ended one by moving the epoch and clearing the lease, and left the id.
+    """
+    UPDATE seats SET session_id = NULL WHERE epoch > 0 AND lease_until IS NULL;
+    """,
 )
 
 ITEM_DEFAULTS: dict[str, Any] = {

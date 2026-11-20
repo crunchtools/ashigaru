@@ -17,10 +17,18 @@ All notable changes to this project are documented here. The format follows
   first typed prompt (startup now drops the last one's, as /clear did), and
   `hook next` tells a newer session taking over from an ended one by the
   `session` a stale-session 409 now carries.
+  Deploy the Desk before any 5.1 client: a 5.1 client sends no epoch, which a
+  5.0.1 Desk refuses as a stale session.
 
 ### Fixed
 - A session the Desk ended after its lease lapsed is fenced out by its session
-  id too: ending it clears the seat's `session_id` as well as moving the epoch.
+  id too: ending it clears the seat's `session_id` as well as moving the epoch,
+  and migration 13 clears the id of every session a 5.0 Desk ended.
+- A usage report no longer writes a registered seat's `session_id`: one naming
+  another session than the seat's is 409 `stale-session` from anyone, and a
+  seat's own whose header and body sessions differ is refused.
+- `ashigaru` outside a seat's session (no `CLAUDE_CODE_SESSION_ID`) says so on a
+  stale-session refusal.
 - A sweep test no longer fails once its fixed timestamp is a day old.
 
 ## [5.0.1] - 2026-11-20

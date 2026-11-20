@@ -417,7 +417,8 @@ def test_the_migration_leaves_one_open_item_per_seat_and_rows_that_agree(
     items (the row's own item kept, the other let go and requeued), and rows saying busy or free
     against their items."""
     old = store.connect(tmp_path / "old.db")
-    monkeypatch.setattr(store, "MIGRATIONS", store.MIGRATIONS[:-1])
+    epochs = next(n for n, script in enumerate(store.MIGRATIONS) if "ADD COLUMN epoch" in script)
+    monkeypatch.setattr(store, "MIGRATIONS", store.MIGRATIONS[:epochs])
     store.migrate(old)
     rows = [
         ("a1", MINE, "queued", "auto"),
@@ -766,3 +767,64 @@ def test_a_new_session_drops_the_task_for_its_first_prompt_to_set(
     assert seat_row(client, keys, MINE)["task"] is None
     again = client.patch(path, headers=only(keys, MINE, "s2"), json={"turn": "active", "task": "again"})
     assert again.status_code == OK and again.json()["task"] == "again"
+
+
+def test_the_migration_drops_the_id_of_a_session_a_5_0_desk_ended(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A 5.0 Desk ended a session by moving the epoch and clearing the lease, and kept its id."""
+    old = store.connect(tmp_path / "old.db")
+    monkeypatch.setattr(store, "MIGRATIONS", store.MIGRATIONS[:-1])
+    store.migrate(old)
+    for name, epoch_now, lease_until in ((MINE, 3, None), (OTHER, 2, ago(minutes=-5)), (CI, 0, None)):
+        old.execute(
+            "INSERT INTO seats (name, status, since, updated_at, session_id, epoch, lease_until)"
+            " VALUES (?, 'free', ?, ?, ?, ?, ?)",
+            (name, ago(hours=1), ago(minutes=5), f"{name}-s", epoch_now, lease_until),
+        )
+    monkeypatch.undo()
+    store.migrate(old)
+    kept = {row["name"]: row["session_id"] for row in old.execute("SELECT name, session_id FROM seats")}
+    assert kept == {MINE: None, OTHER: f"{OTHER}-s", CI: f"{CI}-s"}, "only an ended session loses its id"
+
+
+def test_a_session_whose_lease_the_desk_cleared_cannot_resume_or_report(
+    client: TestClient, keys: Keys, conn: sqlite3.Connection
+) -> None:
+    up(client, keys, MINE)
+    session(client, keys, MINE, "s1", "startup")
+    conn.execute("UPDATE seats SET lease_until = NULL WHERE name = ?", (MINE,))
+    assert refused(session(client, keys, MINE, "s1", "resume"))
+    with store.transaction(conn):
+        dispatch.end_session(conn, MINE, "test", "lapsed")
+    assert refused(client.patch(f"/v1/seats/{MINE}", headers=only(keys, MINE, "s1"), json={"turn": "idle"}))
+    assert seat_row(client, keys, MINE)["lease_until"] is None
+
+
+def test_a_resume_after_a_clear_names_the_new_session(client: TestClient, keys: Keys) -> None:
+    up(client, keys, MINE)
+    session(client, keys, MINE, "s1", "startup")
+    session(client, keys, MINE, "s2", "clear")
+    resumed = session(client, keys, MINE, "s1", "resume")
+    assert refused(resumed) and resumed.json()["session"] == "s2"
+
+
+def test_no_usage_report_writes_the_session_of_a_registered_seat(
+    client: TestClient, keys: Keys, conn: sqlite3.Connection
+) -> None:
+    up(client, keys, MINE)
+    session(client, keys, MINE, "s1", "startup")
+    path = f"/v1/seats/{MINE}/usage"
+    moved = client.post(path, headers=only(keys, MINE, "s1"), json={"session_id": "s9", "cost_usd": 1.0})
+    assert refused(moved) and moved.json()["session"] == "s1"
+    assert seat_row(client, keys, MINE)["session_id"] == "s1"
+    with store.transaction(conn):
+        dispatch.end_session(conn, MINE, "test", "lapsed")
+    revived = client.post(path, headers=keys[JOSUI], json={"session_id": "s1", "cost_usd": 1.0})
+    assert refused(revived) and revived.json()["session"] is None
+    assert seat_row(client, keys, MINE)["session_id"] is None
+    assert conn.execute("SELECT coalesce(sum(cost_usd), 0) FROM spend").fetchone()[0] == 0
+    session(client, keys, MINE, "s2", "startup")
+    report = {"session_id": "s2", "cost_usd": 2.0, "billing": "max"}
+    assert client.post(path, headers=keys[JOSUI], json=report).status_code == OK
+    assert seat_row(client, keys, MINE)["session_id"] == "s2"

@@ -8,6 +8,7 @@ an item recorded but not assigned) still prints that item.
 
 import argparse
 import json
+import os
 import sys
 from http import HTTPStatus
 from typing import Any
@@ -15,7 +16,7 @@ from urllib.parse import quote
 
 from .. import __version__
 from . import commands, hooks, render
-from .client import Desk, DeskError, Unreachable
+from .client import SESSION_ENV, Desk, DeskError, Unreachable
 from .config import ConfigError, load
 from .wait import CI_SUCCEEDED, SUCCEEDED
 
@@ -343,6 +344,8 @@ def main(argv: list[str] | None = None) -> int:
         return execute(args, desk)
     except (DeskError, Unreachable, commands.CommandError, TimeoutError) as exc:
         print(f"ashigaru: {exc}", file=sys.stderr)
+        if isinstance(exc, DeskError) and exc.code == "stale-session" and not os.environ.get(SESSION_ENV):
+            print(f"ashigaru: no {SESSION_ENV}: not inside the seat's session", file=sys.stderr)
         return 1
     finally:
         desk.close()

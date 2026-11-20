@@ -142,6 +142,17 @@ def test_an_error_carries_the_desks_detail(desk: FakeDesk, capsys: pytest.Captur
     assert "409: Vertex 1 is busy" in capsys.readouterr().err
 
 
+def test_a_stale_answer_outside_a_seat_session_says_so(
+    desk: FakeDesk, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    desk.on("GET", "/v1/seats", took_over(None))
+    assert main(["agents"]) == 1
+    assert "no CLAUDE_CODE_SESSION_ID: not inside the seat's session" in capsys.readouterr().err
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "s1")
+    assert main(["agents"]) == 1
+    assert "no CLAUDE_CODE_SESSION_ID" not in capsys.readouterr().err
+
+
 def test_a_redirect_is_not_followed(desk: FakeDesk) -> None:
     desk.on("GET", "/v1/seats", (302, {}))
     with pytest.raises(DeskError, match="redirected"):

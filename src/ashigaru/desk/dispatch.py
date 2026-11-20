@@ -562,6 +562,27 @@ def start_session(
         return epoch, _report_seat(conn, name, fields, actor, Own(epoch))
 
 
+def _usage_session(found: dict[str, Any] | None, seat: str, named: str, own: Own | None) -> None:
+    """Raise Conflict (stale-session) unless a usage report for session `named` may land: the seat's
+    own must name that session in its header too and be in it (`fence`); once the seat has registered
+    a session, anyone's must name that one."""
+    current = (found or {}).get("session_id")
+    if own is not None:
+        if own.session is not None and own.session != named:
+            raise store.Conflict(
+                f"seat {seat!r}: a usage report from session {own.session} names session {named}",
+                "stale-session",
+                current,
+            )
+        fence(found, seat, dataclasses.replace(own, session=named))
+    if found is not None and found["epoch"] > 0 and current != named:
+        raise store.Conflict(
+            f"seat {seat!r} is in session {current}; a usage report for session {named} is not its",
+            "stale-session",
+            current,
+        )
+
+
 def report_usage(
     conn: sqlite3.Connection,
     seat: str,
@@ -570,14 +591,18 @@ def report_usage(
 ) -> dict[str, Any]:
     """Record a seat's usage and book whatever of the session's cost is not yet in spend. Billing is
     the report's, else the seat's lane's, else what the row had. A seat reporting for itself (`own`)
-    bills by its lane before the report's, must be in its current session (`fence`), and renews its
-    lease; once it has registered a session, a report for another session is refused, so two never
-    take turns resetting what is booked. Until a billing is known the cost waits."""
+    bills by its lane before the report's, must be in its current session (`fence`), naming it in the
+    report too, and renews its lease. Once the seat has registered a session, only `start_session`
+    sets its id: a report for another session, from anyone, is refused, so two never take turns
+    resetting what is booked and an ended session is never written back. Until a billing is known the
+    cost waits."""
     lane_first = own is not None
     with store.transaction(conn):
         found = store.get_seat(conn, seat)
-        if own is not None:
-            fence(found, seat, dataclasses.replace(own, session=own.session or report["session_id"]))
+        named = report["session_id"]
+        _usage_session(found, seat, named, own)
+        if found is not None and found["epoch"] > 0:
+            report = {key: value for key, value in report.items() if key != "session_id"}
         current = found or {**store.SEAT_DEFAULTS, "session_id": None}
         cost = report.pop("cost_usd", None)
         fields = {key: value for key, value in report.items() if value is not None}
@@ -589,7 +614,7 @@ def report_usage(
         if billing:
             fields["billing"] = billing
         if cost is not None:
-            same = current["session_id"] == report["session_id"]
+            same = current["session_id"] == named
             booked = current["session_booked_usd"] if same else 0.0
             fields["session_cost_usd"] = cost
             if billing:
