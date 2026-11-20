@@ -1,6 +1,7 @@
 """The Desk's REST API over httpx. Redirects are not followed: the bearer key goes only where the
 config points."""
 
+import dataclasses
 from pathlib import Path
 from typing import Any
 
@@ -39,6 +40,15 @@ class Unreachable(Exception):
     """No answer from the Desk: DNS, connect, TLS or a timeout."""
 
 
+@dataclasses.dataclass(frozen=True)
+class Send:
+    """How one request goes beyond its method, path, query and body: `timeout` replaces the client's
+    (a long-poll), `headers` are added (If-Match)."""
+
+    timeout: float | None = None
+    headers: dict[str, str] = dataclasses.field(default_factory=dict)
+
+
 class Desk:
     def __init__(
         self, config: Config, timeout: float = 10.0, transport: httpx.BaseTransport | None = None
@@ -58,12 +68,11 @@ class Desk:
         *,
         params: dict[str, Any] | None = None,
         body: Any = None,
-        **options: Any,
+        send: Send | None = None,
     ) -> Any:
-        """`options` are `timeout`, which replaces the client's for this request, for a long-poll, and
-        `headers`, added to it, such as If-Match. The seat's epoch, when epoch_file() holds one, goes on
-        every request."""
-        timeout, headers = options.get("timeout"), options.get("headers")
+        """`send` says how: a timeout replacing the client's, for a long-poll, and headers added to the
+        request, such as If-Match. The seat's epoch, when epoch_file() holds one, goes on every request."""
+        timeout, headers = (send.timeout, send.headers) if send else (None, {})
         wait = httpx.USE_CLIENT_DEFAULT if timeout is None else httpx.Timeout(timeout)
         held = epoch()
         sent = ({EPOCH_HEADER: str(held)} if held is not None else {}) | (headers or {})
@@ -88,7 +97,7 @@ class Desk:
         return self.request("GET", path, params={k: v for k, v in params.items() if v is not None})
 
     def post(self, path: str, body: Any = None, headers: dict[str, str] | None = None) -> Any:
-        return self.request("POST", path, body={} if body is None else body, headers=headers)
+        return self.request("POST", path, body={} if body is None else body, send=Send(headers=headers or {}))
 
     def close(self) -> None:
         self._http.close()

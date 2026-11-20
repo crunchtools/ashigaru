@@ -12,7 +12,7 @@ from http import HTTPStatus
 from typing import TYPE_CHECKING, Any, Protocol
 from urllib.parse import quote
 
-from .client import DeskError, Unreachable
+from .client import DeskError, Send, Unreachable
 
 if TYPE_CHECKING:
     from .client import Desk
@@ -91,7 +91,7 @@ class CIWaiter:
                 "GET",
                 "/v1/ci/wait",
                 params=params,
-                timeout=seconds + SLACK,
+                send=Send(timeout=seconds + SLACK),
             )
         except Unreachable:
             return None

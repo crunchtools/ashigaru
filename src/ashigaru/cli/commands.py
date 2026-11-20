@@ -7,7 +7,7 @@ from http import HTTPStatus
 from typing import Any
 from urllib.parse import quote
 
-from .client import Desk, DeskError, Unreachable
+from .client import Desk, DeskError, Send, Unreachable
 from .wait import CIWaiter, waiter_for
 
 
@@ -28,10 +28,10 @@ def _item(item_id: str) -> str:
     return f"/v1/items/{quote(item_id, safe='')}"
 
 
-def _match(if_version: int | None) -> dict[str, str] | None:
-    """The If-Match header for a write that must find the item at `if_version`, else None. The Desk
+def _match(if_version: int | None) -> dict[str, str]:
+    """The If-Match header for a write that must find the item at `if_version`, else none. The Desk
     answers 412 (code "version") when the item has moved since."""
-    return None if if_version is None else {"If-Match": str(if_version)}
+    return {} if if_version is None else {"If-Match": str(if_version)}
 
 
 def _codes_of(name: str) -> str:
@@ -218,7 +218,9 @@ def update(
     body |= dict.fromkeys(clear)
     if not body:
         raise CommandError("nothing to update; give a field, or --clear one")
-    result: dict[str, Any] = desk.request("PATCH", _item(item), body=body, headers=_match(if_version))
+    result: dict[str, Any] = desk.request(
+        "PATCH", _item(item), body=body, send=Send(headers=_match(if_version))
+    )
     return result
 
 

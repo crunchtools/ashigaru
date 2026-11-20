@@ -60,7 +60,7 @@ from urllib.parse import quote
 
 import httpx
 
-from .client import Desk, DeskError, Unreachable, epoch, epoch_file
+from .client import Desk, DeskError, Send, Unreachable, epoch, epoch_file
 from .config import load
 
 EVENTS = ("session-start", "prompt-submit", "stop", "next", "statusline")
@@ -317,7 +317,10 @@ def _ask(desk: Desk, method: str, path: str, deadline: float, **params: Any) -> 
             raise _Deadline
         try:
             return desk.request(
-                method, path, params={"wait": wait} if "wait" in params else None, timeout=wait + NEXT_GRACE
+                method,
+                path,
+                params={"wait": wait} if "wait" in params else None,
+                send=Send(timeout=wait + NEXT_GRACE),
             )
         except (DeskError, Unreachable) as error:
             if isinstance(error, DeskError):

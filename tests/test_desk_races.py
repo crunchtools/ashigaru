@@ -217,6 +217,32 @@ def test_r4_a_desk_just_up_lapses_and_hands_back_nothing_its_outage_silenced(
     assert get(client, keys, claimed)["seat"] is None
 
 
+def test_r4_a_new_session_leaves_scotts_item_open_and_the_seat_free(client: TestClient, keys: Keys) -> None:
+    up(client, keys, MINE)
+    session(client, keys, MINE, "s1", "startup")
+    client.patch(f"/v1/seats/{MINE}", headers=keys[MINE], json={"turn": "active", "task": "Scott's own"})
+    held = seat_row(client, keys, MINE)["item"]
+    session(client, keys, MINE, "s2", "startup")
+    found = get(client, keys, held)
+    assert (found["state"], found["seat"], found["wrap"]) == ("working", None, None)
+    assert (seat_row(client, keys, MINE)["status"], seat_row(client, keys, MINE)["owner"]) == ("free", None)
+
+
+def test_r10_a_seat_mid_turn_keeps_its_session_for_the_longer_lease(
+    client: TestClient, keys: Keys, conn: sqlite3.Connection, db: Path
+) -> None:
+    up(client, keys, MINE)
+    client.patch(f"/v1/seats/{MINE}", headers=keys[MINE], json={"turn": "active"})
+    lease = seat_row(client, keys, MINE)["lease_until"]
+    assert lease > (datetime.now(UTC) + timedelta(minutes=50)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    assert reconcile.run(str(db), reconcile.Settings())["lapsed"] == 0
+    conn.execute("UPDATE seats SET lease_until = ? WHERE name = ?", (ago(minutes=1), MINE))
+    just_up = datetime.now(UTC) - timedelta(minutes=30)
+    assert reconcile.run(str(db), reconcile.Settings(), just_up)["lapsed"] == 0
+    long_up = datetime.now(UTC) - timedelta(minutes=61)
+    assert reconcile.run(str(db), reconcile.Settings(), long_up)["lapsed"] == 1
+
+
 # R2 residue: the next hook stopped for good on a 409 that only meant "busy until the wrap".
 
 

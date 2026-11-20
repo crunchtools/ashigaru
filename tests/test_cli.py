@@ -15,7 +15,7 @@ from fake_desk import FakeDesk, Seen, serve
 from ashigaru import __version__
 from ashigaru.cli import commands, config, hooks, render
 from ashigaru.cli.__main__ import main
-from ashigaru.cli.client import Desk, DeskError, Unreachable
+from ashigaru.cli.client import Desk, DeskError, Send, Unreachable
 from ashigaru.cli.wait import CIWaiter, PollWaiter
 
 KEY = "ash_k1_secret"
@@ -729,7 +729,7 @@ def test_a_long_poll_outlasts_the_clients_timeout(desk: FakeDesk) -> None:
     client = Desk(config.load(), timeout=0.1)
     with pytest.raises(Unreachable):
         client.request("GET", "/v1/ci/wait")
-    assert client.request("GET", "/v1/ci/wait", timeout=2.0)["status"] == "success"
+    assert client.request("GET", "/v1/ci/wait", send=Send(timeout=2.0))["status"] == "success"
 
 
 def test_wait_on_a_commit_pauses_no_longer_than_its_deadline(desk: FakeDesk) -> None:
