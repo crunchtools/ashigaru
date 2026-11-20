@@ -281,23 +281,19 @@ class _Refused(Exception):
     """The Desk said this seat cannot take work now: check in again after NEXT_CHECK_IN."""
 
 
-# How the Desk's stale-session answer names the seat's current session ("None" once it ended it).
-CURRENT_SESSION = re.compile(r"is in session (\S+) at epoch")
-
-
-def _superseded(detail: str, session: str | None) -> bool:
-    """True when the Desk's stale-session answer names another session as the seat's: a newer one
-    (a /clear, a restart) took the seat over. False when it names none, which is an ended session."""
-    found = CURRENT_SESSION.search(detail)
-    return bool(found and found[1] not in ("None", session))
-
-
 class _Stale(Exception):
-    """The Desk said this session is over; `detail` is why."""
+    """The Desk said this session is over; `detail` is why, `session` the seat's current one it
+    named (None once the Desk ended the seat's session)."""
 
-    def __init__(self, detail: str) -> None:
+    def __init__(self, detail: str, session: str | None = None) -> None:
         super().__init__(detail)
         self.detail = detail
+        self.session = session
+
+    def superseded(self, own: str | None) -> bool:
+        """True when the Desk named another session as the seat's: a newer one (a /clear, a restart)
+        took the seat over. False when it named none, which is an ended session."""
+        return self.session is not None and self.session != own
 
 
 def _ask(desk: Desk, method: str, path: str, deadline: float, **params: Any) -> Any:
@@ -320,7 +316,7 @@ def _ask(desk: Desk, method: str, path: str, deadline: float, **params: Any) -> 
             if isinstance(error, DeskError):
                 if error.status == HTTPStatus.CONFLICT:
                     if error.code == STALE:
-                        raise _Stale(error.detail) from error
+                        raise _Stale(error.detail, error.session) from error
                     if error.code not in NEXT_BUSY:
                         raise _Refused from error
                 elif error.status in NEXT_REFUSED:
@@ -351,7 +347,7 @@ def _next(desk: Desk, seat: str | None, session: str | None = None) -> str | Non
                 return brief
             time.sleep(NEXT_PAUSE)
     except _Stale as stale:
-        return None if _superseded(stale.detail, session) else _stale(stale.detail)
+        return None if stale.superseded(session) else _stale(stale.detail)
     except _Deadline:
         return None
 

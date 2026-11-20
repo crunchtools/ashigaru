@@ -43,8 +43,9 @@ CC-DONE or mid-turn) or `version`.
 A seat's requests carry `X-Ashigaru-Session`, the Claude Code session id its
 hook was handed or its shell sees as `CLAUDE_CODE_SESSION_ID`. One that names
 another session than the seat's current one, or a session the Desk has ended,
-is 409 `stale-session` and changes nothing; the request is in that session's
-epoch. A 5.0 client sends `X-Ashigaru-Epoch`, the epoch its session registered,
+is 409 `stale-session` and changes nothing, its body's `session` naming the
+seat's current session (null once the Desk ended it); the request is in that
+session's epoch. A 5.0 client sends `X-Ashigaru-Epoch`, the epoch its session registered,
 instead or as well, and is held to it. A REST request naming neither is
 accepted only from a seat that never registered a session (epoch 0, a 4.x
 client); MCP tool calls name neither and are not fenced.

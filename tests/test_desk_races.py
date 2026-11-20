@@ -674,6 +674,22 @@ def test_a_request_naming_neither_is_refused_once_the_seat_registered_a_session(
     assert refused(client.post(f"/v1/seats/{MINE}/next?wait=0", headers=keys[MINE]))
 
 
+def test_a_stale_answer_names_the_seats_current_session_or_none_once_ended(
+    client: TestClient, keys: Keys, conn: sqlite3.Connection
+) -> None:
+    up(client, keys, MINE)
+    session(client, keys, MINE, "s1", "startup")
+    session(client, keys, MINE, "s2", "clear")
+    answer = client.patch(f"/v1/seats/{MINE}", headers=only(keys, MINE, "s1"), json={"turn": "idle"})
+    assert refused(answer) and answer.json()["session"] == "s2"
+    with store.transaction(conn):
+        dispatch.end_session(conn, MINE, "test", "lapsed")
+    answer = client.patch(f"/v1/seats/{MINE}", headers=only(keys, MINE, "s2"), json={"turn": "idle"})
+    assert refused(answer) and answer.json()["session"] is None
+    resumed = session(client, keys, MINE, "s2", "resume")
+    assert refused(resumed) and resumed.json()["session"] is None
+
+
 def test_a_seat_that_never_registered_a_session_takes_any_session_it_names(
     client: TestClient, keys: Keys
 ) -> None:

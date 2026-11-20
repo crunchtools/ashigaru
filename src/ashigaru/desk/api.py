@@ -120,11 +120,13 @@ def _found(value: dict[str, Any] | None, what: str) -> dict[str, Any]:
 
 
 class ProblemError(HTTPException):
-    """A 4xx whose body carries a `code` beside its detail (Problem), for a client that acts on it."""
+    """A 4xx whose body carries a `code` beside its detail (Problem), for a client that acts on it,
+    and for a stale-session one the seat's current `session`."""
 
-    def __init__(self, status_code: int, detail: str, code: str | None) -> None:
+    def __init__(self, status_code: int, detail: str, code: str | None, session: str | None = None) -> None:
         super().__init__(status_code, detail)
         self.code = code
+        self.session = session
 
 
 async def _problem(request: Request, error: Exception) -> JSONResponse:
@@ -132,16 +134,20 @@ async def _problem(request: Request, error: Exception) -> JSONResponse:
     status_code = (
         error.status_code if isinstance(error, HTTPException) else status.HTTP_500_INTERNAL_SERVER_ERROR
     )
-    return JSONResponse(
-        {"detail": getattr(error, "detail", str(error)), "code": code}, status_code=status_code
-    )
+    body = {"detail": getattr(error, "detail", str(error)), "code": code}
+    if code == "stale-session":
+        body["session"] = error.session if isinstance(error, ProblemError) else None
+    return JSONResponse(body, status_code=status_code)
 
 
 def _conflict(error: store.Conflict) -> ProblemError:
     """409 with the Conflict's code; 412 when what conflicts is the version the caller named."""
     moved = error.code == "version"
     return ProblemError(
-        status.HTTP_412_PRECONDITION_FAILED if moved else status.HTTP_409_CONFLICT, str(error), error.code
+        status.HTTP_412_PRECONDITION_FAILED if moved else status.HTTP_409_CONFLICT,
+        str(error),
+        error.code,
+        error.session,
     )
 
 

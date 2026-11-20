@@ -1179,11 +1179,12 @@ def stale() -> tuple[int, Any]:
     return 409, {"detail": "the Desk ended it", "code": "stale-session"}
 
 
-def took_over(by: str) -> tuple[int, Any]:
-    """The Desk's stale-session answer once `by` is the seat's session, worded as dispatch.fence does."""
+def took_over(by: str | None) -> tuple[int, Any]:
+    """The Desk's stale-session answer naming `by` as the seat's session, as dispatch.fence does."""
     return 409, {
         "detail": f"seat 'Max 1' is in session {by} at epoch 8; this request has ended",
         "code": "stale-session",
+        "session": by,
     }
 
 
@@ -1206,9 +1207,9 @@ def test_next_stops_silently_when_a_newer_session_took_the_seat(
     assert captured.out == "" and captured.err == "" and len(waking.calls("POST", NEXT)) == 1
 
 
-@pytest.mark.parametrize("current", ["None", "s1"])
+@pytest.mark.parametrize("current", [None, "s1"])
 def test_next_tells_the_model_when_the_desk_names_no_newer_session(
-    waking: FakeDesk, capsys: pytest.CaptureFixture[str], current: str
+    waking: FakeDesk, capsys: pytest.CaptureFixture[str], current: str | None
 ) -> None:
     """None: the Desk ended the session. s1: the seat's current session is this one, so nothing took over."""
     waking.on("POST", NEXT, took_over(current))
@@ -1216,11 +1217,17 @@ def test_next_tells_the_model_when_the_desk_names_no_newer_session(
     assert capsys.readouterr().err.startswith("Ashigaru Desk: this session is stale:")
 
 
-def test_superseded_reads_the_session_the_desk_names() -> None:
-    assert hooks._superseded("seat 'Max 1' is in session s2 at epoch 8; x", "s1")
-    assert not hooks._superseded("seat 'Max 1' is in session s1 at epoch 8; x", "s1")
-    assert not hooks._superseded("seat 'Max 1' is in session None at epoch 8; x", "s1")
-    assert not hooks._superseded("the Desk ended it", "s1")
+def test_a_stale_answer_is_superseded_only_when_it_names_another_session() -> None:
+    assert hooks._Stale("x", "s2").superseded("s1")
+    assert not hooks._Stale("x", "s1").superseded("s1")
+    assert not hooks._Stale("x", None).superseded("s1")
+
+
+def test_a_desk_error_carries_the_session_a_stale_answer_names(desk: FakeDesk) -> None:
+    desk.on("GET", "/v1/me", took_over("s2"))
+    with pytest.raises(DeskError) as raised:
+        Desk(config.load()).get("/v1/me")
+    assert (raised.value.code, raised.value.session) == ("stale-session", "s2")
 
 
 def test_the_cli_names_the_session_it_runs_in_and_never_an_epoch(

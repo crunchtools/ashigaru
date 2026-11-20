@@ -451,11 +451,13 @@ TIMESTAMP_FOR_STATE = {State.ASSIGNED: "assigned_at", State.QUEUED: "queued_at"}
 
 class Conflict(Exception):
     """A write that would break a uniqueness rule (id, subject_key, one child, one item per seat), or
-    an item or seat not in a state for it. `code` says which, where a client acts on it."""
+    an item or seat not in a state for it. `code` says which, where a client acts on it; a
+    stale-session one names the seat's current `session`, None once the Desk ended it."""
 
-    def __init__(self, message: str, code: str | None = None) -> None:
+    def __init__(self, message: str, code: str | None = None, session: str | None = None) -> None:
         super().__init__(message)
         self.code = code
+        self.session = session
 
 
 def now() -> str:

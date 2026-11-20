@@ -2636,6 +2636,18 @@
           "detail": {
             "title": "Detail",
             "type": "string"
+          },
+          "session": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "On a stale-session 409 only: the seat's current Claude Code session, null once the Desk ended it. A session naming another knows a newer one took the seat.",
+            "title": "Session"
           }
         },
         "required": [

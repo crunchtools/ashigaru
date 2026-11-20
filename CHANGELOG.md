@@ -15,8 +15,8 @@ All notable changes to this project are documented here. The format follows
   alone, taking the epoch from the seat's row; `X-Ashigaru-Epoch` from a 5.0
   client is still honoured. The Desk keeps a seat's task from its session's
   first typed prompt (startup now drops the last one's, as /clear did), and
-  `hook next` tells a newer session taking over from an ended one by the session
-  the stale-session answer names.
+  `hook next` tells a newer session taking over from an ended one by the
+  `session` a stale-session 409 now carries.
 
 ### Fixed
 - A session the Desk ended after its lease lapsed is fenced out by its session

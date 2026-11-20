@@ -200,6 +200,7 @@ def fence(seat: dict[str, Any] | None, name: str, own: Own | None) -> int | None
             f"seat {name!r} is in session {session} at epoch {current}; this request's session "
             f"({own.session or '?'}, epoch {own.epoch}) has ended: /clear to rejoin",
             "stale-session",
+            session,
         )
     return own.epoch if own.epoch is not None else (current if own.session is not None else None)
 
@@ -542,6 +543,7 @@ def start_session(
                     f"seat {name!r}: session {session_id} has ended (the seat is in session "
                     f"{current['session_id']} at epoch {current['epoch']}); /clear to rejoin",
                     "stale-session",
+                    current["session_id"],
                 )
             return current["epoch"], _report_seat(
                 conn, name, {"turn": Turn.IDLE}, actor, Own(current["epoch"])

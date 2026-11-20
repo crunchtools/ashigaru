@@ -16,13 +16,15 @@ SESSION_ENV = "CLAUDE_CODE_SESSION_ID"
 
 class DeskError(Exception):
     """The Desk answered with an error; `detail` is its `{"detail": ..., "code": ...}`, and `code` is
-    None when it sent none, as an old Desk does."""
+    None when it sent none, as an old Desk does. `session` is the seat's current session a
+    stale-session answer names, None when it names none."""
 
-    def __init__(self, status: int, detail: str, code: str | None = None) -> None:
+    def __init__(self, status: int, detail: str, code: str | None = None, session: str | None = None) -> None:
         super().__init__(f"{status}: {detail}")
         self.status = status
         self.detail = detail
         self.code = code
+        self.session = session
 
 
 class Unreachable(Exception):
@@ -80,14 +82,16 @@ class Desk:
         if response.is_redirect:
             raise DeskError(response.status_code, "the Desk redirected; check its URL")
         if response.is_error:
-            code = None
+            code = session = None
             try:
                 answer = response.json()
                 detail = answer.get("detail")
                 code = answer.get("code") if isinstance(answer.get("code"), str) else None
+                session = answer.get("session") if isinstance(answer.get("session"), str) else None
             except (ValueError, AttributeError):
                 detail = response.text[:200] or response.reason_phrase
-            raise DeskError(response.status_code, detail if isinstance(detail, str) else str(detail), code)
+            text = detail if isinstance(detail, str) else str(detail)
+            raise DeskError(response.status_code, text, code, session)
         return response.json() if response.content else None
 
     def get(self, path: str, **params: Any) -> Any:
