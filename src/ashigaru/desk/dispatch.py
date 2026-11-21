@@ -1,8 +1,9 @@
 """Dispatch on top of the store: assign, claim and wrap, usage and spend, the queue, seats, outcomes
 and work views.
 
-Assign and claim run in one BEGIN IMMEDIATE transaction each, so two callers
-racing for one item or one seat get one winner and one Conflict.
+Assign and claim run in one BEGIN IMMEDIATE transaction each (a create that assigns, in the
+create's), so two callers racing for one item or one seat get one winner and one Conflict, and an
+assign never writes over a seat's claim it did not read.
 """
 
 import dataclasses
@@ -94,6 +95,7 @@ AUTODISPATCH = "autodispatch"
 NEXT_READY = f"""
     SELECT * FROM items
     WHERE {store.OPEN} AND state = 'queued' AND seat IS NULL AND mode = 'auto' AND lane = :lane
+      AND wrap IS NULL
       AND NOT EXISTS (
           SELECT 1 FROM json_each(items.after)
           WHERE value NOT IN (SELECT id FROM items WHERE state = 'done')
@@ -101,7 +103,8 @@ NEXT_READY = f"""
     ORDER BY created_at, id
     LIMIT 1
 """
-"""What a free seat in the lane claims: the oldest queued auto item whose `after` items are done."""
+"""What a free seat in the lane claims: the oldest queued auto item, not being wrapped, whose `after`
+items are done. A wrapping item `_ready` refuses must not head the lane, or no item behind it is claimed."""
 CATCH_UP_DEFAULT = timedelta(days=1)
 
 NEEDS_YOU = f"""
@@ -148,9 +151,11 @@ SET_LIMITS = """
 
 
 def _ready(conn: sqlite3.Connection, item: dict[str, Any]) -> None:
-    """Raise Conflict unless the item is open and everything it waits on is done."""
+    """Raise Conflict unless the item is open, not being wrapped, and everything it waits on is done."""
     if item["state"] in CLOSED or item["wrap"] == Wrap.CLEARED:
         raise store.Conflict(f"{item['id']} is closed")
+    if item["wrap"] == Wrap.WRAPPING:
+        raise store.Conflict(f"{item['id']} is being wrapped on {item['seat'] or 'no seat'}", "wrapping")
     waiting = [row[0] for row in conn.execute(WAITING_ON, {"after": json.dumps(item["after"])})]
     if waiting:
         raise store.Conflict(f"{item['id']} waits on {', '.join(waiting)}")
@@ -213,6 +218,15 @@ def unmoved(item: dict[str, Any], version: int | None) -> None:
         )
 
 
+def _read(conn: sqlite3.Connection, item_id: str, version: int | None) -> dict[str, Any]:
+    """The item a write was decided on: KeyError if there is none, Conflict (version) if it moved."""
+    item = store.get_item(conn, item_id)
+    if item is None:
+        raise KeyError(item_id)
+    unmoved(item, version)
+    return item
+
+
 def _free(seat: dict[str, Any] | None, name: str) -> dict[str, Any]:
     if seat is None:
         raise store.Conflict(f"seat {name!r} has not reported", "unseen")
@@ -236,31 +250,52 @@ def _take(
     store.update_item(conn, item["id"], fields, actor, source)
 
 
+def _pick(conn: sqlite3.Connection, item_id: str, lane: str | None) -> str:
+    """The seat an assign naming none gets: PICK_SEAT's in the lane; Conflict when there is none."""
+    if lane is None:
+        raise store.Conflict(f"{item_id} has no lane to pick a seat by; name a seat or a lane")
+    picked = conn.execute(PICK_SEAT, {"lane": lane, "now": store.now()}).fetchone()
+    if picked is None:
+        raise store.Conflict(f"no free seat in lane {lane}")
+    return str(picked[0])
+
+
 def assign(
     conn: sqlite3.Connection, item_id: str, target: dict[str, Any], actor: str, version: int | None = None
 ) -> str:
     """Give the item to the target's seat, or to the longest-free unheld seat that is up in its lane
     (default the item's). Returns the seat."""
-    seat, lane = target.get("seat"), target.get("lane")
     with store.transaction(conn):
-        item = store.get_item(conn, item_id)
-        if item is None:
-            raise KeyError(item_id)
-        unmoved(item, version)
-        _ready(conn, item)
-        lane = lane or item["lane"]
-        if seat is None:
-            if lane is None:
-                raise store.Conflict(f"{item_id} has no lane to pick a seat by; name a seat or a lane")
-            picked = conn.execute(PICK_SEAT, {"lane": lane, "now": store.now()}).fetchone()
-            if picked is None:
-                raise store.Conflict(f"no free seat in lane {lane}")
-            seat = str(picked[0])
-        row = _free(store.get_seat(conn, seat), seat)
-        if lane is not None and item["lane"] is None:
-            store.update_item(conn, item_id, {"lane": lane}, actor)
-            item["lane"] = lane
-        _take(conn, item, row, actor)
+        return assign_in(conn, item_id, target, actor, version)
+
+
+def assign_in(
+    conn: sqlite3.Connection, item_id: str, target: dict[str, Any], actor: str, version: int | None = None
+) -> str:
+    """`assign`, the caller holding the transaction, so a create can assign in the same one. An item
+    another seat holds is refused (taken) unless the caller names the version it read: then the other
+    seat loses it, and if its work was under way, its session (`end_session`), so the next thing it
+    asks of the Desk tells it the item is no longer its. No version takes Scott's held item (held)
+    or one being wrapped (wrapping): the checks come before `_take`, which moves the item."""
+    item = _read(conn, item_id, version)
+    _ready(conn, item)
+    holder = item["seat"]
+    if holder is not None and item["mode"] == Mode.MANUAL:
+        raise store.Conflict(f"{item_id} is Scott's, held on seat {holder}; no version takes it", "held")
+    if holder is not None and version is None:
+        # An unread take is how an assign wrote over a seat's claim (#245).
+        raise store.Conflict(
+            f"{item_id} is {item['state']} with seat {holder}; name the version you read to take it from it",
+            "taken",
+        )
+    seat = target.get("seat") or _pick(conn, item_id, target.get("lane") or item["lane"])
+    row = _free(store.get_seat(conn, seat), seat)
+    if item["lane"] is None and target.get("lane") is not None:
+        store.update_item(conn, item_id, {"lane": target["lane"]}, actor)
+        item["lane"] = target["lane"]
+    _take(conn, item, row, actor)
+    if holder is not None and item["state"] in (State.ASSIGNED, State.WORKING):
+        end_session(conn, holder, actor, f"{item_id} was reassigned to {seat}")
     return seat
 
 
@@ -665,10 +700,7 @@ def wrap(
     seat's turn is active, unless forced; then it clears the wrap and closes an open item, which
     frees the seat."""
     with store.transaction(conn):
-        item = store.get_item(conn, item_id)
-        if item is None:
-            raise KeyError(item_id)
-        unmoved(item, version)
+        item = _read(conn, item_id, version)
         fields: dict[str, Any] = {"wrap": request["stage"]}
         if request.get("learned"):
             fields["learned"] = request["learned"]

@@ -442,14 +442,24 @@ def test_assign_by_seat(desk: FakeDesk) -> None:
     assert desk.seen[0].body == {"seat": "Vertex 1"}
 
 
-def test_assign_records_a_new_item_then_picks_by_lane(desk: FakeDesk) -> None:
-    desk.on("POST", "/v1/items", (201, item(id="a7")))
-    desk.on("POST", "/v1/items/a7/assign", (200, item(id="a7", seat="Max 3", state="assigned")))
+def test_assign_records_a_new_item_and_assigns_it_in_one_request(desk: FakeDesk) -> None:
+    desk.on("POST", "/v1/items", (201, item(id="a7", seat="Max 3", state="assigned")))
     argv = ["assign", "--task", "ship it", "--lane", "exedore-max", "--after", "a5", "--ref", "RT#9"]
     assert main(argv) == 0
-    create, pick = desk.seen
-    assert create.body == {"task": "ship it", "lane": "exedore-max", "after": ["a5"], "ref": "RT#9"}
-    assert pick.body == {"lane": "exedore-max"}
+    assert [(s.method, s.path) for s in desk.seen] == [("POST", "/v1/items")]
+    assert desk.seen[0].body == {
+        "task": "ship it",
+        "lane": "exedore-max",
+        "after": ["a5"],
+        "ref": "RT#9",
+        "assign": {"lane": "exedore-max"},
+    }
+
+
+def test_assign_task_by_seat_names_the_seat_in_the_create(desk: FakeDesk) -> None:
+    desk.on("POST", "/v1/items", (201, item(id="a7", seat="Vertex 1", state="assigned")))
+    assert main(["assign", "--task", "t", "--seat", "Vertex 1"]) == 0
+    assert desk.seen[0].body == {"task": "t", "assign": {"seat": "Vertex 1"}}
 
 
 def test_assign_needs_an_item(desk: FakeDesk, capsys: pytest.CaptureFixture[str]) -> None:
@@ -572,21 +582,18 @@ def test_create_looks_up_a_taken_id_before_the_subject_key(
     assert capsys.readouterr().out.splitlines()[1].startswith("a5")
 
 
-def test_assign_task_keeps_the_id_when_the_assign_is_refused(
+def test_assign_task_refused_records_nothing_and_says_why(
     desk: FakeDesk, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    desk.on("POST", "/v1/items", (201, item(id="a8")))
-    desk.on("POST", "/v1/items/a8/assign", (409, {"detail": "no free seat in lane vertex"}))
-    desk.on("GET", "/v1/items/a8", (200, item(id="a8", lane="vertex")))
-    assert main(["assign", "--task", "t", "--lane", "vertex", "--subject-key", "RT#1"]) == 1
+    desk.on("POST", "/v1/items", (409, {"detail": "no free seat in lane vertex"}))
+    assert main(["assign", "--task", "t", "--lane", "vertex"]) == 1
     out = capsys.readouterr()
-    assert out.out.splitlines()[1].startswith("a8") and "recorded a8, not assigned" in out.err
-    assert desk.calls("POST", "/v1/items")[0].body == {"task": "t", "lane": "vertex", "subject_key": "RT#1"}
+    assert out.out == "" and "no free seat in lane vertex" in out.err
+    assert [(s.method, s.path) for s in desk.seen] == [("POST", "/v1/items")]
 
 
 def test_assign_task_does_not_hide_a_desk_failure(desk: FakeDesk, capsys: pytest.CaptureFixture[str]) -> None:
-    desk.on("POST", "/v1/items", (201, item(id="a8")))
-    desk.on("POST", "/v1/items/a8/assign", (500, {"detail": "boom"}))
+    desk.on("POST", "/v1/items", (500, {"detail": "boom"}))
     assert main(["assign", "--task", "t", "--lane", "vertex"]) == 1
     out = capsys.readouterr()
     assert out.out == "" and "500: boom" in out.err
@@ -1074,6 +1081,38 @@ def test_the_seat_defaults_to_the_keys_identity(desk: FakeDesk) -> None:
     desk.on("PATCH", "/v1/seats/Vertex%202", (200, SEAT))
     hook("stop", {"hook_event_name": "Stop"})
     assert desk.calls("PATCH", "/v1/seats/Vertex%202")[0].body == {"turn": "idle"}
+
+
+def test_a_stop_the_desk_ended_tells_the_model_and_wakes_it(
+    seat: FakeDesk, capsys: pytest.CaptureFixture[str]
+) -> None:
+    seat.on("PATCH", "/v1/seats/Max%201", took_over(None))
+    assert hook("stop", {"hook_event_name": "Stop", "session_id": "s1"}) == hooks.WAKE
+    out = capsys.readouterr()
+    assert out.out == "" and "this session is stale" in out.err and "/clear" in out.err
+
+
+@pytest.mark.parametrize(
+    ("event", "answer"),
+    [
+        ({"hook_event_name": "Stop", "session_id": "s1", "stop_hook_active": True}, None),
+        ({"hook_event_name": "Stop", "session_id": "s1"}, "s2"),
+        ({"hook_event_name": "Notification", "session_id": "s1"}, None),
+    ],
+    ids=["the stop the notice caused", "a newer session holds the seat", "a notification"],
+)
+def test_a_stale_stop_is_not_told_twice_or_to_a_session_that_was_superseded(
+    seat: FakeDesk, capsys: pytest.CaptureFixture[str], event: dict[str, Any], answer: str | None
+) -> None:
+    seat.on("PATCH", "/v1/seats/Max%201", took_over(answer))
+    seat.on(
+        "GET",
+        "/v1/seats/Max%201",
+        (200, SEAT | {"turn": "active", "turn_started_at": "2000-01-01T00:00:00Z"}),
+    )
+    assert hook("stop", event) == 0
+    assert "this session is stale" not in capsys.readouterr().err
+    assert len(patches(seat)) == 1
 
 
 def test_a_slow_desk_never_holds_a_hook(seat: FakeDesk, monkeypatch: pytest.MonkeyPatch) -> None:

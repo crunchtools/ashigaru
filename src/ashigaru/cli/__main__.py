@@ -2,8 +2,8 @@
 
 Exit 0 on success, 1 when the Desk or a command refuses (or `wait` ends on
 blocked, wontdo or abandoned, or a failed CI, or times out), 2 on a usage or
-config error. A refusal that leaves an item a caller needs (a taken subject_key,
-an item recorded but not assigned) still prints that item.
+config error. A refusal that leaves an item a caller needs (a taken subject_key)
+still prints that item.
 """
 
 import argparse
@@ -236,7 +236,7 @@ def parser() -> argparse.ArgumentParser:
         choices=CHOICES["--lane"],
         help="the seat in this lane free longest (default: the item's lane)",
     )
-    assign.add_argument("--task", help="record a new item with this one-line objective first")
+    assign.add_argument("--task", help="record a new item with this one-line objective and assign it at once")
     assign.add_argument("--done-when", dest="done_when")
     assign.add_argument("--ref", help="the issue or RT URL")
     assign.add_argument("--repo")

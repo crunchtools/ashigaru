@@ -88,3 +88,10 @@ path = "src/ashigaru/desk/dispatch.py"
 item = "_waiting_seat"
 justification = "matched against store.write_seat (and before that release.survey) on statement shape alone: a seat lookup, guards and one query, no shared logic"
 classification = "gourmand_bug"
+
+[[exceptions]]
+check = "copy_paste_detection"
+path = "src/ashigaru/desk/forges/github.py"
+item = "GitHub.subject"
+justification = "matched against dispatch.assign_in, relock, hooks and render on statement shape alone (a read, guards, one write and a return); an issue fetch shares no logic with any of them"
+classification = "gourmand_bug"

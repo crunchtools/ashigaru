@@ -19,6 +19,10 @@ seat-state.json hooks and keep their rules.
                   idle. idle_prompt leaves alone a turn that started too
                   recently to be the one it reports on. Stop also sends the
                   seat's final message as waiting_on, trimmed to WAITING_LENGTH.
+                  A Stop answered 409 stale-session (the Desk ended this
+                  session, as when an assign took its item from it) prints
+                  the stale notice on stderr and exits 2, which tells the
+                  model before it stops; not again on the Stop that causes.
   next            SessionStart (startup, clear, resume), registered async with
                   asyncRewake: waits up to NEXT_SECONDS for the Desk to hand
                   this free seat its next queued item, then prints the brief
@@ -43,8 +47,9 @@ throttle.
 A hook must never stand between a person and their prompt: the whole run is
 bounded at HOOK_SECONDS, every failure (no config, no network, a refusal) goes
 to stderr, and the exit is 0. `next` alone runs in the background, bounded at
-NEXT_SECONDS, and exits 2 only to hand over a brief. Nothing goes to stdout, which UserPromptSubmit
-would add to the conversation.
+NEXT_SECONDS, and exits 2 only to hand over a brief; `stop` exits 2 only for a
+stale notice. Nothing goes to stdout, which UserPromptSubmit would add to the
+conversation.
 """
 
 import json
@@ -54,7 +59,7 @@ import signal
 import stat
 import sys
 import time
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from datetime import UTC, datetime, timedelta
 from http import HTTPStatus
 from pathlib import Path
@@ -265,16 +270,28 @@ def _waiting_on(event: dict[str, Any]) -> str | None:
     return text if len(text) <= WAITING_LENGTH else "…" + text[-(WAITING_LENGTH - 1) :]
 
 
-def _stop(event: dict[str, Any], desk: Desk, path: str) -> None:
+def _stop(event: dict[str, Any], desk: Desk, path: str) -> str | None:
+    """Turn idle. A Stop the Desk answers stale-session (it ended this session: its item was
+    reassigned, or its lease lapsed) returns the notice, which blocks the stop and tells the model,
+    once: not on the Stop that notice itself caused, and not when a newer session holds the seat."""
     kind = event.get("hook_event_name")
     if kind == "Notification":
         seat = desk.get(path)
         if seat["turn"] == "idle" or _started_within(seat, IDLE_NOTICE_AFTER):
-            return
+            return None
     body: dict[str, Any] = {"turn": "idle"}
     if kind in (None, "Stop") and (waiting := _waiting_on(event)) is not None:
         body["waiting_on"] = waiting
-    desk.request("PATCH", path, body=body)
+    try:
+        desk.request("PATCH", path, body=body)
+    except DeskError as error:
+        if error.status != HTTPStatus.CONFLICT or error.code != STALE or kind not in (None, "Stop"):
+            raise
+        stale = _Stale(error.detail, error.session)
+        if event.get("stop_hook_active") or stale.superseded(str(event.get("session_id") or "") or None):
+            raise
+        return _stale(error.detail)
+    return None
 
 
 class _Refused(Exception):
@@ -451,11 +468,18 @@ def _throttled(event: dict[str, Any], env: Mapping[str, str]) -> bool:
     return False
 
 
-HANDLERS = {"session-start": _start, "prompt-submit": _prompt, "stop": _stop, "statusline": _statusline}
+Handler = Callable[[dict[str, Any], Desk, str], str | None]
+HANDLERS: dict[str, Handler] = {
+    "session-start": _start,
+    "prompt-submit": _prompt,
+    "stop": _stop,
+    "statusline": _statusline,
+}
 
 
 def _report(name: str, stdin: TextIO, env: Mapping[str, str] | None, transport: Any) -> str | None:
-    """Run the hook; `next` returns the brief it was handed."""
+    """Run the hook; `next` returns the brief it was handed, `stop` the notice of a session the Desk
+    ended."""
     event = {} if stdin.isatty() else json.loads(stdin.read() or "{}")
     if not isinstance(event, dict):
         raise ValueError("the hook event is not a JSON object")
@@ -468,10 +492,9 @@ def _report(name: str, stdin: TextIO, env: Mapping[str, str] | None, transport: 
         if name == "next":
             return _next(desk, config.seat, session)
         seat = config.seat or desk.get("/v1/me")["name"]
-        HANDLERS[name](event, desk, f"/v1/seats/{quote(seat, safe='')}")
+        return HANDLERS[name](event, desk, f"/v1/seats/{quote(seat, safe='')}")
     finally:
         desk.close()
-    return None
 
 
 def run(
@@ -480,7 +503,7 @@ def run(
     env: Mapping[str, str] | None = None,
     transport: httpx.BaseTransport | None = None,
 ) -> int:
-    """Run one hook; 0, or WAKE once `next` has printed a brief on stderr."""
+    """Run one hook; 0, or WAKE once `next` has printed a brief, or `stop` a stale notice, on stderr."""
     bound = NEXT_SECONDS + NEXT_GRACE if name == "next" else HOOK_SECONDS
     previous = signal.signal(signal.SIGALRM, _alarm)
     signal.setitimer(signal.ITIMER_REAL, bound)

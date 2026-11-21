@@ -338,10 +338,15 @@ def with_outcome(conn: sqlite3.Connection, fields: dict[str, Any], actor: str) -
     "/v1/items", tags=["items"], status_code=status.HTTP_201_CREATED, responses=errors(401, 403, 409)
 )
 def create_item(conn: Conn, who: Admin, body: ItemCreate) -> Item:
+    """Admin: record an item. With `assign`, assign it in the same transaction (`ashigaru assign
+    --task`), so no seat can claim it in between; a refused assign (409) records nothing."""
     with store.transaction(conn):
         try:
             fields = with_outcome(conn, body.model_dump(exclude_unset=True), who.name)
+            target = fields.pop("assign", None)
             item_id = store.insert_item(conn, fields, who.name)
+            if target is not None:
+                dispatch.assign_in(conn, item_id, target, who.name)
         except store.Conflict as error:
             raise _conflict(error) from error
     return Item.model_validate(store.get_item(conn, item_id))
@@ -728,7 +733,9 @@ def outcomes(conn: Conn, who: Who) -> list[OutcomeRow]:
 def assign(conn: Conn, who: Admin, item_id: str, body: Assign, checked: Guarded = UNGUARDED) -> Item:
     """Admin: give an open item whose `after` items are all done to a seat, in the seat's current
     session. With no seat named, picks the seat in the lane that has been free longest, is idle and
-    up (its lease live) and is not held by Scott; 409 when none is, or the seat named is missing."""
+    up (its lease live) and is not held by Scott; 409 when none is, or the seat named is missing. An
+    item another seat holds is 409 `taken` unless If-Match names the version read; then that seat
+    loses it, and if it was under way, its session."""
     try:
         dispatch.assign(conn, item_id, body.model_dump(), who.name, checked.version)
     except KeyError as error:

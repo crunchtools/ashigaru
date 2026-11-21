@@ -223,11 +223,25 @@ class _Fields(BaseModel):
         return key
 
 
+class Assign(BaseModel):
+    """Name a seat, or let the Desk pick the longest-free unheld seat in the lane."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    seat: str | None = None
+    lane: Lane | None = Field(None, description="Defaults to the item's lane.")
+
+
 class ItemCreate(_Fields):
-    """Josui only. `id` is generated (a<N+1>) when omitted; `state` defaults to queued."""
+    """Josui only. `id` is generated (a<N+1>) when omitted; `state` defaults to queued. With `assign`,
+    the item is recorded and assigned in one transaction: it is never seen queued, and a refused
+    assign records nothing."""
 
     id: str | None = Field(None, pattern=r"^[a-z][a-z0-9-]{0,31}$")
     task: str
+    assign: Assign | None = Field(
+        None, description="Assign it as it is recorded, as POST /items/{id}/assign."
+    )
 
 
 class ItemPatch(_Fields):
@@ -701,15 +715,6 @@ class OutcomeRow(BaseModel):
     done: int
     blocked: int
     open: int
-
-
-class Assign(BaseModel):
-    """Name a seat, or let the Desk pick the longest-free unheld seat in the lane."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    seat: str | None = None
-    lane: Lane | None = Field(None, description="Defaults to the item's lane.")
 
 
 class NewItem(BaseModel):

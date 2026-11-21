@@ -6,6 +6,28 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+Upgrade note: deploy the Desk before the clients. `ashigaru assign --task` now
+sends `assign` with the create, which a 5.1.0 Desk answers 422, recording
+nothing. There is no fallback to the old two requests: it would bring the race
+back.
+
+### Fixed
+- `assign` no longer writes over a claim it did not read (#245, a843):
+  `POST /items/{id}/assign` is 409 `taken` for an item another seat holds unless
+  the caller names the version it read (`If-Match`, `--if-version`,
+  `if_version`), and no version takes Scott's held item (409 `held`) or one
+  being wrapped (409 `wrapping`); with the version the item moves and, if it
+  was `assigned` or `working`, the losing seat's session is ended, so its next
+  request is 409 stale-session.
+  `POST /items` takes `assign: {seat}|{lane}|{}` and records and assigns in one
+  transaction, so the item is never seen `queued` and a refused assign records
+  nothing; `ashigaru assign --task` and MCP `desk_assign` with `record` use it
+  (`desk_assign` refuses `if_version` with a record), and the "recorded aN, not
+  assigned" outcome is gone.
+- The `stop` hook, answered 409 stale-session, prints the stale notice on stderr
+  and exits 2, which tells the model before it stops, except on a Stop with
+  `stop_hook_active` or when the Desk names a newer session.
+
 ## [5.1.0] - 2026-11-20
 
 ### Changed

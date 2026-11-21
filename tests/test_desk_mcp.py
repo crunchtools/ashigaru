@@ -384,7 +384,7 @@ def test_desk_get_by_subject_key_and_ref(
     assert mcp_status(call(client, urls[SEAT], "desk_get", both)) == UNPROCESSABLE_ENTITY
 
 
-def test_desk_assign_with_a_task_creates_then_assigns(
+def test_desk_assign_with_a_task_records_and_assigns_in_one_transaction(
     client: TestClient, urls: dict[str, str], conn: sqlite3.Connection
 ) -> None:
     up_seat(conn, SEAT, lane="exedore-max")
@@ -394,6 +394,19 @@ def test_desk_assign_with_a_task_creates_then_assigns(
     assert (item["task"], item["done_when"], item["subject_key"]) == ("do it", "merged", "RT#9")
     assert item["seat"] == SEAT and store.get_item(conn, item["id"]) is not None
     assert mcp_status(call(client, urls[JOSUI], "desk_assign", {"seat": SEAT})) == UNPROCESSABLE_ENTITY
+    assert mcp_status(call(client, urls[JOSUI], "desk_assign", {"seat": SEAT})) == UNPROCESSABLE_ENTITY
+
+
+def test_desk_assign_with_a_task_refuses_a_version_and_records_nothing_when_refused(
+    client: TestClient, urls: dict[str, str], conn: sqlite3.Connection
+) -> None:
+    up_seat(conn, SEAT, lane="exedore-max")
+    record = {"task": "do it", "subject_key": "RT#9"}
+    versioned = {"record": record, "seat": SEAT, "if_version": 1}
+    assert mcp_status(call(client, urls[JOSUI], "desk_assign", versioned)) == UNPROCESSABLE_ENTITY
+    unknown = {"record": record, "seat": "Exedore 9 - Max"}
+    assert mcp_status(call(client, urls[JOSUI], "desk_assign", unknown)) == CONFLICT
+    assert conn.execute("SELECT count(*) FROM items").fetchone()[0] == 0
 
 
 def test_desk_wait_holds_a_commit_to_the_branch_it_names(
