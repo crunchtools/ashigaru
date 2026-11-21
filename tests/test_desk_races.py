@@ -943,9 +943,10 @@ def test_r13_taking_an_item_a_seat_is_working_on_ends_its_session(client: TestCl
     assert (stale.status_code, stale.json()["code"]) == (CONFLICT, "stale-session")
 
 
+@pytest.mark.parametrize("read", [True, False], ids=["versioned", "unversioned"])
 @pytest.mark.parametrize("held", ["manual", "wrapping"])
 def test_r13_no_version_takes_scotts_held_item_or_one_being_wrapped(
-    client: TestClient, keys: Keys, held: str
+    client: TestClient, keys: Keys, held: str, read: bool
 ) -> None:
     up(client, keys, MINE)
     up(client, keys, OTHER)
@@ -954,14 +955,11 @@ def test_r13_no_version_takes_scotts_held_item_or_one_being_wrapped(
     assign(client, keys, work, seat=MINE)
     if held == "wrapping":
         client.post(f"/v1/items/{work}/wrap", headers=keys[JOSUI], json={"stage": "wrapping"})
-    read = get(client, keys, work)
-    refused = client.post(
-        f"/v1/items/{work}/assign",
-        headers={**keys[JOSUI], "If-Match": str(read["version"])},
-        json={"seat": OTHER},
-    )
+    before = get(client, keys, work)
+    match = {"If-Match": str(before["version"])} if read else {}
+    refused = client.post(f"/v1/items/{work}/assign", headers={**keys[JOSUI], **match}, json={"seat": OTHER})
     assert (refused.status_code, refused.json()["code"]) == (CONFLICT, "held" if held == "manual" else held)
-    assert get(client, keys, work) == read
+    assert get(client, keys, work) == before
     kept = seat_row(client, keys, MINE)
     assert (kept["epoch"], kept["session_id"], kept["item"]) == (first, "s1", work)
     assert seat_row(client, keys, OTHER)["status"] == "free"
