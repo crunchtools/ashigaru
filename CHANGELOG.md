@@ -6,6 +6,10 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Security
+
+- `examples/ashigaru.yml` audits clean under zizmor (a860). Its `issue_comment`, `workflow_run` and `pull_request_target` triggers were dangerous-triggers highs in every enrolled repo once constitution 1.58.0 began running zizmor; each now carries an inline `zizmor: ignore[dangerous-triggers]` with the reason it is safe: the router checks out nothing, and the only jobs that check out code act on this repository's own `ashigaru/` branches. The events are unchanged. This repo's Gatehouse callers carry the same.
+
 ## [5.3.0] - 2026-11-21
 
 ### Added

@@ -45,12 +45,21 @@ name: Ashigaru
 on:
   issues:
     types: [opened, labeled, reopened]
-  issue_comment:
+  # The three triggers zizmor calls dangerous are safe here for one reason:
+  # nothing runs a fork's code. router.yml checks out nothing and acts only on
+  # this repository's ashigaru/ branches, which the Ashigaru app wrote; every
+  # other event ends in the one-step ignore job, which reads no secret.
+  # No job acts on a comment yet; it is part of the superset above.
+  issue_comment:  # zizmor: ignore[dangerous-triggers]
     types: [created]
-  workflow_run:
+  # fix.yml, for a Gatehouse run on an ashigaru/ branch in this repository.
+  # It checks out that branch, never a fork's.
+  workflow_run:  # zizmor: ignore[dangerous-triggers]
     workflows: [Gatehouse]
     types: [completed]
-  pull_request_target:
+  # release-tag.yml, for a merged ashigaru/release- branch in this repository.
+  # It checks out Ashigaru itself, not the pull request.
+  pull_request_target:  # zizmor: ignore[dangerous-triggers]
     types: [opened, synchronize, closed]
   workflow_dispatch:
 
