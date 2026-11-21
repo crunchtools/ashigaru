@@ -459,14 +459,15 @@ def test_serve_sweeps_only_with_a_token_and_an_org(monkeypatch: pytest.MonkeyPat
 
 
 BOT = "dependabot[bot]"
+RENOVATE = "renovate[bot]"
 
 
 def ago(delta: timedelta) -> str:
     return (datetime.now(UTC) - delta).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def bump(number: int, age: timedelta, **fields: Any) -> IntakeItem:
-    return subject(number, author=BOT, opened_at=ago(age), **fields)
+def bump(number: int, age: timedelta, author: str = BOT, **fields: Any) -> IntakeItem:
+    return subject(number, author=author, opened_at=ago(age), **fields)
 
 
 def test_a_young_dependabot_pr_is_recorded_and_an_old_one_is_queued(
@@ -496,6 +497,34 @@ def test_a_young_dependabot_pr_is_recorded_and_an_old_one_is_queued(
     )
     assert queued["done_when"] == "PR merged-ready green or closed"
     assert (queued["ref"], queued["repo"]) == ("https://github.com/crunchtools/x/pull/2", "crunchtools/x")
+
+
+def test_a_renovate_pr_is_recorded_on_first_sight_and_queued_at_a_day_old(
+    conn: sqlite3.Connection, db: Path
+) -> None:
+    young = Found(bump(1, timedelta(hours=1), author=RENOVATE), "NONE", "")
+    run = sweeping(db, FakeForge(hits=[young]))
+    assert (run["new"], run["outsiders"], store.list_items(conn)) == (0, [], [])
+    assert (subjects.get(conn, "crunchtools/x#1") or {})["state"] == "open"
+    day = sweep.BOT_AFTER + timedelta(minutes=5)
+    run = sweeping(db, FakeForge(subjects={1: bump(1, day, author=RENOVATE)}))
+    assert run["new"] == 1 and run["error"] is None
+    queued = store.list_items(conn)[0]
+    assert (queued["lane"], queued["mode"], queued["state"]) == ("exedore-max", "auto", "queued")
+    assert queued["task"] == "Land or close Renovate crunchtools/x#1: make CI green or close it with a reason"
+
+
+def test_old_sweeps_that_listed_renovate_are_not_needs_you(conn: sqlite3.Connection) -> None:
+    listed = [
+        {"subject_key": "crunchtools/x#1", "ref": "r1", "author": RENOVATE},
+        {"subject_key": "crunchtools/x#2", "ref": "r2", "author": "outsider"},
+    ]
+    conn.execute(
+        "INSERT INTO sweeps (trigger, started_at, finished_at, outsiders) VALUES (?, ?, ?, ?)",
+        ("timer", ago(HOURS_AGO), ago(HOURS_AGO), json.dumps(listed)),
+    )
+    conn.commit()
+    assert [found["subject_key"] for found in sweep.outsiders(conn)] == ["crunchtools/x#2"]
 
 
 def test_a_recorded_dependabot_pr_is_queued_once_old_enough_and_not_if_closed(
@@ -546,7 +575,7 @@ def test_a_queued_dependabot_item_settles_when_its_pr_closes(conn: sqlite3.Conne
     [
         {"kind": Kind.OUTCOME},
         {"opened_at": None},
-        {"opened_at": ago(sweep.DEPENDABOT_AFTER - timedelta(minutes=5))},
+        {"opened_at": ago(sweep.BOT_AFTER - timedelta(minutes=5))},
     ],
 )
 def test_a_dependabot_subject_that_is_not_a_pr_has_no_age_or_is_young_is_not_queued(

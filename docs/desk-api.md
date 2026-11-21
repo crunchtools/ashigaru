@@ -212,9 +212,9 @@ labels on anyone else's subject approve nothing. The record issues the sweep
 keeps (labeled `ashigaru-inbox`, `ashigaru-releases`, `ashigaru-red` or
 `ashigaru-observe`) are
 never queued, and one queued before is held on its next delivery. A subject
-authored by a bot that is not in that list (dependabot, say) is not queued
-when first seen, by webhook or sweep; it used to be held. The sweep queues a
-Dependabot PR that is still open a day on (see Sweep).
+authored by a bot that is not in that list (Dependabot or Renovate, say) is not
+queued when first seen, by webhook or sweep; it used to be held. The sweep queues
+a Dependabot or Renovate PR that is still open a day on (see Sweep).
 
 **Seat reconcile.** `serve` runs it at startup and every 5 minutes; it needs no
 forge. It ends the session of a seat whose lease ran out (see Seats). A seat turn active longer than `ASHIGARU_TURN_MAX` (3 hours) whose row
@@ -236,9 +236,11 @@ OWNER's, MEMBER's or trusted author's new subject (claimable when the forge says
 its author writes to that repo, else held: org membership is not write access;
 a PR links to an item only from such a writer) and listing anyone else's in
 the run's `outsiders` (shown under NEEDS YOU for a day) without storing it,
-except Dependabot's: its PRs are recorded as subjects, re-read every run while
+except Dependabot's and Renovate's (`dependabot[bot]`, `renovate[bot]`): their PRs are recorded as subjects, re-read every run while
 open, and one still open `ASHIGARU_DEPENDABOT_AFTER` seconds after it was
-opened is queued, auto on exedore-max, to land or close;
+opened is queued, auto on exedore-max, to land or close (Renovate waits a week
+after a release and automerges green minor and patch bumps, so one still open is
+stuck: red CI, a major, or a conflict);
 links a writer's PR as Linking says; then settles everything. The mark moves to the
 run's start once the search was read whole, or to the last hit's time when the
 forge's cap of 1000 cut it short, but never past a hit it could not judge (its
@@ -387,7 +389,7 @@ Settings are flags on `ashigaru-desk serve`, else these environment variables:
 | `ASHIGARU_FORGE_AUTHORS_GITHUB` | comma-separated accounts, such as the app's bot, whose own issues and PRs are trusted as a writer's, so a lane label on one makes it auto-claimable; each forge has its own `ASHIGARU_FORGE_AUTHORS_<FORGE>` | none; the image sets `ashigaru-crunchtools[bot]` |
 | `ASHIGARU_FORGE_ORG_GITHUB` | the GitHub org the sweep searches; the sweep runs only with this and the token | none: no sweep |
 | `ASHIGARU_SWEEP_EVERY` | seconds between sweeps | `600` |
-| `ASHIGARU_DEPENDABOT_AFTER` | seconds a Dependabot PR may stay open before the sweep queues it for an exedore-max seat to land or close | `86400` |
+| `ASHIGARU_DEPENDABOT_AFTER` | seconds a Dependabot or Renovate PR may stay open before the sweep queues it for an exedore-max seat to land or close | `86400` |
 | `ASHIGARU_TURN_MAX` | seconds a seat turn may stay active, with no write to its row for 10 minutes, before seat reconcile ends it | `10800` |
 | `ASHIGARU_SILENT_AFTER` | seconds a busy seat may go without a write before seat reconcile flags it silent | `900` |
 | `ASHIGARU_WEBHOOK_SECRET` | GitHub's secret under the bare name the first deploy used; added to `_GITHUB` | none |
