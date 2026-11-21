@@ -9,6 +9,14 @@ All notable changes to this project are documented here. The format follows
 ### Added
 
 - A Fedora 45 RPM. Each release now attaches `ashigaru-X.Y.Z-1.fc45.noarch.rpm` (Python 3.15) next to the fc43 and el10 ones, with the `ashigaru-desk` and `ashigaru+desk` subpackages and the source RPM. CI runs the test suite on Fedora 45's Python 3.15 against `uv.lock`; it passed with no code change.
+- The Desk treats Renovate's PRs (`renovate[bot]`) as it does Dependabot's
+  (a852): not queued on first sight, never listed under NEEDS YOU as an
+  outsider, and one still open `ASHIGARU_DEPENDABOT_AFTER` (a day) after it was
+  opened is queued `auto` on exedore-max: "Land or close Renovate <key>".
+  Renovate opens a PR a week after a release and automerges it when green, so
+  one still open is stuck. The backfill mark is now `sweep-bot-backfill`, so the
+  first run reads old runs' outsiders back once more and records any Renovate PR
+  they listed.
 
 ## [5.2.0] - 2026-11-21
 

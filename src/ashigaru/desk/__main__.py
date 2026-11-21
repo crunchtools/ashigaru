@@ -26,8 +26,8 @@ SETTINGS = {
     "ASHIGARU_BIND": "the address serve listens on; 127.0.0.1 by default, 0.0.0.0 in the image",
     "ASHIGARU_PORT": "the port serve listens on; 8080 by default",
     "ASHIGARU_SWEEP_EVERY": "seconds between sweeps of the forge (serve); 600 by default",
-    "ASHIGARU_DEPENDABOT_AFTER": "seconds a Dependabot PR may stay open before the sweep queues it for an "
-    "exedore-max seat to land or close (serve); 86400 by default",
+    "ASHIGARU_DEPENDABOT_AFTER": "seconds a Dependabot or Renovate PR may stay open before the sweep queues "
+    "it for an exedore-max seat to land or close (serve); 86400 by default",
     "ASHIGARU_TURN_MAX": "seconds a silent seat turn may stay active before seat reconcile ends it (serve); "
     "10800 by default",
     "ASHIGARU_SILENT_AFTER": "seconds a busy seat may go without a write before seat reconcile flags it "
@@ -111,13 +111,11 @@ def sweeper(db: str) -> sweep.Sweeper | None:
     if not (token and org):
         return None
     every = float(setting("ASHIGARU_SWEEP_EVERY", str(sweep.EVERY)))
-    after = float(setting("ASHIGARU_DEPENDABOT_AFTER", str(sweep.DEPENDABOT_AFTER.total_seconds())))
+    after = float(setting("ASHIGARU_DEPENDABOT_AFTER", str(sweep.BOT_AFTER.total_seconds())))
     authors = frozenset(forge_authors()[DEFAULT])
     return sweep.Sweeper(
         db,
-        sweep.Settings(
-            FORGES[DEFAULT], token, org, authors, every, dependabot_after=timedelta(seconds=after)
-        ),
+        sweep.Settings(FORGES[DEFAULT], token, org, authors, every, bot_after=timedelta(seconds=after)),
     )
 
 
