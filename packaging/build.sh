@@ -1,7 +1,7 @@
 #!/bin/bash
 # Build the ashigaru RPMs from this checkout inside a fresh container.
 #   packaging/build.sh <image> <outdir> [tag]
-# <image> is the build root (fedora:43, centos:stream10, ...). The version is
+# <image> is the build root (fedora:43, fedora:45, centos:stream10, ...). The version is
 # VERSION's; given a release tag, the build refuses unless the tag names it.
 set -euo pipefail
 
