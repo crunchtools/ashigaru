@@ -42,6 +42,34 @@ jobs:
           SDLC_IMAGE: ${{ vars.SDLC_IMAGE }}
         run: .sdlc/bin/sdlc ci
 
+  # Python 3.15, on the Fedora 45 image the fc45 RPM is built for: sdlc ci tests
+  # on the image's own Python, so this is the one run on the newest. The
+  # interpreter is the distro's, never a download; the dependencies are uv.lock's.
+  py315:
+    name: pytest (Python 3.15, Fedora 45)
+    runs-on: ubuntu-latest
+    container: registry.fedoraproject.org/fedora:45
+    timeout-minutes: 20
+    env:
+      UV_PYTHON_DOWNLOADS: never
+    steps:
+      - name: Install Python, git and uv
+        run: |
+          dnf -y -q install python3 python3-pip git
+          python3 -m pip install -q --root-user-action=ignore uv
+
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Sync the locked dependencies
+        run: uv sync --locked --python /usr/bin/python3
+
+      - name: pytest
+        run: |
+          uv run --no-sync python -V
+          uv run --no-sync pytest -q
+
   gourmand:
     name: Code Quality (Gourmand)
     uses: crunchtools/gatehouse/.github/workflows/gourmand.yml@v0

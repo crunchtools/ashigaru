@@ -55,6 +55,8 @@ jobs:
         include:
           - dist: fc43
             image: registry.fedoraproject.org/fedora:43
+          - dist: fc45
+            image: registry.fedoraproject.org/fedora:45
           - dist: el10
             image: quay.io/centos/centos:stream10
     env:
