@@ -514,7 +514,9 @@ def test_a_renovate_pr_is_recorded_on_first_sight_and_queued_at_a_day_old(
     assert queued["task"] == "Land or close Renovate crunchtools/x#1: make CI green or close it with a reason"
 
 
-def test_old_sweeps_that_listed_renovate_are_not_needs_you(conn: sqlite3.Connection) -> None:
+def test_old_sweeps_that_listed_renovate_are_backfilled_past_the_old_mark(
+    conn: sqlite3.Connection, db: Path
+) -> None:
     listed = [
         {"subject_key": "crunchtools/x#1", "ref": "r1", "author": RENOVATE},
         {"subject_key": "crunchtools/x#2", "ref": "r2", "author": "outsider"},
@@ -524,7 +526,15 @@ def test_old_sweeps_that_listed_renovate_are_not_needs_you(conn: sqlite3.Connect
         ("timer", ago(HOURS_AGO), ago(HOURS_AGO), json.dumps(listed)),
     )
     conn.commit()
+    store.set_mark(conn, "sweep-dependabot-backfill", ago(HOURS_AGO), "test")
+    conn.commit()
     assert [found["subject_key"] for found in sweep.outsiders(conn)] == ["crunchtools/x#2"]
+    sweeping(db, FakeForge(refuse={1: OSError("down")}))
+    assert store.get_mark(conn, sweep.BACKFILLED) is None
+    run = sweeping(db, FakeForge(subjects={1: bump(1, timedelta(days=2), author=RENOVATE)}))
+    assert run["new"] == 1 and run["error"] is None
+    assert store.get_mark(conn, sweep.BACKFILLED) is not None
+    assert [row["subject_key"] for row in store.list_items(conn)] == ["crunchtools/x#1"]
 
 
 def test_a_recorded_dependabot_pr_is_queued_once_old_enough_and_not_if_closed(
