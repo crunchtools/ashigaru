@@ -282,7 +282,11 @@ def assign_in(
             "taken",
         )
     seat = target.get("seat") or _pick(conn, item_id, target.get("lane") or item["lane"])
-    _take(conn, item, _free(store.get_seat(conn, seat), seat), actor)
+    row = _free(store.get_seat(conn, seat), seat)
+    if item["lane"] is None and target.get("lane") is not None:
+        store.update_item(conn, item_id, {"lane": target["lane"]}, actor)
+        item["lane"] = target["lane"]
+    _take(conn, item, row, actor)
     if holder is not None and item["state"] in (State.ASSIGNED, State.WORKING):
         end_session(conn, holder, actor, f"{item_id} was reassigned to {seat}")
     return seat

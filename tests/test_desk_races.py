@@ -924,6 +924,35 @@ def test_r13_taking_an_item_a_seat_holds_in_review_or_blocked_leaves_its_session
     assert client.patch(f"/v1/seats/{MINE}", headers=mine, json={"turn": "idle"}).status_code == OK
 
 
+def test_r13_taking_an_item_a_seat_is_working_on_ends_its_session(client: TestClient, keys: Keys) -> None:
+    up(client, keys, MINE)
+    up(client, keys, OTHER)
+    first = session(client, keys, MINE, "s1", "startup").json()["epoch"]
+    work = item(client, keys, lane="exedore-max")
+    assign(client, keys, work, seat=MINE)
+    mine = headers(keys, MINE, first, "s1")
+    assert client.patch(f"/v1/items/{work}", headers=mine, json={"state": "working"}).status_code == OK
+    read = get(client, keys, work)["version"]
+    moved = client.post(
+        f"/v1/items/{work}/assign", headers={**keys[JOSUI], "If-Match": str(read)}, json={"seat": OTHER}
+    )
+    assert moved.status_code == OK and moved.json()["seat"] == OTHER
+    lost = seat_row(client, keys, MINE)
+    assert (lost["epoch"], lost["session_id"], lost["lease_until"]) == (first + 1, None, None)
+    stale = client.patch(f"/v1/seats/{MINE}", headers=mine, json={"turn": "idle"})
+    assert (stale.status_code, stale.json()["code"]) == (CONFLICT, "stale-session")
+
+
+def test_r13_an_assign_naming_a_lane_gives_it_to_an_item_with_none(client: TestClient, keys: Keys) -> None:
+    up(client, keys, MINE)
+    work = item(client, keys)
+    taken = client.post(
+        f"/v1/items/{work}/assign", headers=keys[JOSUI], json={"seat": MINE, "lane": "vertex"}
+    )
+    assert taken.status_code == OK
+    assert (taken.json()["seat"], taken.json()["lane"]) == (MINE, "vertex")
+
+
 def test_r13_a_create_with_an_assign_records_and_assigns_in_one_request(
     client: TestClient, keys: Keys
 ) -> None:
