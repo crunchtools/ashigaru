@@ -300,14 +300,16 @@ item's learnings memorized. A Learned of `none` records nothing.
 2. **Scale the effort.** One seat for one well-bounded task. Split only along
    lines that cannot collide: separate repositories, or separate files with
    no shared edits. Three to five seats at once is the useful ceiling.
-3. **Record and assign** before briefing, so the brief carries the Desk's id:
+3. **Record and assign** in one step before briefing, so the brief carries the Desk's id (the item is never seen queued, and a refused assign records nothing):
    `ashigaru assign --task "<one line>" --done-when "<one line>" --ref <url> --subject-key <key> --repo <owner/repo> --lane exedore-max --outcome RT#1652`,
    or `ashigaru assign a7 --lane exedore-max` for an item already recorded
    (`--outcome`/`--outcome-text` set its outcome first; see `outcomes`).
    The Desk picks the lane's seat that has been free longest and isn't held by
    Scott, and never a busy one; `--seat` names a seat instead. If the assign is
-   refused, the CLI prints the item, which stays `queued`: start the loop, tell
-   Scott, and stop.
+   refused, the CLI says why and, for `--task`, nothing was recorded: tell Scott
+   and stop. An item another seat holds is 409 `taken`; reassign it only with
+   `--if-version N` (the version you read), which ends that seat's session if
+   it was under way, so its next request is 409 stale-session.
 4. **Write the brief.** The seat knows only what it says. Send it with
    **SendMessage** to the seat's exact name, with the Desk's id:
 

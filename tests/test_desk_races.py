@@ -4,7 +4,15 @@ claims acknowledged by the seat's next turn, and writes that can name the versio
 
 import sqlite3
 from datetime import UTC, datetime, timedelta
-from http.client import CONFLICT, NO_CONTENT, OK, PRECONDITION_FAILED, UNPROCESSABLE_ENTITY
+from http.client import (
+    CONFLICT,
+    CREATED,
+    NO_CONTENT,
+    NOT_FOUND,
+    OK,
+    PRECONDITION_FAILED,
+    UNPROCESSABLE_ENTITY,
+)
 from pathlib import Path
 from typing import Any
 
@@ -842,3 +850,114 @@ def test_a_seats_usage_report_from_one_session_for_another_is_refused(
     answer = client.post(f"/v1/seats/{MINE}/usage", headers=only(keys, MINE, "s0"), json=report)
     assert refused(answer) and answer.json()["session"] == "s1"
     assert seat_row(client, keys, MINE)["lease_until"] == soon
+
+
+# R13: Prime's `assign --task` recorded an item, then assigned it in a second request; a seat's next hook
+# claimed it in between, and the assign wrote over the claim.
+
+
+def test_r13_an_assign_without_the_version_never_overwrites_a_seats_claim(
+    client: TestClient, keys: Keys
+) -> None:
+    up(client, keys, MINE)
+    up(client, keys, OTHER)
+    first = session(client, keys, MINE, "s1", "startup").json()["epoch"]
+    switch_on(client, keys)
+    work = item(client, keys, lane="exedore-max")
+    mine = headers(keys, MINE, first, "s1")
+    assert client.post(f"/v1/seats/{MINE}/next?wait=0", headers=mine).status_code == OK
+    assert get(client, keys, work)["seat"] == MINE
+    late = assign(client, keys, work, seat=OTHER)
+    assert late.status_code == CONFLICT and late.json()["code"] == "taken"
+    assert get(client, keys, work)["seat"] == MINE
+    assert (seat_row(client, keys, MINE)["status"], seat_row(client, keys, MINE)["item"]) == ("busy", work)
+    assert seat_row(client, keys, OTHER)["status"] == "free"
+    read = get(client, keys, work)["version"]
+    moved = client.post(
+        f"/v1/items/{work}/assign", headers={**keys[JOSUI], "If-Match": str(read)}, json={"seat": OTHER}
+    )
+    assert moved.status_code == OK and moved.json()["seat"] == OTHER
+    assert (seat_row(client, keys, OTHER)["status"], seat_row(client, keys, OTHER)["item"]) == ("busy", work)
+    lost = seat_row(client, keys, MINE)
+    assert lost["epoch"] > first and lost["session_id"] is None and lost["lease_until"] is None
+    assert lost["item"] is None and lost["missing"], "no lease: never picked until a new session starts"
+    stale = client.patch(f"/v1/seats/{MINE}", headers=mine, json={"turn": "idle"})
+    assert stale.status_code == CONFLICT and stale.json()["code"] == "stale-session"
+    assert refused(client.post(f"/v1/seats/{MINE}/next?wait=0", headers=mine))
+    assert get(client, keys, work)["seat"] == OTHER
+
+
+def test_r13_a_stale_version_refuses_the_move_and_leaves_the_claim(client: TestClient, keys: Keys) -> None:
+    up(client, keys, MINE)
+    up(client, keys, OTHER)
+    work = item(client, keys, lane="exedore-max")
+    assign(client, keys, work, seat=MINE)
+    read = get(client, keys, work)["version"]
+    client.post(f"/v1/items/{work}/report", headers=keys[MINE], json={"verb": "WORKING", "text": "x"})
+    late = client.post(
+        f"/v1/items/{work}/assign", headers={**keys[JOSUI], "If-Match": str(read)}, json={"seat": OTHER}
+    )
+    assert late.status_code == PRECONDITION_FAILED and late.json()["code"] == "version"
+    assert (get(client, keys, work)["seat"], seat_row(client, keys, MINE)["status"]) == (MINE, "busy")
+
+
+@pytest.mark.parametrize("state", ["review", "blocked"])
+def test_r13_taking_an_item_a_seat_holds_in_review_or_blocked_leaves_its_session(
+    client: TestClient, keys: Keys, state: str
+) -> None:
+    up(client, keys, MINE)
+    up(client, keys, OTHER)
+    first = session(client, keys, MINE, "s1", "startup").json()["epoch"]
+    work = item(client, keys, lane="exedore-max")
+    assign(client, keys, work, seat=MINE)
+    patch = {"state": state} | ({"blocked_reason": "no token"} if state == "blocked" else {})
+    assert client.patch(f"/v1/items/{work}", headers=keys[JOSUI], json=patch).status_code == OK
+    read = get(client, keys, work)["version"]
+    moved = client.post(
+        f"/v1/items/{work}/assign", headers={**keys[JOSUI], "If-Match": str(read)}, json={"seat": OTHER}
+    )
+    assert moved.status_code == OK and moved.json()["seat"] == OTHER
+    kept = seat_row(client, keys, MINE)
+    assert (kept["epoch"], kept["session_id"], kept["status"]) == (first, "s1", "free")
+    assert kept["lease_until"] is not None
+    mine = headers(keys, MINE, first, "s1")
+    assert client.patch(f"/v1/seats/{MINE}", headers=mine, json={"turn": "idle"}).status_code == OK
+
+
+def test_r13_a_create_with_an_assign_records_and_assigns_in_one_request(
+    client: TestClient, keys: Keys
+) -> None:
+    up(client, keys, MINE)
+    switch_on(client, keys)
+    made = client.post(
+        "/v1/items", headers=keys[JOSUI], json={"task": "t", "lane": "exedore-max", "assign": {"seat": MINE}}
+    )
+    assert made.status_code == CREATED
+    work = made.json()["id"]
+    assert (made.json()["state"], made.json()["seat"]) == ("assigned", MINE)
+    events = client.get(f"/v1/items/{work}/events", headers=keys[CI]).json()
+    # The create's own event says queued, as every item is born; the assign follows in its transaction.
+    assert [event["patch"].get("state") for event in events] == ["queued", "assigned"]
+    assert events[1]["patch"]["seat"] == MINE
+    assert (seat_row(client, keys, MINE)["status"], seat_row(client, keys, MINE)["item"]) == ("busy", work)
+    by_lane = client.post(
+        "/v1/items", headers=keys[JOSUI], json={"task": "t", "assign": {"lane": "exedore-max"}}
+    )
+    assert by_lane.status_code == CONFLICT, "the only seat in the lane is busy"
+
+
+def test_r13_a_create_whose_assign_is_refused_records_nothing(client: TestClient, keys: Keys) -> None:
+    up(client, keys, MINE)
+    held = item(client, keys, lane="exedore-max")
+    assign(client, keys, held, seat=MINE)
+    for target in ({"seat": MINE}, {"seat": "Exedore 9 - Max"}, {"lane": "exedore-max"}):
+        refused = client.post(
+            "/v1/items",
+            headers=keys[JOSUI],
+            json={"task": "t", "lane": "exedore-max", "subject_key": "RT#13", "assign": target},
+        )
+        assert refused.status_code == CONFLICT, target
+    assert client.get("/v1/items", headers=keys[CI], params={"subject_key": "RT#13"}).json() == []
+    gone = f"a{int(held.removeprefix('a')) + 1}"
+    assert client.get(f"/v1/items/{gone}", headers=keys[CI]).status_code == NOT_FOUND
+    assert item(client, keys) == gone, "a refused create consumes no id"

@@ -232,18 +232,21 @@ def desk_assign(
 ) -> Item:
     """`ashigaru assign`, admin only: give the item to `seat`, or to the seat in `lane` (default: the
     item's) that has been free longest and is not held by Scott. With `record` (`assign --task`) the
-    item is recorded first, in `lane`."""
+    item is recorded and assigned in one transaction, in `lane`: a refused assign records nothing."""
     if seat and lane:
         raise ToolError("422: name a seat or a lane, not both")
     with desk() as (conn, who):
         admin = api.admin(who)
+        target = Assign(seat=seat, lane=lane)
         if record is not None:
+            if if_version is not None:
+                raise ToolError("422: if_version is for an existing item, not a new one")
             fields = record.model_dump(exclude_none=True) | {"id": item_id, "lane": lane}
             new = {key: value for key, value in fields.items() if value is not None}
-            item_id = api.create_item(conn, admin, ItemCreate.model_validate(new)).id
+            return api.create_item(conn, admin, ItemCreate.model_validate(new | {"assign": target}))
         if item_id is None:
             raise ToolError("422: name an item_id, or give a record to create one")
-        return api.assign(conn, admin, item_id, Assign(seat=seat, lane=lane), api.Guard(version=if_version))
+        return api.assign(conn, admin, item_id, target, api.Guard(version=if_version))
 
 
 @mcp.tool

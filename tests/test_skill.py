@@ -125,6 +125,7 @@ MCP_ONLY = {
     "desk_create": {
         "seat": "recorded without assign's checks; assign gives an item to a seat",
         "wrap": "the wrap stage is wrap's, never set at creation",
+        "assign": "the CLI's `assign --task` records and assigns in one request; create only records",
         **dict.fromkeys(
             ("result", "next", "learned", "blocked_reason", "check_after", "memorized", "verified_by"), SEAT
         ),

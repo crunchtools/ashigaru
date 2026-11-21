@@ -490,7 +490,11 @@ def test_reassigning_frees_the_previous_holder(
     seat(conn, "Exedore 3 - Max")
     work = item(client, keys)
     client.post(f"/v1/items/{work}/assign", headers=keys[JOSUI], json={"seat": MINE})
-    moved = client.post(f"/v1/items/{work}/assign", headers=keys[JOSUI], json={"seat": OTHER})
+    taken = client.post(f"/v1/items/{work}/assign", headers=keys[JOSUI], json={"seat": OTHER})
+    assert taken.status_code == CONFLICT and taken.json()["code"] == "taken"
+    read = client.get(f"/v1/items/{work}", headers=keys[CI]).json()["version"]
+    guard = {**keys[JOSUI], "If-Match": str(read)}
+    moved = client.post(f"/v1/items/{work}/assign", headers=guard, json={"seat": OTHER})
     assert moved.status_code == OK and moved.json()["seat"] == OTHER
     seats = {row["name"]: row for row in client.get("/v1/seats", headers=keys[CI]).json()}
     assert (seats[MINE]["status"], seats[MINE]["item"]) == ("free", None)

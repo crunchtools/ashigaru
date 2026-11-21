@@ -88,3 +88,10 @@ path = "src/ashigaru/desk/dispatch.py"
 item = "_waiting_seat"
 justification = "matched against store.write_seat (and before that release.survey) on statement shape alone: a seat lookup, guards and one query, no shared logic"
 classification = "gourmand_bug"
+
+[[exceptions]]
+check = "copy_paste_detection"
+path = "scripts/sweep.py"
+item = "keep_inbox"
+justification = "matched only against dispatch.assign_in, an item assign with no shared logic; the similarity is a read, guards and one write"
+classification = "gourmand_bug"

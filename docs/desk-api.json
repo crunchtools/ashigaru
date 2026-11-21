@@ -1453,7 +1453,7 @@
       },
       "ItemCreate": {
         "additionalProperties": false,
-        "description": "Josui only. `id` is generated (a<N+1>) when omitted; `state` defaults to queued.",
+        "description": "Josui only. `id` is generated (a<N+1>) when omitted; `state` defaults to queued. With `assign`,\nthe item is recorded and assigned in one transaction: it is never seen queued, and a refused\nassign records nothing.",
         "properties": {
           "after": {
             "anyOf": [
@@ -1468,6 +1468,17 @@
               }
             ],
             "title": "After"
+          },
+          "assign": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Assign"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Assign it as it is recorded, as POST /items/{id}/assign."
           },
           "blocked_reason": {
             "anyOf": [
@@ -5548,6 +5559,7 @@
         ]
       },
       "post": {
+        "description": "Admin: record an item. With `assign`, assign it in the same transaction (`ashigaru assign\n--task`), so no seat can claim it in between; a refused assign (409) records nothing.",
         "operationId": "create_item_v1_items_post",
         "requestBody": {
           "content": {
@@ -5851,7 +5863,7 @@
     },
     "/v1/items/{item_id}/assign": {
       "post": {
-        "description": "Admin: give an open item whose `after` items are all done to a seat, in the seat's current\nsession. With no seat named, picks the seat in the lane that has been free longest, is idle and\nup (its lease live) and is not held by Scott; 409 when none is, or the seat named is missing.",
+        "description": "Admin: give an open item whose `after` items are all done to a seat, in the seat's current\nsession. With no seat named, picks the seat in the lane that has been free longest, is idle and\nup (its lease live) and is not held by Scott; 409 when none is, or the seat named is missing. An\nitem another seat holds is 409 `taken` unless If-Match names the version read; then that seat\nloses it, and if it was under way, its session.",
         "operationId": "assign_v1_items__item_id__assign_post",
         "parameters": [
           {

@@ -16,8 +16,8 @@ class CommandError(Exception):
 
 
 class Refused(CommandError):
-    """The Desk refused, and `item` is the one a caller wants anyway: the one holding a subject_key,
-    or one recorded before its assign was refused. The CLI prints it, then exits 1."""
+    """The Desk refused, and `item` is the one a caller wants anyway: the one holding a subject_key.
+    The CLI prints it, then exits 1."""
 
     def __init__(self, message: str, item: dict[str, Any]) -> None:
         super().__init__(message)
@@ -247,27 +247,24 @@ def assign(
 ) -> dict[str, Any]:
     """Assign an item to a seat: `seat` names one, else the Desk picks the seat in `lane` (default:
     the item's) free longest and not held by Scott. With a `task` in `record` (and optionally
-    done_when, ref, repo, after, mode, subject_key), the item is recorded first, in `lane`; if the
-    subject_key is taken, or the assign is refused, Refused carries the item so its id is not lost.
-    An `outcome` (or `outcome_text`) given without a task, even empty, is set on the item before
-    it is assigned. `if_version` guards the assign itself, so it needs an existing item."""
+    done_when, ref, repo, after, mode, subject_key), the item is recorded and assigned in one request,
+    in `lane`, so no seat claims it in between; a refused assign records nothing, and a taken
+    subject_key raises Refused carrying the item that holds it. An `outcome` (or `outcome_text`)
+    given without a task, even empty, is set on the item before it is assigned. An item another seat
+    holds is refused (409 taken) unless `if_version` names the version read, which also guards the
+    assign itself, so it needs an existing item."""
     if seat and lane:
         raise CommandError("name a seat or a lane, not both")
     if if_version is not None and record.get("task"):
         raise CommandError("--if-version is for an existing item, not a new one")
-    if record.get("task"):
-        item = create(desk, id=item, lane=lane, **record)["id"]
-    elif not item:
-        raise CommandError("name an item, or give --task to record a new one")
-    elif serves := {key: record[key] for key in ("outcome", "outcome_text") if record.get(key) is not None}:
-        desk.request("PATCH", _item(item), body=serves)
     body = {"seat": seat} if seat else {"lane": lane} if lane else {}
-    try:
-        result: dict[str, Any] = desk.post(f"{_item(item)}/assign", body, _match(if_version))
-    except DeskError as exc:
-        if not record.get("task") or exc.status >= HTTPStatus.INTERNAL_SERVER_ERROR:
-            raise
-        raise Refused(f"recorded {item}, not assigned: {exc.detail}", desk.get(_item(item))) from exc
+    if record.get("task"):
+        return create(desk, id=item, lane=lane, assign=body, **record)
+    if not item:
+        raise CommandError("name an item, or give --task to record a new one")
+    if serves := {key: record[key] for key in ("outcome", "outcome_text") if record.get(key) is not None}:
+        desk.request("PATCH", _item(item), body=serves)
+    result: dict[str, Any] = desk.post(f"{_item(item)}/assign", body, _match(if_version))
     return result
 
 
