@@ -56,11 +56,16 @@ jobs:
       - name: Install Python, git and uv
         run: |
           dnf -y -q install python3 python3-pip git
-          python3 -m pip install -q --root-user-action=ignore uv
+          python3 -m pip install -q --root-user-action=ignore uv==0.13.7
 
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
+
+      # The checkout belongs to the runner's user, not the container's root, and
+      # git refuses a repository it does not own (tests/test_rpm.py runs git).
+      - name: Trust the checkout
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
       - name: Sync the locked dependencies
         run: uv sync --locked --python /usr/bin/python3
