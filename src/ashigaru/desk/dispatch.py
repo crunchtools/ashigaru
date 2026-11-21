@@ -149,9 +149,11 @@ SET_LIMITS = """
 
 
 def _ready(conn: sqlite3.Connection, item: dict[str, Any]) -> None:
-    """Raise Conflict unless the item is open and everything it waits on is done."""
+    """Raise Conflict unless the item is open, not being wrapped, and everything it waits on is done."""
     if item["state"] in CLOSED or item["wrap"] == Wrap.CLEARED:
         raise store.Conflict(f"{item['id']} is closed")
+    if item["wrap"] == Wrap.WRAPPING:
+        raise store.Conflict(f"{item['id']} is being wrapped on {item['seat'] or 'no seat'}", "wrapping")
     waiting = [row[0] for row in conn.execute(WAITING_ON, {"after": json.dumps(item["after"])})]
     if waiting:
         raise store.Conflict(f"{item['id']} waits on {', '.join(waiting)}")
@@ -271,10 +273,13 @@ def assign_in(
     """`assign`, the caller holding the transaction, so a create can assign in the same one. An item
     another seat holds is refused (taken) unless the caller names the version it read: then the other
     seat loses it, and if its work was under way, its session (`end_session`), so the next thing it
-    asks of the Desk tells it the item is no longer its."""
+    asks of the Desk tells it the item is no longer its. No version takes Scott's held item (held)
+    or one being wrapped (wrapping): the checks come before `_take`, which moves the item."""
     item = _read(conn, item_id, version)
     _ready(conn, item)
     holder = item["seat"]
+    if holder is not None and item["mode"] == Mode.MANUAL:
+        raise store.Conflict(f"{item_id} is Scott's, held on seat {holder}; no version takes it", "held")
     if holder is not None and version is None:
         # An unread take is how an assign wrote over a seat's claim (#245).
         raise store.Conflict(

@@ -91,7 +91,7 @@ classification = "gourmand_bug"
 
 [[exceptions]]
 check = "copy_paste_detection"
-path = "scripts/sweep.py"
-item = "keep_inbox"
-justification = "matched only against dispatch.assign_in, an item assign with no shared logic; the similarity is a read, guards and one write"
+path = "src/ashigaru/desk/forges/github.py"
+item = "GitHub.subject"
+justification = "matched against dispatch.assign_in, relock, hooks and render on statement shape alone (a read, guards, one write and a return); an issue fetch shares no logic with any of them"
 classification = "gourmand_bug"

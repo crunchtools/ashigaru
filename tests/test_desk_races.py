@@ -943,6 +943,30 @@ def test_r13_taking_an_item_a_seat_is_working_on_ends_its_session(client: TestCl
     assert (stale.status_code, stale.json()["code"]) == (CONFLICT, "stale-session")
 
 
+@pytest.mark.parametrize("held", ["manual", "wrapping"])
+def test_r13_no_version_takes_scotts_held_item_or_one_being_wrapped(
+    client: TestClient, keys: Keys, held: str
+) -> None:
+    up(client, keys, MINE)
+    up(client, keys, OTHER)
+    first = session(client, keys, MINE, "s1", "startup").json()["epoch"]
+    work = item(client, keys, lane="exedore-max", mode="manual" if held == "manual" else "auto")
+    assign(client, keys, work, seat=MINE)
+    if held == "wrapping":
+        client.post(f"/v1/items/{work}/wrap", headers=keys[JOSUI], json={"stage": "wrapping"})
+    read = get(client, keys, work)
+    refused = client.post(
+        f"/v1/items/{work}/assign",
+        headers={**keys[JOSUI], "If-Match": str(read["version"])},
+        json={"seat": OTHER},
+    )
+    assert (refused.status_code, refused.json()["code"]) == (CONFLICT, "held" if held == "manual" else held)
+    assert get(client, keys, work) == read
+    kept = seat_row(client, keys, MINE)
+    assert (kept["epoch"], kept["session_id"], kept["item"]) == (first, "s1", work)
+    assert seat_row(client, keys, OTHER)["status"] == "free"
+
+
 def test_r13_an_assign_naming_a_lane_gives_it_to_an_item_with_none(client: TestClient, keys: Keys) -> None:
     up(client, keys, MINE)
     work = item(client, keys)
