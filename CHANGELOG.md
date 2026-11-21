@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [5.2.0] - 2026-11-21
+
 Upgrade note: deploy the Desk before the clients. `ashigaru assign --task` now
 sends `assign` with the create, which a 5.1.0 Desk answers 422, recording
 nothing. There is no fallback to the old two requests: it would bring the race
