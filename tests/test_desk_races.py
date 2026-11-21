@@ -965,6 +965,18 @@ def test_r13_no_version_takes_scotts_held_item_or_one_being_wrapped(
     assert seat_row(client, keys, OTHER)["status"] == "free"
 
 
+def test_r13_next_passes_over_a_queued_item_being_wrapped(client: TestClient, keys: Keys) -> None:
+    up(client, keys, MINE)
+    first = session(client, keys, MINE, "s1", "startup").json()["epoch"]
+    switch_on(client, keys)
+    wrapping = item(client, keys, lane="exedore-max")
+    client.post(f"/v1/items/{wrapping}/wrap", headers=keys[JOSUI], json={"stage": "wrapping"})
+    good = item(client, keys, lane="exedore-max")
+    handed = client.post(f"/v1/seats/{MINE}/next?wait=0", headers=headers(keys, MINE, first, "s1"))
+    assert handed.status_code == OK and handed.json()["item"]["id"] == good
+    assert (get(client, keys, wrapping)["state"], get(client, keys, wrapping)["seat"]) == ("queued", None)
+
+
 def test_r13_an_assign_naming_a_lane_gives_it_to_an_item_with_none(client: TestClient, keys: Keys) -> None:
     up(client, keys, MINE)
     work = item(client, keys)

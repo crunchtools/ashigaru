@@ -95,6 +95,7 @@ AUTODISPATCH = "autodispatch"
 NEXT_READY = f"""
     SELECT * FROM items
     WHERE {store.OPEN} AND state = 'queued' AND seat IS NULL AND mode = 'auto' AND lane = :lane
+      AND wrap IS NULL
       AND NOT EXISTS (
           SELECT 1 FROM json_each(items.after)
           WHERE value NOT IN (SELECT id FROM items WHERE state = 'done')
@@ -102,7 +103,8 @@ NEXT_READY = f"""
     ORDER BY created_at, id
     LIMIT 1
 """
-"""What a free seat in the lane claims: the oldest queued auto item whose `after` items are done."""
+"""What a free seat in the lane claims: the oldest queued auto item, not being wrapped, whose `after`
+items are done. A wrapping item `_ready` refuses must not head the lane, or no item behind it is claimed."""
 CATCH_UP_DEFAULT = timedelta(days=1)
 
 NEEDS_YOU = f"""
