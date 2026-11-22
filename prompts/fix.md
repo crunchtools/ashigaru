@@ -20,7 +20,7 @@ For each entry in `failed_checks`, read the log, find the cause and fix it in th
 ## Rules
 
 - Stay inside the scope of this pull request. Fix what is listed; do not start new work.
-- Do not edit anything under `.github/`.
+- Do not edit anything under `.github/` or `.sdlc/`, `sdlc.toml`, the `[tool.sdlc]` tables in `pyproject.toml`, or the Gatehouse and Gourmand waivers (`gatehouse-findings.toml`, `.gatehouse-ignore`, `gourmand-exceptions.toml`, `.gourmand-exceptions.d/`). A patch that does is refused whole.
 - Prefer fixing over arguing. Use `not_a_bug` only when you are sure.
 
 ## Result

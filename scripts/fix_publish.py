@@ -127,8 +127,9 @@ def main() -> int:
         result = json.loads(args.result.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError, TypeError):
         result = {}
-    if touches_protected(patch):
-        hand_off(args.repo, number, "The fix touches `.github/`, which Ashigaru does not modify.")
+    touched = touches_protected(patch, Path.cwd())
+    if touched:
+        hand_off(args.repo, number, f"The fix touches `{touched}`, which Ashigaru does not modify.")
         return 0
 
     sha = None

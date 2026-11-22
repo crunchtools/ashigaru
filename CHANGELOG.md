@@ -12,6 +12,8 @@ All notable changes to this project are documented here. The format follows
 
 ### Security
 
+- The code and fix publish jobs refuse a patch that touches the gates' own configuration, not only `.github/` (a1072): `.sdlc/`, `sdlc.toml`, the `[tool.sdlc]` tables in `pyproject.toml`, `gatehouse-findings.toml`, `.gatehouse-ignore`, `gourmand-exceptions.toml` and `.gourmand-exceptions.d/`. An agent could otherwise clear a red gate by waiving the finding or skipping the check. A pyproject hunk is placed in its table by reading the checkout's own file, so a change elsewhere in pyproject still publishes. The refusal names the path it hit.
+
 - `examples/ashigaru.yml` audits clean under zizmor (a860). Its `issue_comment`, `workflow_run` and `pull_request_target` triggers were dangerous-triggers highs in every enrolled repo once constitution 1.58.0 began running zizmor; each now carries an inline `zizmor: ignore[dangerous-triggers]` with the reason it is safe: the router checks out nothing, and the only jobs that check out code act on this repository's own `ashigaru/` branches. The events are unchanged. This repo's Gatehouse callers carry the same.
 
 ## [5.3.0] - 2026-11-21

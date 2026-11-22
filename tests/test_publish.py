@@ -1,6 +1,7 @@
 """What may become a pull request, and what may be pushed in a fix round."""
 
 import subprocess
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -27,26 +28,118 @@ RENAME_OUT = "diff --git a/.github/workflows/ci.yml b/docs/ci.yml\nrename from x
 
 
 def test_a_fix_with_a_patch_is_published():
-    assert refusal({"status": "fixed", "summary": "s"}, PATCH) is None
+    assert refusal({"status": "fixed", "summary": "s"}, PATCH, Path()) is None
 
 
 def test_no_fix_is_handed_to_a_human_with_the_reason():
-    assert "already fixed" in refusal({"status": "no_change", "reason": "already fixed"}, "")
-    assert refusal({}, PATCH) is not None
+    assert "already fixed" in refusal({"status": "no_change", "reason": "already fixed"}, "", Path())
+    assert refusal({}, PATCH, Path()) is not None
 
 
 def test_a_claimed_fix_without_changes_is_refused():
-    assert "changed no files" in refusal({"status": "fixed"}, "  \n")
+    assert "changed no files" in refusal({"status": "fixed"}, "  \n", Path())
 
 
 ACTION_PATCH = PATCH.replace("src/app.py", ".github/actions/setup/action.yml")
 
 
 def test_nothing_under_dot_github_is_ever_published():
-    assert touches_protected(WORKFLOW_PATCH) and touches_protected(RENAME_OUT)
-    assert touches_protected(ACTION_PATCH)
-    assert not touches_protected(PATCH)
-    assert ".github/" in refusal({"status": "fixed"}, WORKFLOW_PATCH)
+    assert touches_protected(WORKFLOW_PATCH, Path()) and touches_protected(RENAME_OUT, Path())
+    assert touches_protected(ACTION_PATCH, Path())
+    assert not touches_protected(PATCH, Path())
+    assert ".github/" in refusal({"status": "fixed"}, WORKFLOW_PATCH, Path())
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "gatehouse-findings.toml",
+        "gourmand-exceptions.toml",
+        ".gatehouse-ignore",
+        ".gourmand-exceptions.d/CH009-random_scripts.toml",
+        ".sdlc/bin/sdlc",
+        "sdlc.toml",
+    ],
+)
+def test_the_gates_own_config_is_never_published(path):
+    assert touches_protected(PATCH.replace("src/app.py", path), Path()) == path
+    assert path in refusal({"status": "fixed"}, PATCH.replace("src/app.py", path), Path())
+
+
+def test_a_file_merely_named_like_a_waiver_is_published():
+    assert not touches_protected(PATCH.replace("src/app.py", "docs/gatehouse-findings.toml"), Path())
+
+
+PYPROJECT = """\
+[project]
+name = "x"
+version = "1.0.0"
+dependencies = [
+    "a",
+    "b",
+    "c",
+]
+
+[tool.sdlc.push]
+# a comment
+skip = ["semgrep"]
+
+[tool.ruff]
+line-length = 110
+select = ["E"]
+ignore = []
+"""
+
+
+def diff(root: Path, before: str, after: str) -> str:
+    """A real git diff of pyproject.toml, leaving `root` holding the file as it was before."""
+    subprocess.run(["git", "init", "-q", str(root)], check=True)
+    (root / "pyproject.toml").write_text(before)
+    subprocess.run(["git", "-C", str(root), "add", "pyproject.toml"], check=True)
+    (root / "pyproject.toml").write_text(after)
+    out = subprocess.run(["git", "-C", str(root), "diff", "--unified=1"], check=True,
+                         capture_output=True, text=True).stdout  # fmt: skip
+    (root / "pyproject.toml").write_text(before)
+    return out
+
+
+@pytest.mark.parametrize(
+    "after",
+    [
+        PYPROJECT.replace('skip = ["semgrep"]', 'skip = ["semgrep", "tests"]'),
+        PYPROJECT.replace("# a comment\n", ""),
+        PYPROJECT.replace("[tool.sdlc.push]", "[tool.sdlc.pushed]"),
+        PYPROJECT.replace("[tool.ruff]", '[tool.sdlc]\nskip = ["gourmand"]\n\n[tool.ruff]'),
+        PYPROJECT.replace(
+            "[tool.ruff]\nline-length = 110", '[tool . "sdlc" . commit]\nskip = ["x"]\n[tool.ruff]'
+        ),
+        PYPROJECT + '\n[tool.sdlc.commit]\nskip = ["ruff"]\n',
+    ],
+)
+def test_a_change_inside_tool_sdlc_is_never_published(tmp_path, after):
+    patch = diff(tmp_path, PYPROJECT, after)
+    assert touches_protected(patch, tmp_path) == "[tool.sdlc] in pyproject.toml"
+    assert "tool.sdlc" in refusal({"status": "fixed"}, patch, tmp_path)
+
+
+@pytest.mark.parametrize(
+    "after",
+    [
+        PYPROJECT.replace('version = "1.0.0"', 'version = "1.0.1"'),
+        PYPROJECT.replace('    "c",\n', '    "c",\n    "d",\n'),
+        PYPROJECT.replace("ignore = []", 'ignore = ["E501"]'),
+        PYPROJECT.replace("line-length = 110", "line-length = 120"),
+    ],
+)
+def test_the_rest_of_pyproject_is_published(tmp_path, after):
+    assert touches_protected(diff(tmp_path, PYPROJECT, after), tmp_path) is None
+
+
+def test_a_hunk_far_from_its_table_header_is_still_placed(tmp_path):
+    long = PYPROJECT.replace("# a comment\n", "".join(f"# line {n}\n" for n in range(40)))
+    patch = diff(tmp_path, long, long.replace('skip = ["semgrep"]', "skip = []"))
+    assert "[tool.sdlc" not in patch.split("@@", 2)[2]  # the header is outside the hunk
+    assert touches_protected(patch, tmp_path)
 
 
 def test_a_maintainer_comment_is_never_dismissed():

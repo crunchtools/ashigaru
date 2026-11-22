@@ -76,7 +76,7 @@ def test_a_missing_uv_hands_over_not_a_traceback(tmp_path):
 
 
 def test_a_relock_is_no_route_to_the_workflows(tmp_path):
-    assert touches_protected(WORKFLOW)  # a patch naming .github/ is refused before any relock runs
+    assert touches_protected(WORKFLOW, tmp_path)  # a patch naming .github/ is refused before any relock runs
     got = relock(MANIFEST, repo(tmp_path), run=done(), strays=lambda root: {".github/workflows/ci.yml"})
     assert ".github/workflows/ci.yml" in got
 

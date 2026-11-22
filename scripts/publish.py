@@ -46,15 +46,16 @@ REBUILT = (
 )
 
 
-def refusal(result: dict, patch: str) -> str | None:
+def refusal(result: dict, patch: str, root: Path) -> str | None:
     """Why this run must not become a pull request, or None when it may."""
     if result.get("status") != "fixed":
         reason = str(result.get("reason", "")).strip() or "the agent did not report a fix"
         return f"No fix was produced: {reason}"
     if not patch.strip():
         return "The agent reported a fix but changed no files."
-    if touches_protected(patch):
-        return "The change touches `.github/`, which Ashigaru does not modify."
+    touched = touches_protected(patch, root)
+    if touched:
+        return f"The change touches `{touched}`, which Ashigaru does not modify."
     return None
 
 
@@ -237,7 +238,7 @@ def main() -> int:
         set_output("pr", "")
         return 0
 
-    why = refusal(result, patch)
+    why = refusal(result, patch, Path.cwd())
     if observing(args.repo):
         watch(args.repo, args.issue, branch, found["title"].strip(), why)
         return 0

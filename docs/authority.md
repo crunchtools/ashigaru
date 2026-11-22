@@ -20,7 +20,7 @@ A model that reads issue text can be talked into things. The design assumes that
 | Cut releases: open and publish | no | a second Ashigaru app token, `contents: write` and `pull-requests: write`, minted only when a release is due and only for the repositories that have one | none |
 | Post the review | no | Ashigaru app token, `pull-requests: write` only | none |
 
-Agent jobs check out with `persist-credentials: false`. What leaves an agent job is structured output validated against a schema and a patch file; the writing job applies the patch on a fresh runner. The app has no Workflows permission, and the publish scripts refuse a patch that touches `.github/`.
+Agent jobs check out with `persist-credentials: false`. What leaves an agent job is structured output validated against a schema and a patch file; the writing job applies the patch on a fresh runner. The app has no Workflows permission, and the publish scripts refuse a patch that touches `.github/`, `.sdlc/`, `sdlc.toml`, pyproject's `[tool.sdlc]` tables, or the Gatehouse and Gourmand waivers: an agent never edits what judges its own work.
 
 **Merging.** No job merges. The publish job turns on auto-merge and GitHub merges when the repository's required checks pass. The app is not an organization admin and cannot bypass a ruleset.
 

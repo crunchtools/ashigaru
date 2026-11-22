@@ -7,6 +7,7 @@ import json
 import os
 import re
 import subprocess
+from pathlib import Path
 from typing import Any
 
 READY_FOR_TRIAGE = "ready-for-triage"
@@ -54,7 +55,15 @@ MANAGED_LABELS = (
 
 WRITE_PERMISSIONS = {"admin", "write"}  # the API folds maintain into write, triage into read
 BRANCH_PREFIX = "ashigaru/"
-PROTECTED_DIR = ".github/"
+PROTECTED = (".github/", ".sdlc/", ".gourmand-exceptions.d/")
+"""Directories a patch may not touch: what CI runs, how the gates run, and Gourmand's waivers."""
+PROTECTED_FILES = frozenset(
+    {"gatehouse-findings.toml", "gourmand-exceptions.toml", ".gatehouse-ignore", "sdlc.toml"}
+)
+"""Files that waive or hide findings, or configure `sdlc` where there is no pyproject. An agent
+that edits them grades its own work."""
+SDLC_TABLE = "tool.sdlc"
+"""The pyproject table that decides which gates `sdlc` skips; the rest of pyproject is fair game."""
 SECRET = re.compile(r"sk-ant-[\w-]{16,}|gh[pousr]_\w{20,}|github_pat_\w{20,}")
 """Anything shaped like a Claude or GitHub token. Blanked out of agent-written text before it
 is posted: the agent jobs are denied the files that hold their token, and this is the second
@@ -168,12 +177,67 @@ def set_state(
     gh(*args)
 
 
-def touches_protected(patch: str) -> bool:
-    """True when a git diff changes a file under .github/ (either side of a rename).
+HUNK = re.compile(r"^@@ -(\d+)(?:,(\d+))? \+\d+(?:,\d+)? @@")
+TABLE = re.compile(r"^\s*\[\[?\s*([^\]]+?)\s*\]\]?")
+
+
+def _table(line: str) -> str | None:
+    """The dotted name a TOML table header opens, or None for any other line."""
+    found = TABLE.match(line)
+    return re.sub(r"\s*\.\s*", ".", found.group(1)).replace('"', "") if found else None
+
+
+def _tables(text: str) -> list[str | None]:
+    """The table each line of a TOML file sits in, indexed by line number (0 is before line 1)."""
+    current: str | None = None
+    out: list[str | None] = [None]
+    for line in text.splitlines():
+        current = _table(line) or current
+        out.append(current)
+    return out
+
+
+def touches_sdlc_table(section: str, before: str) -> bool:
+    """True when a pyproject.toml diff section changes a line inside [tool.sdlc].
+
+    A hunk's context rarely reaches the table header, so the table each hunk starts
+    in is read off the file as it stood before the patch; a header inside the hunk
+    moves it on. A changed header counts as a change to the table it opens.
+    """
+    tables = _tables(before)
+    current: str | None = None
+    for line in section.splitlines():
+        hunk = HUNK.match(line)
+        if hunk:
+            start = int(hunk.group(1))
+            preceding = start if hunk.group(2) == "0" else start - 1  # -N,0 inserts after line N
+            current = tables[max(0, min(preceding, len(tables) - 1))]
+            continue
+        if line[:1] not in {" ", "+", "-"} or line.startswith(("+++ ", "--- ")):
+            continue
+        current = _table(line[1:]) or current
+        if line[0] != " " and current is not None and f"{current}.".startswith(f"{SDLC_TABLE}."):
+            return True
+    return False
+
+
+def touches_protected(patch: str, root: Path) -> str | None:
+    """The first path a git diff may not change (either side of a rename), or None.
 
     Workflows, local actions, CODEOWNERS and Dependabot config decide what CI runs
-    and who reviews; Ashigaru leaves all of it to people.
+    and who reviews; the `sdlc` launcher, pyproject's [tool.sdlc] and the Gatehouse
+    and Gourmand waivers decide what the gates check. Ashigaru leaves all of it to
+    people. `root` is the checkout the patch applies to; its pyproject.toml is read.
     """
-    return any(
-        path.startswith(PROTECTED_DIR) for match in DIFF_HEADER.finditer(patch) for path in match.groups()
-    )
+    starts = list(DIFF_HEADER.finditer(patch))
+    for index, match in enumerate(starts):
+        for path in match.groups():
+            if path.startswith(PROTECTED) or path in PROTECTED_FILES:
+                return path
+        if match.group(1) == "pyproject.toml" or match.group(2) == "pyproject.toml":
+            end = starts[index + 1].start() if index + 1 < len(starts) else len(patch)
+            before = root / match.group(1)
+            text = before.read_text(encoding="utf-8") if before.is_file() else ""
+            if touches_sdlc_table(patch[match.end() : end], text):
+                return f"[{SDLC_TABLE}] in pyproject.toml"
+    return None
