@@ -73,6 +73,21 @@ def next_step(sha: str | None, left: int, failed_checks: bool) -> str | None:
     return None
 
 
+def leased_push(branch: str, expected: str) -> bool:
+    """Push only if the branch still points where the round started; False when it moved.
+
+    A push to the branch since then triggers a fresh round on the new head, so this one
+    yields rather than overwriting or answering for code it never saw.
+    """
+    try:
+        git("push", f"--force-with-lease={branch}:{expected}", "origin", f"HEAD:{branch}")
+    except subprocess.CalledProcessError as error:
+        if "(stale info)" not in error.stderr:  # a protected branch or a bad token is not a moved branch
+            raise RuntimeError(f"push to {branch} failed: {error.stderr.strip()}") from error
+        return False
+    return True
+
+
 def hand_off(repo: str, number: int, why: str) -> None:
     set_state(repo, number, NEEDS_HUMAN)
     gh("pr", "merge", str(number), "--repo", repo, "--disable-auto")
@@ -99,6 +114,28 @@ def close_round(repo: str, collected: dict, result: dict, answered: dict[int, st
         hand_off(repo, number, "The round changed no code and work remains, so another round would not help.")
     elif step == "rearm":
         gh("pr", "merge", str(number), "--repo", repo, "--auto", "--squash")
+
+
+def commit_fix(repo: str, number: int, round_number: int, patch_path: Path, patch: str) -> bool:
+    """Apply, vet and commit the patch; False when it was handed to a person instead."""
+    git("config", "user.name", BOT_NAME)
+    git("config", "user.email", BOT_EMAIL)
+    try:
+        git("apply", "--index", "--3way", str(patch_path))
+    except subprocess.CalledProcessError:
+        hand_off(repo, number, "The fix no longer applies to the pull request branch.")
+        return False
+    touched = staged_refusal()
+    if touched:
+        hand_off(repo, number, f"The fix touches {touched}, which Ashigaru does not modify.")
+        return False
+    stale_lock = relock(patch, Path.cwd())
+    if stale_lock:
+        hand_off(repo, number, stale_lock)
+        return False
+    print(tidy(patch, Path.cwd()))
+    git("commit", "-m", f"fix: address review findings (round {round_number})\n\n{TRAILER}\n")
+    return True
 
 
 def main() -> int:
@@ -130,24 +167,11 @@ def main() -> int:
 
     sha = None
     if patch.strip():
-        git("config", "user.name", BOT_NAME)
-        git("config", "user.email", BOT_EMAIL)
-        try:
-            git("apply", "--index", "--3way", str(args.patch))
-        except subprocess.CalledProcessError:
-            hand_off(args.repo, number, "The fix no longer applies to the pull request branch.")
+        if not commit_fix(args.repo, number, round_number, args.patch, patch):
             return 0
-        touched = staged_refusal()
-        if touched:
-            hand_off(args.repo, number, f"The fix touches {touched}, which Ashigaru does not modify.")
+        if not leased_push(args.branch, collected["head"]):
+            print(f"fix: {args.branch} moved off {collected['head']}; pushed and answered nothing")
             return 0
-        stale_lock = relock(patch, Path.cwd())
-        if stale_lock:
-            hand_off(args.repo, number, stale_lock)
-            return 0
-        print(tidy(patch, Path.cwd()))
-        git("commit", "-m", f"fix: address review findings (round {round_number})\n\n{TRAILER}\n")
-        git("push", "origin", f"HEAD:{args.branch}")
         sha = git("rev-parse", "HEAD").strip()
 
     answered = replies(collected["findings"], result.get("dispositions") or [], sha)
