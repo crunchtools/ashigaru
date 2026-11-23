@@ -73,6 +73,25 @@ def next_step(sha: str | None, left: int, failed_checks: bool) -> str | None:
     return None
 
 
+def moved(branch: str, head: str, patched: bool) -> bool:
+    """True when the branch is no longer at the head the round started from, which it then yields.
+
+    The publish job checks the branch out by name, so a patched round compares that checkout:
+    applied to code the agent never saw, a conflict would hand the PR to a person for nothing.
+    A round with no patch never pushes, so it asks the remote before answering findings.
+    The push that moved the branch starts a fresh round on the new head.
+    """
+    if patched:
+        now = git("rev-parse", "HEAD").strip()
+    else:
+        listed = git("ls-remote", "origin", f"refs/heads/{branch}").split()
+        now = listed[0] if listed else ""
+    if now == head:
+        return False
+    print(f"fix: {branch} moved off {head} to {now or 'nothing'}; round yields, nothing answered")
+    return True
+
+
 def leased_push(branch: str, expected: str) -> bool:
     """Push only if the branch still points where the round started; False when it moved.
 
@@ -165,6 +184,8 @@ def main() -> int:
     except (OSError, json.JSONDecodeError, TypeError):
         result = {}
 
+    if moved(args.branch, collected["head"], patched=bool(patch.strip())):
+        return 0
     sha = None
     if patch.strip():
         if not commit_fix(args.repo, number, round_number, args.patch, patch):

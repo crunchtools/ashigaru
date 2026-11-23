@@ -92,12 +92,56 @@ def test_a_fix_that_cannot_be_committed_is_handed_off_and_pushes_nothing(round_,
                                                                          spoil, why):  # fmt: skip
     remote, head, calls = round_
     if spoil == "conflict":
-        (Path.cwd() / "b.txt").write_text("already here\n")
-        git(Path.cwd(), "add", "-A")
-        git(Path.cwd(), "commit", "-qm", "clash")
+        (tmp_path / "change.patch").write_text(
+            "diff --git a/a.txt b/a.txt\n--- a/a.txt\n+++ b/a.txt\n@@ -1 +1 @@\n-not there\n+x\n"
+        )
     else:
         monkeypatch.setattr(fix_publish, "relock", lambda patch, root: why)
     assert fix_publish.main() == 0
     assert git(remote, "rev-parse", "b") == head
     assert [c[-1] for c in calls if c[:2] == ("pr", "comment")] == [f"**Ashigaru stopped.** {why}"]
     assert not any(c[0] == "api" for c in calls)
+
+
+def move(remote: Path, tmp_path: Path, files: dict) -> str:
+    """Someone else's push to `b`; returns the new head."""
+    other = tmp_path / "other"
+    subprocess.run(["git", "clone", "-q", "-b", "b", str(remote), str(other)], check=True,
+                   capture_output=True)  # fmt: skip
+    for name, text in files.items():
+        (other / name).write_text(text)
+    git(other, "add", "-A")
+    git(other, "commit", "-qm", "moved")
+    git(other, "push", "-q", "origin", "HEAD:b")
+    return git(remote, "rev-parse", "b")
+
+
+def test_a_branch_that_moved_before_checkout_yields_rather_than_handing_off(round_, tmp_path):
+    remote, head, calls = round_
+    moved = move(remote, tmp_path, {"b.txt": "theirs\n"})  # the patch creates b.txt: it would conflict
+    git(Path.cwd(), "pull", "-q", "--ff-only", "origin", "b")  # the publish job checks out by name
+    assert fix_publish.main() == 0
+    assert git(remote, "rev-parse", "b") == moved
+    assert calls == []
+
+
+def dismiss_only(tmp_path: Path) -> None:
+    (tmp_path / "change.patch").write_text("")
+    (tmp_path / "result.json").write_text(json.dumps(
+        {"summary": "s", "dispositions": [{"id": 7, "disposition": "not_a_bug", "reason": "r"}]}
+    ))  # fmt: skip
+
+
+def test_a_round_with_no_patch_answers_on_an_unmoved_branch(round_, tmp_path):
+    _, _, calls = round_
+    dismiss_only(tmp_path)
+    assert fix_publish.main() == 0
+    assert any(c[-1] == "body=not a bug: r" for c in calls)
+
+
+def test_a_round_with_no_patch_yields_on_a_moved_branch(round_, tmp_path):
+    remote, _, calls = round_
+    dismiss_only(tmp_path)
+    move(remote, tmp_path, {"a.txt": "someone else\n"})
+    assert fix_publish.main() == 0
+    assert calls == []

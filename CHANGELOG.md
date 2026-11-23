@@ -8,7 +8,7 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
-- A fix round pushes with `git push --force-with-lease=<branch>:<head> origin HEAD:<branch>`, where `<head>` is the pull request head the round collected its findings and checks on (a1109). A branch that moved since then is refused: the round pushes nothing and answers nothing, and the push that moved it starts a fresh round on the new head. Before, a plain push could land a fix written against code the agent never saw. The fleet CI design (sdlc `docs/marketplace-free-ci.md`) requires the leased push, and sdlc's write step calls this script.
+- A fix round pushes with `git push --force-with-lease=<branch>:<head> origin HEAD:<branch>`, where `<head>` is the pull request head the round collected its findings and checks on (a1109). A branch that moved since then is refused: the round pushes nothing and answers nothing, and the push that moved it starts a fresh round on the new head. The round also yields, before applying anything, when the branch it checked out is no longer that head, so a patch that conflicts with code the agent never saw no longer hands the PR to a person; and a round with no patch checks the remote head before it answers a finding. Before, a plain push could land a fix written against code the agent never saw. The fleet CI design (sdlc `docs/marketplace-free-ci.md`) requires the leased push, and sdlc's write step calls this script.
 
 ## [5.4.0] - 2026-11-23
 
