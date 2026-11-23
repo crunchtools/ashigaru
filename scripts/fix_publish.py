@@ -170,7 +170,7 @@ def main() -> int:
         if not commit_fix(args.repo, number, round_number, args.patch, patch):
             return 0
         if not leased_push(args.branch, collected["head"]):
-            print(f"fix: {args.branch} moved off {collected['head']}; pushed and answered nothing")
+            print(f"fix: {args.branch} moved off {collected['head']}; push refused, nothing answered")
             return 0
         sha = git("rev-parse", "HEAD").strip()
 

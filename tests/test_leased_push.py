@@ -42,6 +42,7 @@ def round_(tmp_path, monkeypatch):
     calls = []
     monkeypatch.setattr(fix_publish, "observing", lambda repo: False)
     monkeypatch.setattr(fix_publish, "gh", lambda *args: calls.append(args))
+    monkeypatch.setattr(fix_publish, "set_state", lambda *args: calls.append(("state", *args)))
     monkeypatch.setattr(sys, "argv", ["fix_publish", "--repo", "o/r", "--mode", "fix", "--branch", "b",
                                       "--findings", str(tmp_path / "findings.json"),
                                       "--patch", str(tmp_path / "change.patch"),
@@ -78,3 +79,25 @@ def test_a_push_that_fails_for_another_reason_is_not_taken_for_a_moved_branch(ro
     git(Path.cwd(), "remote", "set-url", "origin", str(remote.parent / "missing.git"))
     with pytest.raises(RuntimeError, match="push to b failed"):
         fix_publish.main()
+
+
+@pytest.mark.parametrize(
+    ("spoil", "why"),
+    [
+        ("conflict", "The fix no longer applies to the pull request branch."),
+        ("stale_lock", "uv.lock is stale."),
+    ],
+)
+def test_a_fix_that_cannot_be_committed_is_handed_off_and_pushes_nothing(round_, tmp_path, monkeypatch,
+                                                                         spoil, why):  # fmt: skip
+    remote, head, calls = round_
+    if spoil == "conflict":
+        (Path.cwd() / "b.txt").write_text("already here\n")
+        git(Path.cwd(), "add", "-A")
+        git(Path.cwd(), "commit", "-qm", "clash")
+    else:
+        monkeypatch.setattr(fix_publish, "relock", lambda patch, root: why)
+    assert fix_publish.main() == 0
+    assert git(remote, "rev-parse", "b") == head
+    assert [c[-1] for c in calls if c[:2] == ("pr", "comment")] == [f"**Ashigaru stopped.** {why}"]
+    assert not any(c[0] == "api" for c in calls)
