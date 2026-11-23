@@ -274,7 +274,7 @@ def test_a_fix_round_hands_off_a_denied_patch_and_pushes_nothing(root, monkeypat
     (root.parent / "change.patch").write_text(git(root, "diff", "--cached", "--binary", "HEAD"))
     git(root, "reset", "-q", "--hard", "HEAD")
     (root.parent / "findings.json").write_text(
-        json.dumps({"pr": 5, "round": 1, "findings": [], "failed_checks": []})
+        json.dumps({"pr": 5, "round": 1, "head": head.strip(), "findings": [], "failed_checks": []})
     )
     (root.parent / "result.json").write_text("{}")
     calls = []

@@ -373,6 +373,7 @@ def main() -> int:
             {
                 "pr": number,
                 "round": round_number,
+                "head": sha,
                 "findings": findings,
                 "issue_comments": context,
                 "failed_checks": [
