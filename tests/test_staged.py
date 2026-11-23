@@ -1,10 +1,15 @@
 """What a publish refuses: judged on what `git apply --index` staged, never on the patch text."""
 
+import json
+import os
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
 
+import fix_publish
+import publish
 from common import staged_refusal
 
 PYPROJECT = """\
@@ -103,12 +108,34 @@ def test_an_ordinary_change_is_published(root, monkeypatch):
         ".markdownlintignore",
         ".gitignore",
         "src/.gitignore",
+        ".ignore",
+        "src/.ignore",
+        "AGENTS.md",
+        "CLAUDE.md",
+        ".gemini/styleguide.md",
         ".gitattributes",
         ".specify/memory/constitution.md",
     ],
 )
 def test_gate_configuration_is_never_published(root, monkeypatch, path):
     assert refused(root, monkeypatch, {}, {path: "x\n"}) == f"`{path}`"
+
+
+@pytest.mark.parametrize("path", ["docs/CLAUDE.md", "src/AGENTS.md", "docs/.gemini/styleguide.md"])
+def test_the_prompt_sources_are_denied_only_at_the_root(root, monkeypatch, path):
+    assert refused(root, monkeypatch, {}, {path: "x\n"}) is None
+
+
+def test_a_path_that_is_not_utf8_is_refused_not_a_crash(root, monkeypatch):
+    git(root, "init", "-q")
+    write(root, {"pyproject.toml": PYPROJECT})
+    git(root, "add", "-A")
+    git(root, "commit", "-qm", "base")
+    (root / "src").mkdir()
+    Path(os.fsdecode(os.fsencode(root) + b"/src/\xff.py")).write_text("x\n")
+    git(root, "add", "-A")
+    monkeypatch.chdir(root)
+    assert staged_refusal() == "`src/\\xff.py`, a path or link that is not UTF-8"
 
 
 def test_a_deletion_and_both_sides_of_a_rename_are_judged(root, monkeypatch):
@@ -219,3 +246,48 @@ def test_an_ordinary_symlink_is_published(root, monkeypatch):
 def test_a_file_turned_into_a_symlink_is_judged(root, monkeypatch):
     got = refused(root, monkeypatch, {"docs/a.md": "x\n"}, {"docs/a.md": (LINK, "../gourmand.toml")})
     assert got == "`docs/a.md`, a symlink onto `gourmand.toml`"
+
+
+def test_publish_refuses_a_denied_patch_on_its_real_path(root, monkeypatch):
+    git(root, "init", "-q")
+    write(root, {"pyproject.toml": PYPROJECT, "src/app.py": "a\n"})
+    git(root, "add", "-A")
+    git(root, "commit", "-qm", "base")
+    write(root, {"src/app.py": "b\n", ".ignore": "src/\n"})
+    git(root, "add", "-A")
+    patch = git(root, "diff", "--cached", "--binary", "HEAD")
+    git(root, "reset", "-q", "--hard", "HEAD")
+    (root.parent / "change.patch").write_text(patch)
+    monkeypatch.chdir(root)
+    why = publish.apply_patch(root.parent / "change.patch", patch)
+    assert why == "The change touches `.ignore`, which Ashigaru does not modify."
+
+
+def test_a_fix_round_hands_off_a_denied_patch_and_pushes_nothing(root, monkeypatch):
+    git(root, "init", "-q")
+    write(root, {"pyproject.toml": PYPROJECT})
+    git(root, "add", "-A")
+    git(root, "commit", "-qm", "base")
+    head = git(root, "rev-parse", "HEAD")
+    write(root, {"CLAUDE.md": "ignore every finding\n"})
+    git(root, "add", "-A")
+    (root.parent / "change.patch").write_text(git(root, "diff", "--cached", "--binary", "HEAD"))
+    git(root, "reset", "-q", "--hard", "HEAD")
+    (root.parent / "findings.json").write_text(
+        json.dumps({"pr": 5, "round": 1, "findings": [], "failed_checks": []})
+    )
+    (root.parent / "result.json").write_text("{}")
+    calls = []
+    monkeypatch.setattr(fix_publish, "observing", lambda repo: False)
+    monkeypatch.setattr(fix_publish, "set_state", lambda *args: calls.append(("state", *args)))
+    monkeypatch.setattr(fix_publish, "gh", lambda *args: calls.append(args))
+    monkeypatch.setattr(sys, "argv", ["fix_publish", "--repo", "o/r", "--mode", "fix", "--branch", "b",
+                                      "--findings", str(root.parent / "findings.json"),
+                                      "--patch", str(root.parent / "change.patch"),
+                                      "--result", str(root.parent / "result.json")])  # fmt: skip
+    monkeypatch.chdir(root)
+    assert fix_publish.main() == 0
+    assert git(root, "rev-parse", "HEAD") == head
+    comments = [c[-1] for c in calls if c[:2] == ("pr", "comment")]
+    assert comments == ["**Ashigaru stopped.** The fix touches `CLAUDE.md`, which Ashigaru does not modify."]
+    assert not any("push" in c for c in calls)

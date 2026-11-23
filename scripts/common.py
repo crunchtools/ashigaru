@@ -73,12 +73,15 @@ DENIED_NAMES = (
     ".hadolint.y*ml",
     ".markdownlint*",
     ".gitignore",
+    ".ignore",
     ".gitattributes",
 )
 """File names, at any depth, that configure, waive or hide what a gate sees. An agent that edits
 them grades its own work. .gitattributes is here because it can turn a file's diff into a binary
-blob or mark it generated, which hides it from review."""
-DENIED_PATHS = (".specify/memory/constitution.md",)
+blob or mark it generated, which hides it from review; .ignore because Gourmand's walker honours it."""
+DENIED_PATHS = (".specify/memory/constitution.md", "AGENTS.md", "CLAUDE.md", ".gemini/styleguide.md")
+"""Paths at the root only: the constitution, and the files Gatehouse reads from the base branch to
+build its reviewers' prompt."""
 SYMLINK = "120000"
 SECRET = re.compile(r"sk-ant-[\w-]{16,}|gh[pousr]_\w{20,}|github_pat_\w{20,}")
 """Anything shaped like a Claude or GitHub token. Blanked out of agent-written text before it
@@ -144,6 +147,11 @@ def observing(repo: str) -> bool:
 def git(*args: str) -> str:
     done = subprocess.run(["git", *args], check=True, capture_output=True, text=True)
     return done.stdout
+
+
+def git_bytes(*args: str) -> bytes:
+    """`git` as bytes, for output that may name a path that is not UTF-8."""
+    return subprocess.run(["git", *args], check=True, capture_output=True).stdout
 
 
 def set_output(name: str, value: str) -> None:
@@ -234,21 +242,24 @@ def staged_refusal() -> str | None:
     hide a file. Symlinks onto gate configuration are refused, and pyproject's
     `tool.sdlc` table is compared parsed, so how it is spelt does not matter.
     """
-    raw = git("-c", "core.quotePath=false", "diff", "--cached", "--raw", "-z", "--no-renames", "--no-abbrev",
-              "--no-ext-diff", "--no-textconv", "HEAD")  # fmt: skip
-    fields = raw.split("\0")
+    raw = git_bytes("-c", "core.quotePath=false", "diff", "--cached", "--raw", "-z", "--no-renames",
+                    "--no-abbrev", "--no-ext-diff", "--no-textconv", "HEAD")  # fmt: skip
+    fields = raw.split(b"\0")
     changed = set()
-    for meta, path in zip(fields[0::2], fields[1::2], strict=False):
-        if not meta.startswith(":"):
+    for meta, name in zip(fields[0::2], fields[1::2], strict=False):
+        if not meta.startswith(b":"):
             continue
-        _, new_mode, _, new_sha, _ = meta[1:].split(" ")
+        _, new_mode, _, new_sha, _ = meta[1:].decode("ascii").split(" ")
+        try:
+            path = name.decode("utf-8")
+            link = git_bytes("cat-file", "blob", new_sha).decode("utf-8") if new_mode == SYMLINK else None
+        except UnicodeDecodeError:
+            return f"`{name.decode('utf-8', 'backslashreplace')}`, a path or link that is not UTF-8"
         changed.add(path)
         if denied(path):
             return f"`{path}`"
-        if new_mode == SYMLINK:
-            target = posixpath.normpath(
-                posixpath.join(posixpath.dirname(path), git("cat-file", "blob", new_sha))
-            )
+        if link is not None:
+            target = posixpath.normpath(posixpath.join(posixpath.dirname(path), link))
             if _holds_denied(target):
                 return f"`{path}`, a symlink onto `{target}`"
     if "pyproject.toml" in changed:
