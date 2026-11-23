@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [5.4.0] - 2026-11-23
+
 ### Changed
 
 - The `assign` brief's Scope line says "One PR per repo; one commit per step." (a872): a change ships as one pull request in each repo it touches, never a PR per part.
