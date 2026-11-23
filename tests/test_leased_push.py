@@ -145,3 +145,11 @@ def test_a_round_with_no_patch_yields_on_a_moved_branch(round_, tmp_path):
     move(remote, tmp_path, {"a.txt": "someone else\n"})
     assert fix_publish.main() == 0
     assert calls == []
+
+
+def test_a_round_with_no_patch_yields_on_a_deleted_branch(round_, tmp_path):
+    remote, _, calls = round_
+    dismiss_only(tmp_path)
+    git(remote, "update-ref", "-d", "refs/heads/b")
+    assert fix_publish.main() == 0
+    assert calls == []
