@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import fnmatch
 import functools
 import json
 import os
+import posixpath
 import re
 import subprocess
-from pathlib import Path
+import tomllib
 from typing import Any
 
 READY_FOR_TRIAGE = "ready-for-triage"
@@ -55,15 +57,29 @@ MANAGED_LABELS = (
 
 WRITE_PERMISSIONS = {"admin", "write"}  # the API folds maintain into write, triage into read
 BRANCH_PREFIX = "ashigaru/"
-PROTECTED = (".github/", ".sdlc/", ".gourmand-exceptions.d/")
-"""Directories a patch may not touch: what CI runs, how the gates run, and Gourmand's waivers."""
-PROTECTED_FILES = frozenset(
-    {"gatehouse-findings.toml", "gourmand-exceptions.toml", ".gatehouse-ignore", "sdlc.toml"}
+DENIED_DIRS = (".github/", ".sdlc/", ".semgrep/", ".gourmand-exceptions.d/")
+"""Directories a patch may not touch: what CI runs, how the gates run, and their rules and waivers."""
+DENIED_NAMES = (
+    "gatehouse.toml",
+    "gatehouse-findings.toml",
+    ".gatehouse-ignore",
+    "gourmand.toml",
+    "gourmand-exceptions.toml",
+    "gourmand-patterns.toml",
+    "gourmand-audit-ledger.toml",
+    "sdlc.toml",
+    "lychee.toml",
+    ".semgrepignore",
+    ".hadolint.y*ml",
+    ".markdownlint*",
+    ".gitignore",
+    ".gitattributes",
 )
-"""Files that waive or hide findings, or configure `sdlc` where there is no pyproject. An agent
-that edits them grades its own work."""
-SDLC_TABLE = "tool.sdlc"
-"""The pyproject table that decides which gates `sdlc` skips; the rest of pyproject is fair game."""
+"""File names, at any depth, that configure, waive or hide what a gate sees. An agent that edits
+them grades its own work. .gitattributes is here because it can turn a file's diff into a binary
+blob or mark it generated, which hides it from review."""
+DENIED_PATHS = (".specify/memory/constitution.md",)
+SYMLINK = "120000"
 SECRET = re.compile(r"sk-ant-[\w-]{16,}|gh[pousr]_\w{20,}|github_pat_\w{20,}")
 """Anything shaped like a Claude or GitHub token. Blanked out of agent-written text before it
 is posted: the agent jobs are denied the files that hold their token, and this is the second
@@ -177,67 +193,69 @@ def set_state(
     gh(*args)
 
 
-HUNK = re.compile(r"^@@ -(\d+)(?:,(\d+))? \+\d+(?:,\d+)? @@")
-TABLE = re.compile(r"^\s*\[\[?\s*([^\]]+?)\s*\]\]?")
+def denied(path: str) -> bool:
+    """True when a repository path is gate configuration that Ashigaru leaves to people."""
+    name = posixpath.basename(path)
+    return (
+        path in DENIED_PATHS
+        or f"{path}/".startswith(DENIED_DIRS)
+        or any(fnmatch.fnmatchcase(name, pattern) for pattern in DENIED_NAMES)
+    )
 
 
-def _table(line: str) -> str | None:
-    """The dotted name a TOML table header opens, or None for any other line."""
-    found = TABLE.match(line)
-    return re.sub(r"\s*\.\s*", ".", found.group(1)).replace('"', "") if found else None
+def _holds_denied(target: str) -> bool:
+    """True when a symlink target is, or is an ancestor of, gate configuration, or leaves the tree."""
+    if posixpath.isabs(target) or target == ".." or target.startswith("../"):
+        return True
+    return (
+        denied(target)
+        or target == "."
+        or any(d.startswith(f"{target}/") for d in (*DENIED_DIRS, *DENIED_PATHS))
+    )
 
 
-def _tables(text: str) -> list[str | None]:
-    """The table each line of a TOML file sits in, indexed by line number (0 is before line 1)."""
-    current: str | None = None
-    out: list[str | None] = [None]
-    for line in text.splitlines():
-        current = _table(line) or current
-        out.append(current)
-    return out
+def _sdlc_table(spec: str) -> object:
+    """`tool.sdlc` of the pyproject.toml at a git object spec; None when the file is absent.
 
-
-def touches_sdlc_table(section: str, before: str) -> bool:
-    """True when a pyproject.toml diff section changes a line inside [tool.sdlc].
-
-    A hunk's context rarely reaches the table header, so the table each hunk starts
-    in is read off the file as it stood before the patch; a header inside the hunk
-    moves it on. A changed header counts as a change to the table it opens.
+    Raises ValueError when it does not decode or parse.
     """
-    tables = _tables(before)
-    current: str | None = None
-    for line in section.splitlines():
-        hunk = HUNK.match(line)
-        if hunk:
-            start = int(hunk.group(1))
-            preceding = start if hunk.group(2) == "0" else start - 1  # -N,0 inserts after line N
-            current = tables[max(0, min(preceding, len(tables) - 1))]
-            continue
-        if line[:1] not in {" ", "+", "-"} or line.startswith(("+++ ", "--- ")):
-            continue
-        current = _table(line[1:]) or current
-        if line[0] != " " and current is not None and f"{current}.".startswith(f"{SDLC_TABLE}."):
-            return True
-    return False
+    try:
+        text = git("show", spec)
+    except subprocess.CalledProcessError:
+        return None
+    return tomllib.loads(text).get("tool", {}).get("sdlc")
 
 
-def touches_protected(patch: str, root: Path) -> str | None:
-    """The first path a git diff may not change (either side of a rename), or None.
+def staged_refusal() -> str | None:
+    """What in the index, against HEAD, Ashigaru may not publish, or None.
 
-    Workflows, local actions, CODEOWNERS and Dependabot config decide what CI runs
-    and who reviews; the `sdlc` launcher, pyproject's [tool.sdlc] and the Gatehouse
-    and Gourmand waivers decide what the gates check. Ashigaru leaves all of it to
-    people. `root` is the checkout the patch applies to; its pyproject.toml is read.
+    Run after `git apply --index`, so it judges what git staged rather than the
+    patch text: a quoted path, a rename, a binary diff or a diff config cannot
+    hide a file. Symlinks onto gate configuration are refused, and pyproject's
+    `tool.sdlc` table is compared parsed, so how it is spelt does not matter.
     """
-    starts = list(DIFF_HEADER.finditer(patch))
-    for index, match in enumerate(starts):
-        for path in match.groups():
-            if path.startswith(PROTECTED) or path in PROTECTED_FILES:
-                return path
-        if match.group(1) == "pyproject.toml" or match.group(2) == "pyproject.toml":
-            end = starts[index + 1].start() if index + 1 < len(starts) else len(patch)
-            before = root / match.group(1)
-            text = before.read_text(encoding="utf-8") if before.is_file() else ""
-            if touches_sdlc_table(patch[match.end() : end], text):
-                return f"[{SDLC_TABLE}] in pyproject.toml"
+    raw = git("-c", "core.quotePath=false", "diff", "--cached", "--raw", "-z", "--no-renames", "--no-abbrev",
+              "--no-ext-diff", "--no-textconv", "HEAD")  # fmt: skip
+    fields = raw.split("\0")
+    changed = set()
+    for meta, path in zip(fields[0::2], fields[1::2], strict=False):
+        if not meta.startswith(":"):
+            continue
+        _, new_mode, _, new_sha, _ = meta[1:].split(" ")
+        changed.add(path)
+        if denied(path):
+            return f"`{path}`"
+        if new_mode == SYMLINK:
+            target = posixpath.normpath(
+                posixpath.join(posixpath.dirname(path), git("cat-file", "blob", new_sha))
+            )
+            if _holds_denied(target):
+                return f"`{path}`, a symlink onto `{target}`"
+    if "pyproject.toml" in changed:
+        try:
+            moved = _sdlc_table("HEAD:pyproject.toml") != _sdlc_table(":pyproject.toml")
+        except ValueError:  # TOMLDecodeError, or bytes that are not UTF-8
+            return "`pyproject.toml`, which no longer parses"
+        if moved:
+            return "`[tool.sdlc]` in `pyproject.toml`"
     return None

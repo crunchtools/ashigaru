@@ -20,7 +20,7 @@ A model that reads issue text can be talked into things. The design assumes that
 | Cut releases: open and publish | no | a second Ashigaru app token, `contents: write` and `pull-requests: write`, minted only when a release is due and only for the repositories that have one | none |
 | Post the review | no | Ashigaru app token, `pull-requests: write` only | none |
 
-Agent jobs check out with `persist-credentials: false`. What leaves an agent job is structured output validated against a schema and a patch file; the writing job applies the patch on a fresh runner. The app has no Workflows permission, and the publish scripts refuse a patch that touches `.github/`, `.sdlc/`, `sdlc.toml`, pyproject's `[tool.sdlc]` tables, or the Gatehouse and Gourmand waivers: an agent never edits what judges its own work.
+Agent jobs check out with `persist-credentials: false`. What leaves an agent job is structured output validated against a schema and a patch file; the writing job applies the patch on a fresh runner. The app has no Workflows permission, and after applying a patch the publish scripts refuse it if git staged a change to CI or gate configuration (the list is in [code.md](code.md)): an agent never edits what judges its own work. Two knobs stay open by design: `[tool.ruff]` per-file-ignores and coverage's `fail_under` live in ordinary project config that a real fix legitimately changes, so a change to them is left to the pull request's review rather than refused.
 
 **Merging.** No job merges. The publish job turns on auto-merge and GitHub merges when the repository's required checks pass. The app is not an organization admin and cannot bypass a ruleset.
 
