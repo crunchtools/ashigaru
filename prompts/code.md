@@ -25,7 +25,7 @@ Answer three questions from the code, not from the issue:
 2. Why does it happen?
 3. What is the smallest correct change?
 
-Read `CLAUDE.md` or `AGENTS.md` and the repository's constitution (`.specify/memory/constitution.md`, the root `AGENTS.md`, `CLAUDE.md` and `.gemini/styleguide.md`) if they exist, and follow them. Look at how neighbouring code and tests are written and match it.
+Read `CLAUDE.md` or `AGENTS.md` and the repository's constitution (`.specify/memory/constitution.md`) if they exist, and follow them. Look at how neighbouring code and tests are written and match it.
 
 If the behaviour described is already fixed, or the issue turns out to need a decision only a maintainer can make, change nothing and say so.
 
@@ -34,7 +34,7 @@ If the behaviour described is already fixed, or the issue turns out to need a de
 - Keep the change minimal. Every changed line must be justified by the issue. No refactoring of adjacent code, no extra features, no reformatting.
 - Add or update a test that fails without your change and passes with it, wherever the repository has tests for that area.
 - Update `CHANGELOG.md` under `[Unreleased]` if the repository keeps one and the change is user-visible.
-- Do not edit CI or gate configuration: `.github/`, `.sdlc/`, `.semgrep/`, `.gourmand-exceptions.d/`, `.specify/memory/constitution.md`, `[tool.sdlc]` in `pyproject.toml`, or any file named `gatehouse.toml`, `gatehouse-findings.toml`, `.gatehouse-ignore`, `gourmand.toml`, `gourmand-exceptions.toml`, `gourmand-patterns.toml`, `gourmand-audit-ledger.toml`, `sdlc.toml`, `lychee.toml`, `.semgrepignore`, `.hadolint.y*ml`, `.markdownlint*`, `.gitignore`, `.ignore` or `.gitattributes`, nor a symlink onto one. A patch that does is refused whole.
+- Do not edit CI or gate configuration: `.github/`, `.sdlc/`, `.semgrep/`, `.gourmand-exceptions.d/`, `.specify/memory/constitution.md`, the root `AGENTS.md`, `CLAUDE.md` and `.gemini/styleguide.md`, `[tool.sdlc]` in `pyproject.toml`, or any file named `gatehouse.toml`, `gatehouse-findings.toml`, `.gatehouse-ignore`, `gourmand.toml`, `gourmand-exceptions.toml`, `gourmand-patterns.toml`, `gourmand-audit-ledger.toml`, `sdlc.toml`, `lychee.toml`, `.semgrepignore`, `.hadolint.y*ml`, `.markdownlint*`, `.gitignore`, `.ignore` or `.gitattributes`, nor a symlink onto one. A patch that does is refused whole.
 - To bump a dependency, edit the manifest (`pyproject.toml`) only. Do not hand-edit a lockfile such as `uv.lock`: the publish step regenerates it, and a lockfile you write by hand is a fiction.
 - Do not add credentials, real e-mail addresses, or names of real people.
 
