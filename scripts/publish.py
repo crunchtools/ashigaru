@@ -24,7 +24,7 @@ from common import (
     observing,
     set_output,
     set_state,
-    touches_protected,
+    staged_refusal,
 )
 from findings import REBUILD_MARKER
 from relock import relock
@@ -53,8 +53,6 @@ def refusal(result: dict, patch: str) -> str | None:
         return f"No fix was produced: {reason}"
     if not patch.strip():
         return "The agent reported a fix but changed no files."
-    if touches_protected(patch):
-        return "The change touches `.github/`, which Ashigaru does not modify."
     return None
 
 
@@ -89,6 +87,9 @@ def apply_patch(path: Path, patch: str) -> str | None:
         git("apply", "--index", "--3way", str(path))
     except subprocess.CalledProcessError:
         return "The fix no longer applies to the default branch."
+    touched = staged_refusal()
+    if touched:
+        return f"The change touches {touched}, which Ashigaru does not modify."
     why = relock(patch, Path.cwd())
     if why is None:
         print(tidy(patch, Path.cwd()))

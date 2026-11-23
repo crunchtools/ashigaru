@@ -5,7 +5,6 @@ from unittest.mock import patch
 
 import pytest
 
-from common import touches_protected
 from findings import REBUILD_MARKER
 from fix_publish import asked, next_step, post_reply, replies
 from publish import (
@@ -22,8 +21,6 @@ from publish import (
 )
 
 PATCH = "diff --git a/src/app.py b/src/app.py\n--- a/src/app.py\n+++ b/src/app.py\n@@ -1 +1 @@\n-a\n+b\n"
-WORKFLOW_PATCH = PATCH.replace("src/app.py", ".github/workflows/ci.yml")
-RENAME_OUT = "diff --git a/.github/workflows/ci.yml b/docs/ci.yml\nrename from x\nrename to y\n"
 
 
 def test_a_fix_with_a_patch_is_published():
@@ -37,16 +34,6 @@ def test_no_fix_is_handed_to_a_human_with_the_reason():
 
 def test_a_claimed_fix_without_changes_is_refused():
     assert "changed no files" in refusal({"status": "fixed"}, "  \n")
-
-
-ACTION_PATCH = PATCH.replace("src/app.py", ".github/actions/setup/action.yml")
-
-
-def test_nothing_under_dot_github_is_ever_published():
-    assert touches_protected(WORKFLOW_PATCH) and touches_protected(RENAME_OUT)
-    assert touches_protected(ACTION_PATCH)
-    assert not touches_protected(PATCH)
-    assert ".github/" in refusal({"status": "fixed"}, WORKFLOW_PATCH)
 
 
 def test_a_maintainer_comment_is_never_dismissed():

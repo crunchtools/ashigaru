@@ -15,7 +15,7 @@ import sys
 from pathlib import Path
 
 import inbox
-from common import NEEDS_HUMAN, gh, git, observing, set_state, touches_protected
+from common import NEEDS_HUMAN, gh, git, observing, set_state, staged_refusal
 from findings import ANSWER_MARKER, MAX_ROUNDS, ROUND_MARKER
 from publish import BOT_EMAIL, BOT_NAME, TRAILER
 from relock import relock
@@ -127,9 +127,6 @@ def main() -> int:
         result = json.loads(args.result.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError, TypeError):
         result = {}
-    if touches_protected(patch):
-        hand_off(args.repo, number, "The fix touches `.github/`, which Ashigaru does not modify.")
-        return 0
 
     sha = None
     if patch.strip():
@@ -139,6 +136,10 @@ def main() -> int:
             git("apply", "--index", "--3way", str(args.patch))
         except subprocess.CalledProcessError:
             hand_off(args.repo, number, "The fix no longer applies to the pull request branch.")
+            return 0
+        touched = staged_refusal()
+        if touched:
+            hand_off(args.repo, number, f"The fix touches {touched}, which Ashigaru does not modify.")
             return 0
         stale_lock = relock(patch, Path.cwd())
         if stale_lock:

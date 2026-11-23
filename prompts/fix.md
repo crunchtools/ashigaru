@@ -20,7 +20,7 @@ For each entry in `failed_checks`, read the log, find the cause and fix it in th
 ## Rules
 
 - Stay inside the scope of this pull request. Fix what is listed; do not start new work.
-- Do not edit anything under `.github/`.
+- Do not edit CI or gate configuration: `.github/`, `.sdlc/`, `.semgrep/`, `.gourmand-exceptions.d/`, `.specify/memory/constitution.md`, the root `AGENTS.md`, `CLAUDE.md` and `.gemini/styleguide.md`, `[tool.sdlc]` in `pyproject.toml`, or any file named `gatehouse.toml`, `gatehouse-findings.toml`, `.gatehouse-ignore`, `gourmand.toml`, `gourmand-exceptions.toml`, `gourmand-patterns.toml`, `gourmand-audit-ledger.toml`, `sdlc.toml`, `lychee.toml`, `.semgrepignore`, `.hadolint.y*ml`, `.markdownlint*`, `.gitignore`, `.ignore` or `.gitattributes`, nor a symlink onto one. A patch that does is refused whole.
 - Prefer fixing over arguing. Use `not_a_bug` only when you are sure.
 
 ## Result

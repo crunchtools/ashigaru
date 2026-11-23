@@ -7,7 +7,6 @@ from pathlib import Path
 import pytest
 
 import relock as relock_module
-from common import touches_protected
 from relock import relock, wanted
 
 MANIFEST = (
@@ -15,7 +14,6 @@ MANIFEST = (
     "--- a/pyproject.toml\n+++ b/pyproject.toml\n@@ -1 +1 @@\n-a\n+b\n"
 )
 OTHER = MANIFEST.replace("pyproject.toml", "src/app.py")
-WORKFLOW = MANIFEST.replace("pyproject.toml", ".github/workflows/ci.yml")
 
 
 def repo(tmp_path: Path, lock: bool = True) -> Path:
@@ -76,7 +74,6 @@ def test_a_missing_uv_hands_over_not_a_traceback(tmp_path):
 
 
 def test_a_relock_is_no_route_to_the_workflows(tmp_path):
-    assert touches_protected(WORKFLOW)  # a patch naming .github/ is refused before any relock runs
     got = relock(MANIFEST, repo(tmp_path), run=done(), strays=lambda root: {".github/workflows/ci.yml"})
     assert ".github/workflows/ci.yml" in got
 
