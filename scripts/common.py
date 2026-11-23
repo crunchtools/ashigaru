@@ -80,8 +80,8 @@ DENIED_NAMES = (
 them grades its own work. .gitattributes is here because it can turn a file's diff into a binary
 blob or mark it generated, which hides it from review; .ignore because Gourmand's walker honours it."""
 DENIED_PATHS = (".specify/memory/constitution.md", "AGENTS.md", "CLAUDE.md", ".gemini/styleguide.md")
-"""Paths at the root only: the constitution, and the files Gatehouse reads from the base branch to
-build its reviewers' prompt."""
+"""Exact paths from the root, matched nowhere else: the constitution, and the root files Gatehouse
+reads from the base branch to build its reviewers' prompt."""
 SYMLINK = "120000"
 SECRET = re.compile(r"sk-ant-[\w-]{16,}|gh[pousr]_\w{20,}|github_pat_\w{20,}")
 """Anything shaped like a Claude or GitHub token. Blanked out of agent-written text before it
