@@ -95,3 +95,13 @@ path = "src/ashigaru/desk/forges/github.py"
 item = "GitHub.subject"
 justification = "matched against dispatch.assign_in, relock, hooks and render on statement shape alone (a read, guards, one write and a return); an issue fetch shares no logic with any of them"
 classification = "gourmand_bug"
+
+# [tool.sdlc.ci.py315] runs in sdlc's nested container, where the repo is
+# mounted read-only at /repo and /tmp is the one writable tmpfs: the venv has
+# to live there. It is a path inside that container, not on any host.
+[[exceptions]]
+check = "absolute_paths"
+path = "pyproject.toml"
+pattern = "/tmp"
+justification = "the py315 command's venv lives on the sdlc command container's /tmp tmpfs because /repo is mounted read-only; a container path, never a host one"
+classification = "by_design"
