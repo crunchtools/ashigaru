@@ -8,7 +8,7 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
-- CI is the fleet's one `ci.yml` (sdlc 0.15). The Python 3.15 pytest run that `ci.yml`'s `py315` job did is now declared in `[tool.sdlc.ci]`: an `image-build` of `ci/py315.Containerfile` (Fedora 45, its python3, uv 0.13.7) and a `command` running the locked pytest in it. The image's build, boot and contract gate moved from `container.yml` to `[tool.sdlc.image]`. The tests that read `container.yml` now check that contract and that a tag push builds nothing.
+- CI is the fleet's one `ci.yml` (sdlc 0.15). The Python 3.15 pytest run that `ci.yml`'s `py315` job did is now declared in `[tool.sdlc.ci]`: an `image-build` of `ci/py315.Containerfile` (Fedora 45, its python3, uv 0.13.7) and a `command` running the locked pytest in it. The image's build, boot and contract gate moved from `container.yml` to `[tool.sdlc.image]`. The tests that read `container.yml` now check that contract and that a tag push builds nothing. Dependabot is dropped with its auto-merge workflow; Renovate keeps the pins current, as across the fleet.
 
 ### Fixed
 
