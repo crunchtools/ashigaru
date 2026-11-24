@@ -76,3 +76,11 @@ skip = ["semgrep"]
 
 [tool.sdlc]
 repo-kinds = ["workflow-automation"]
+# The release image is built by the `image` job, which plans the container build.
+stacks = ["container"]
+
+[tool.sdlc.image]
+# Written by crunchtools/sdlc's scripts/convert_repo.py: moved from the workflows.
+image = "quay.io/crunchtools/ashigaru"
+boot = "healthcheck"
+contract-test = "packaging/container-test.sh"
