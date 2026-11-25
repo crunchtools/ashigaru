@@ -29,9 +29,9 @@ Nothing is labeled, approved, merged or closed. The recommendation is an opinion
 - dependency-scan alerts (issues by `github-actions[bot]` labeled `security` and `dependencies`) open more than three days. The scan files them with the workflow token, which starts no workflow, and triage reads only what people wrote, so this list is the one place they surface;
 - issues labeled `ready-to-code` that closed as completed in the past seven days, which is what Ashigaru fixed;
 - open issues labeled `triaged` in the past seven days, which wait on a maintainer to add `ready-to-code` or close them.
-- repositories whose CI is red on the default branch, with links to the failed checks, and the constitution's dispatched `fleet-drift.yml` and `validate-cascade.yml` when their last run failed ([sweep](sweep.md)).
+- repositories whose CI is red on the default branch, with links to the failed checks ([sweep](sweep.md)).
 
-The fixed and triaged lists come from one GraphQL search of public repositories each, which also returns each issue's recent label events, so the triage date costs no extra request. The red list comes from one GraphQL query of the organization's repositories and two requests for the constitution's workflow runs. The body has no timestamps and names people without an `@`, so it is edited only when the list changes, including when an item ages out of the week, and never notifies anyone.
+The fixed and triaged lists come from one GraphQL search of public repositories each, which also returns each issue's recent label events, so the triage date costs no extra request. The red list comes from one GraphQL query of the organization's repositories. The body has no timestamps and names people without an `@`, so it is edited only when the list changes, including when an item ages out of the week, and never notifies anyone.
 
 ## Example
 

@@ -239,7 +239,7 @@ def test_the_past_week_is_one_paginated_search_of_public_repos_per_list(monkeypa
     assert "is:open label:triaged updated:>=2026-10-09T00:00:00Z" in queries[1]
 
 
-def test_red_is_one_paginated_query_of_public_repos_and_one_call_per_watched_workflow(monkeypatch):
+def test_red_is_one_paginated_query_of_public_repos_and_no_rest_call(monkeypatch):
     graphql_calls, rest_calls = [], []
     node = {"nameWithOwner": "o/r", "isArchived": False, "defaultBranchRef": {"name": "main", "target": {
         "oid": "abc1234", "url": "https://github.com/o/r/commit/abc1234",
@@ -262,10 +262,7 @@ def test_red_is_one_paginated_query_of_public_repos_and_one_call_per_watched_wor
     (call,) = graphql_calls
     assert "--paginate" in call and "org=o" in call
     assert "privacy: PUBLIC" in sweep.DEFAULT_BRANCHES and "isArchived: false" in sweep.DEFAULT_BRANCHES
-    assert rest_calls == [
-        "repos/o/constitution/actions/workflows/fleet-drift.yml/runs?status=completed&per_page=1",
-        "repos/o/constitution/actions/workflows/validate-cascade.yml/runs?status=completed&per_page=1",
-    ]
+    assert rest_calls == []
 
 
 def test_a_read_that_fails_is_named_in_the_part_and_does_not_stop_the_sweep(monkeypatch):
@@ -277,8 +274,6 @@ def test_a_read_that_fails_is_named_in_the_part_and_does_not_stop_the_sweep(monk
     body, count, branches = sweep.red("o")
     assert count == 0 and branches is None
     assert "- Could not read the default branches; see the sweep log." in body
-    assert "- Could not read constitution fleet-drift.yml; see the sweep log." in body
-    assert "- Could not read constitution validate-cascade.yml; see the sweep log." in body
 
 
 def inbox_run(monkeypatch, dry_run, branches=(), missed=()):

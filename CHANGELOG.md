@@ -10,6 +10,10 @@ All notable changes to this project are documented here. The format follows
 
 - CI is the fleet's one `ci.yml` (sdlc 0.15). The Python 3.15 pytest run that `ci.yml`'s `py315` job did is now declared in `[tool.sdlc.ci]`: an `image-build` of `ci/py315.Containerfile` (Fedora 45, its python3, uv 0.13.7) and a `command` running the locked pytest in it. The image's build and boot gate moved from `container.yml` to `[tool.sdlc.image]`. The contract test (`packaging/container-test.sh`) did not: sdlc does not run `contract-test` until sdlc#118 (sdlc#168), so the image ships without it until then. The key stays in `[tool.sdlc.image]` so the gate returns with that release. The tests that read `container.yml` now check that contract and that a tag push builds nothing. Dependabot is dropped with its auto-merge workflow; Renovate keeps the pins current, as across the fleet.
 
+### Removed
+
+- The inbox's "Red on the default branch" part no longer watches the constitution's `fleet-drift.yml` and `validate-cascade.yml` (a1542). crunchtools/constitution#227 deletes both with constitution v1, and every sweep would then list two unreadable workflows. The part is the one GraphQL query over default branches; the two REST requests are gone.
+
 ### Fixed
 
 - The app's bot is trusted under its real login, `ashigaru-crunchtools-com[bot]` (GitHub id 340727104; a1409). The image set `ASHIGARU_FORGE_AUTHORS_GITHUB` to `ashigaru-crunchtools[bot]`, a login GitHub does not have, so the Desk sweep listed the app's own release PRs as outsiders in NEEDS YOU instead of queuing them. The scripts' defaults carried the same wrong name: commits now go out as `ashigaru-crunchtools-com[bot]` with its `340727104+` noreply address, a review result finds its earlier comment to update, and the `--bot` defaults of `findings.py`, `release.py`, `release_publish.py` and `sweep.py` name the app `ashigaru-crunchtools-com`.

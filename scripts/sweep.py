@@ -186,9 +186,6 @@ query($org: String!, $endCursor: String) {
 """
 """Each public repository's default branch head and its check rollup, a hundred repositories a
 request. Public only: the inbox is a public issue."""
-WATCHED_REPO = "constitution"
-WATCHED_WORKFLOWS = ("fleet-drift.yml", "validate-cascade.yml")
-"""Run by hand or by dispatch, never on a push, so their result is not in any branch's rollup."""
 
 
 def graphql(query: str, **variables: str) -> list[dict]:
@@ -203,15 +200,9 @@ def search(query: str, since: str) -> list[dict]:
     return [node for page in graphql(SEARCH, since=since, q=query) for node in page["search"]["nodes"]]
 
 
-def last_run(repo: str, workflow: str) -> dict | None:
-    """The latest completed run of one workflow, or None if it never completed."""
-    runs = api(f"repos/{repo}/actions/workflows/{workflow}/runs?status=completed&per_page=1")
-    return next(iter(runs["workflow_runs"]), None)
-
-
 def red(org: str) -> tuple[str, int, list[dict] | None]:
-    """The inbox part listing red default branches and watched runs, how many are red, and the
-    red branches themselves, or None when they could not be read.
+    """The inbox part listing red default branches, how many are red, and the red branches
+    themselves, or None when they could not be read.
 
     A failed read is named in the part, not raised: the rest of the inbox still updates.
     """
@@ -225,19 +216,8 @@ def red(org: str) -> tuple[str, int, list[dict] | None]:
     except subprocess.CalledProcessError as error:
         print(f"::warning::could not read the default branches: {error.stderr.strip()}")
         branches, unread = None, ["the default branches"]
-    runs = []
-    repo = f"{org}/{WATCHED_REPO}"
-    for workflow in WATCHED_WORKFLOWS:
-        try:
-            run = last_run(repo, workflow)
-        except subprocess.CalledProcessError as error:
-            print(f"::warning::could not read {repo} {workflow}: {error.stderr.strip()}")
-            unread.append(f"{WATCHED_REPO} {workflow}")
-            continue
-        if failed := inbox.failed_run(repo, workflow, run):
-            runs.append(failed)
     listed = branches or []
-    return inbox.red(listed, runs, unread), len(listed) + len(runs), branches
+    return inbox.red(listed, unread), len(listed), branches
 
 
 def red_actions(branches: list[dict], issues: list[dict], before: str) -> list[dict]:

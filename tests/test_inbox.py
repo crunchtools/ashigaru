@@ -6,7 +6,6 @@ from inbox import (
     MAX_REVIEWS,
     blocked_releases,
     due,
-    failed_run,
     fixed,
     handed_over,
     held_releases,
@@ -358,7 +357,7 @@ def test_a_red_branch_links_its_failed_checks_and_statuses_but_not_the_cancelled
         {"context": "ci/legacy", "state": "ERROR", "targetUrl": "https://ci.example.com/9"},
         {"context": "ci/ok", "state": "SUCCESS", "targetUrl": "https://ci.example.com/8"},
     ]
-    body = red(red_branches([repo_node("mcp-x", "FAILURE", contexts)]), [], [])
+    body = red(red_branches([repo_node("mcp-x", "FAILURE", contexts)]), [])
     assert body.startswith("## Red on the default branch (1)\n\n")
     assert (
         "- [mcp-x](https://github.com/o/mcp-x/commit/abc1234def) `main` at `abc1234`: failure. "
@@ -368,34 +367,21 @@ def test_a_red_branch_links_its_failed_checks_and_statuses_but_not_the_cancelled
 
 
 def test_a_red_branch_with_no_failed_check_listed_still_says_where_to_look():
-    body = red(red_branches([repo_node("mcp-x", "FAILURE", [check("t", "CANCELLED")])]), [], [])
+    body = red(red_branches([repo_node("mcp-x", "FAILURE", [check("t", "CANCELLED")])]), [])
     assert "failure. No check failed outright; see the commit." in body
 
 
 def test_a_strangers_check_name_and_link_stay_inert():
     hostile = check("x` [click](http://evil) @maintainer\n![i](http://evil)", "FAILURE",
                     url="https://evil.example/a) [more](http://evil")  # fmt: skip
-    line = red(red_branches([repo_node("r", "FAILURE", [hostile])]), [], []).splitlines()[2]
+    line = red(red_branches([repo_node("r", "FAILURE", [hostile])]), []).splitlines()[2]
     assert line.endswith("Failing: `x' [click](http://evil) @maintainer ![i](http://evil)`.")
     assert "evil.example" not in line
 
 
-def test_a_watched_run_is_red_only_when_its_last_completed_run_failed():
-    run = {"conclusion": "failure", "html_url": "https://github.com/o/constitution/actions/runs/3",
-           "created_at": "2026-10-18T05:01:01Z"}  # fmt: skip
-    assert failed_run("o/constitution", "fleet-drift.yml", None) is None
-    assert failed_run("o/constitution", "fleet-drift.yml", {**run, "conclusion": "success"}) is None
-    assert failed_run("o/constitution", "fleet-drift.yml", {**run, "conclusion": "cancelled"}) is None
-    body = red([], [failed_run("o/constitution", "fleet-drift.yml", run)], [])
-    assert (
-        "- [constitution](https://github.com/o/constitution/actions/runs/3) `fleet-drift.yml`, "
-        "last run 2026-10-18: failure."
-    ) in body
-
-
 def test_nothing_red_says_so_and_what_could_not_be_read_is_named():
-    assert red([], [], []) == "## Red on the default branch (0)\n\nNothing red.\n"
-    body = red([], [], ["the default branches"])
+    assert red([], []) == "## Red on the default branch (0)\n\nNothing red.\n"
+    body = red([], ["the default branches"])
     assert "- Could not read the default branches; see the sweep log." in body
 
 
@@ -404,7 +390,7 @@ def test_checks_past_the_page_read_are_counted_so_a_failure_there_is_not_hidden(
     node["defaultBranchRef"]["target"]["statusCheckRollup"]["contexts"]["totalCount"] = 130
     assert (
         "Failing: [`t`](https://github.com/o/r/actions/runs/1/job/2). "
-        "129 more checks were not read; see the commit." in red(red_branches([node]), [], [])
+        "129 more checks were not read; see the commit." in red(red_branches([node]), [])
     )
 
 
