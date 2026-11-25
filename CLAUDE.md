@@ -7,9 +7,8 @@ Everything runs from containers; the host needs only git, podman, pre-commit and
 
 # Layout
 
-- `.github/workflows/{triage,code,fix,release}.yml`: the reusable workflows, the product. `router.yml` is the only one a caller names; it picks among them per event. A new job goes in the router, not the caller.
-- `.github/workflows/sweep.yml`: scheduled here only.
-- `.github/workflows/ci.yml`: this repo's own CI, the fleet's one file; Ashigaru reaches this repo through its `ai` and `write` jobs.
+- `.github/workflows/ci.yml`: the fleet's one file. Its `ai` and `write` jobs run triage, code, fix and release tagging in every enrolled repo, this one included, from the scripts the sdlc image carries.
+- `.github/workflows/sweep.yml`: dispatched here only. `rpm.yml` builds the RPM.
 - `scripts/`: every decision and every write. Standard library and `gh` only. Pure functions are tested in `tests/`; `main()` does the I/O.
 - `prompts/`, `schemas/`: what each agent is told and what it must return.
 - `src/ashigaru/`: 3.x, the Desk and its clients; `docs/desk-api.md` is the contract.
@@ -18,8 +17,8 @@ Everything runs from containers; the host needs only git, podman, pre-commit and
 
 # Rules that are easy to break
 
-- A job that runs `claude-code-action/base-action` gets a read-only token, `persist-credentials: false`, and never the app token. `tests/test_workflows.py` enforces it.
+- The job that runs a model holds a read-only token and never the app key; the job that writes runs no model. sdlc's `ai` and `write` enforce it.
 - Logic goes in `scripts/`, not in workflow shell.
 - Event values reach scripts through `env:`, never interpolated into `run:`.
-- Releasing: see `docs/enrollment.md`. `VERSION` and the CHANGELOG move together; callers and the literal `ref:` in each reusable workflow name the major tag (`v2`), which `major-tag.yml` moves when a release is published.
-- Label names, input names, the `ashigaru/` branch prefix and job names are public interface: a change is a MAJOR release.
+- Releasing: see `docs/enrollment.md`. `VERSION` and the CHANGELOG move together. The fleet runs the commit sdlc pins, not a tag of ours.
+- Label names, the `ashigaru/` branch prefix and the scripts' arguments sdlc calls are public interface: a change is a MAJOR release.

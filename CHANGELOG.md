@@ -8,6 +8,8 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- The workflows the fleet `ci.yml` replaced are gone: `router.yml`, `triage.yml`, `code.yml`, `fix.yml`, `review.yml`, `release.yml`, `release-tag.yml` and `major-tag.yml`, with the caller `examples/ashigaru.yml` and the router's tests. Triage, code, fix and release tagging run in `ci.yml`'s `ai` and `write` jobs from the scripts the sdlc image carries, which stay. The docs describe that wiring: no per-repository inputs (the models, limits and tools are sdlc's), no major tag for callers, and no pre-commit retry loop in the code agent, which sdlc dropped because it ran repository code next to the Claude token. `tests/test_workflows.py` now checks `sweep.yml` and that the retired files stay gone.
+
 - CI is the fleet's one `ci.yml` (sdlc 0.15). The Python 3.15 pytest run that `ci.yml`'s `py315` job did is now declared in `[tool.sdlc.ci]`: an `image-build` of `ci/py315.Containerfile` (Fedora 45, its python3, uv 0.13.7) and a `command` running the locked pytest in it. The image's build and boot gate moved from `container.yml` to `[tool.sdlc.image]`. The contract test (`packaging/container-test.sh`) did not: sdlc does not run `contract-test` until sdlc#118 (sdlc#168), so the image ships without it until then. The key stays in `[tool.sdlc.image]` so the gate returns with that release. The tests that read `container.yml` now check that contract and that a tag push builds nothing. Dependabot is dropped with its auto-merge workflow; Renovate keeps the pins current, as across the fleet.
 
 ### Removed

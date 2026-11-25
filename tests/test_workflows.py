@@ -1,30 +1,20 @@
-"""The workflow files hold the limits and the authority split the profile requires."""
+"""The workflow files hold the limits and the authority split the profile requires.
 
-import json
-import re
+Triage, code, fix and release tagging run in the fleet's ci.yml, through sdlc's
+`ai` and `write` jobs; what is left here is sweep.yml.
+"""
+
 from pathlib import Path
 
-import pytest
 import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOWS = ROOT / ".github" / "workflows"
 VERSION = (ROOT / "VERSION").read_text().strip()
-# The tag callers use. Each release moves it, so no caller is edited to get a release.
-MAJOR = f"v{VERSION.split('.')[0]}"
-PRODUCT = (
-    "triage.yml", "code.yml", "fix.yml", "sweep.yml", "review.yml", "major-tag.yml", "release.yml",
-    "router.yml", "release-tag.yml",
+RETIRED = (
+    "triage.yml", "code.yml", "fix.yml", "review.yml", "router.yml", "release.yml", "release-tag.yml",
+    "major-tag.yml", "ashigaru.yml",
 )  # fmt: skip
-REUSABLE = PRODUCT[:3]
-AGENTS = (*REUSABLE, "review.yml")
-"""Workflows that run a model. Each fetches its scripts at the major tag."""
-UNSWITCHED = ("release-tag.yml", "release.yml", "major-tag.yml")
-"""Workflows that run no model and must keep tagging releases while ASHIGARU_ENABLED is false."""
-SWITCHED = tuple(name for name in PRODUCT if name not in UNSWITCHED)
-COMMIT = re.compile(r"[0-9a-f]{40}")
-BASE_ACTION = "anthropics/claude-code-action/base-action@"
-WRITE = {"write"}
 
 
 def load(name):
@@ -39,177 +29,32 @@ def steps_of(job):
     return job.get("steps", [])
 
 
-def runs_llm(job):
-    return any(str(step.get("uses", "")).startswith(BASE_ACTION) for step in steps_of(job))
-
-
-@pytest.mark.parametrize("name", PRODUCT)
-def test_workflows_start_from_no_permissions(name):
-    assert load(name)["permissions"] == {}
-
-
-@pytest.mark.parametrize("name", SWITCHED)
-def test_the_switch_gates_the_first_job_and_every_job_has_a_timeout(name):
-    gated = False
-    for _, job in jobs(name):
-        # A job that calls a workflow cannot set a timeout; the called jobs set their own.
-        assert "uses" in job or isinstance(job.get("timeout-minutes"), int)
-        # The router's release route is the one exception (test_the_router_tags_releases_with_the_switch_off).
-        if "needs" not in job and not (
-            name == "router.yml" and job.get("uses", "").endswith(f"release-tag.yml@{MAJOR}")
-        ):
-            assert "vars.ASHIGARU_ENABLED == 'true'" in job["if"]
-            gated = True
-    assert gated
-
-
-@pytest.mark.parametrize("name", UNSWITCHED)
-def test_release_tagging_ignores_the_switch_and_runs_no_model(name):
-    """ASHIGARU_ENABLED=false must not stop a merged release from being tagged, nor v2 from moving."""
-    for _, job in jobs(name):
-        assert "uses" in job or isinstance(job.get("timeout-minutes"), int)
-        assert "ASHIGARU_ENABLED" not in str(job)
-        assert not runs_llm(job)
-
-
-def test_the_router_tags_releases_with_the_switch_off():
-    routes = load("router.yml")["jobs"]
-    assert "ASHIGARU_ENABLED" not in routes["release"]["if"]
-    for name, job in routes.items():
-        if name != "release":
-            assert "vars.ASHIGARU_ENABLED == 'true'" in job["if"]
-
-
-def test_a_caller_copied_at_2_13_1_reaches_the_same_release_tag():
-    job = load("release.yml")["jobs"]["publish"]
-    assert job["uses"] == f"crunchtools/ashigaru/.github/workflows/release-tag.yml@{MAJOR}"
-    assert job["secrets"] == {"ASHIGARU_APP_KEY": "${{ secrets.ASHIGARU_APP_KEY }}"}
-    assert job["permissions"] == {"contents": "read"}
-
-
-@pytest.mark.parametrize("name", ("release-tag.yml", "major-tag.yml"))
-def test_release_tagging_pins_its_actions_by_commit(name):
-    """The steps holding a write token run only code whose owner cannot move it under us."""
-    uses = [step["uses"] for _, job in jobs(name) for step in steps_of(job) if "uses" in step]
-    assert uses
-    for ref in uses:
-        assert COMMIT.fullmatch(ref.partition("@")[2]), ref
-
-
-@pytest.mark.parametrize("name", AGENTS)
-def test_a_job_that_runs_an_llm_holds_no_write_credential(name):
-    seen = False
-    for job_name, job in jobs(name):
-        if not runs_llm(job):
-            continue
-        seen = True
-        assert not set(job["permissions"].values()) & WRITE, job_name
-        for step in steps_of(job):
-            assert "create-github-app-token" not in str(step.get("uses", "")), job_name
-            assert "ASHIGARU_APP" not in str(step), job_name
-            if str(step.get("uses", "")).startswith("actions/checkout@"):
-                assert step["with"]["persist-credentials"] is False, job_name
-    assert seen
-
-
-@pytest.mark.parametrize("name", AGENTS)
-def test_every_agent_step_has_a_turn_limit_and_a_tool_list(name):
-    for _, job in jobs(name):
-        for step in steps_of(job):
-            if str(step.get("uses", "")).startswith(BASE_ACTION):
-                args = step["with"]["claude_args"]
-                assert "--max-turns" in args and "--allowedTools" in args
-
-
-@pytest.mark.parametrize("name", ["triage.yml", "review.yml"])
-def test_an_agent_that_reads_outside_text_cannot_edit(name):
-    args = [
-        step["with"]["claude_args"]
-        for _, job in jobs(name)
-        for step in steps_of(job)
-        if str(step.get("uses", "")).startswith(BASE_ACTION)
-    ]
-    assert args and all('--allowedTools "Read,Glob,Grep"' in value for value in args)
-
-
-@pytest.mark.parametrize("name", (*AGENTS, "release-tag.yml"))
-def test_reusable_workflows_fetch_their_scripts_at_the_major_tag(name):
-    """A called workflow cannot name its own ref, so the tag is a literal: the one callers use."""
-    fetches = [
-        step["with"]["ref"]
-        for _, job in jobs(name)
-        for step in steps_of(job)
-        if step.get("with", {}).get("repository") == "crunchtools/ashigaru"
-    ]
-    assert fetches and set(fetches) == {MAJOR}
-
-
-def test_the_caller_uses_the_major_tag():
-    """examples/ashigaru.yml is the caller for repos not yet on the fleet ci.yml; this repo is on
-    it, and its `ai` and `write` jobs route the same events."""
-    example = (ROOT / "examples" / "ashigaru.yml").read_text()
-    assert not (WORKFLOWS / "ashigaru.yml").exists()
-    calls = {name: job["uses"] for name, job in yaml.safe_load(example)["jobs"].items()}
-    assert calls == {"ashigaru": f"crunchtools/ashigaru/.github/workflows/router.yml@{MAJOR}"}
-    routes = {name: job["uses"] for name, job in jobs("router.yml") if "uses" in job}
-    assert routes == {
-        name: f"crunchtools/ashigaru/.github/workflows/{called}.yml@{MAJOR}"
-        for name, called in (
-            ("triage", "triage"),
-            ("code", "code"),
-            ("fix", "fix"),
-            ("release", "release-tag"),
-        )
-    }
-
-
-def test_a_merged_release_pull_request_is_published_then_not_at_the_next_sweep():
-    """#166: in auto mode the release pull request merged and nothing tagged it for up to an hour."""
-    caller = yaml.safe_load((ROOT / "examples" / "ashigaru.yml").read_text())
-    assert "closed" in caller[True]["pull_request_target"]["types"]
-    job = load("router.yml")["jobs"]["release"]
-    for clause in (
-        "github.event_name == 'pull_request_target'",
-        "github.event.pull_request.merged == true",
-        "github.event.pull_request.head.repo.full_name == github.repository",
-        "startsWith(github.event.pull_request.head.ref, 'ashigaru/release-')",
-    ):
-        assert clause in job["if"]
-        assert clause in load("release-tag.yml")["jobs"]["publish"]["if"]
-    assert job["secrets"] == {"ASHIGARU_APP_KEY": "${{ secrets.ASHIGARU_APP_KEY }}"}
-    assert "github.event.pull_request.head.ref" in caller["concurrency"]["group"]
-
-
-def test_the_release_on_merge_tags_with_the_app_token_for_this_repository_only():
-    """A tag made with GITHUB_TOKEN starts no workflow, so container.yml would never run."""
-    job = load("release-tag.yml")["jobs"]["publish"]
-    mint = tokens(job)["app"]
-    assert grants(mint) == {"permission-contents": "write", "permission-pull-requests": "read"}
-    assert mint["with"]["repositories"] == "${{ github.event.repository.name }}"
-    run = [step for step in steps_of(job) if "release_publish.py" in str(step.get("run"))]
-    assert len(run) == 1 and run[0]["env"]["GH_TOKEN"] == "${{ steps.app.outputs.token }}"
-    assert "github.token" not in str(job)
-    assert job["permissions"] == {"contents": "read"}
-
-
-def test_the_fix_job_ignores_runs_that_a_reply_started():
-    condition = load("fix.yml")["jobs"]["agent"]["if"]
-    assert "workflow_run.event == 'pull_request_target'" in condition
-    assert "startsWith(github.event.workflow_run.head_branch, 'ashigaru/')" in condition
-    assert "head_repository.full_name == github.repository" in condition
-
-
-def test_the_fix_agent_leaves_release_pull_requests_alone():
-    condition = load("fix.yml")["jobs"]["agent"]["if"]
-    assert "!startsWith(github.event.workflow_run.head_branch, 'ashigaru/release-')" in condition
-
-
 def tokens(job):
     return {step["id"]: step for step in steps_of(job) if "create-github-app-token" in str(step.get("uses"))}
 
 
 def grants(step):
     return {key: value for key, value in step["with"].items() if key.startswith("permission-")}
+
+
+def test_the_workflows_ci_yml_replaced_stay_gone():
+    assert not [name for name in RETIRED if (WORKFLOWS / name).exists()]
+    assert not (ROOT / "examples" / "ashigaru.yml").exists()
+
+
+def test_the_sweep_starts_from_no_permissions():
+    assert load("sweep.yml")["permissions"] == {}
+
+
+def test_the_switch_gates_the_sweep_and_every_job_has_a_timeout():
+    gated = False
+    for _, job in jobs("sweep.yml"):
+        # A job that calls a workflow cannot set a timeout; the called jobs set their own.
+        assert "uses" in job or isinstance(job.get("timeout-minutes"), int)
+        if "needs" not in job:
+            assert "vars.ASHIGARU_ENABLED == 'true'" in job["if"]
+            gated = True
+    assert gated
 
 
 def test_the_release_job_can_write_only_where_and_when_a_release_is_due():
@@ -230,48 +75,5 @@ def test_changelog_has_this_version():
     assert f"## [{VERSION}]" in (ROOT / "CHANGELOG.md").read_text()
 
 
-def test_the_router_passes_secrets_to_fix_only_for_this_repository():
-    condition = load("router.yml")["jobs"]["fix"]["if"]
-    assert "head_repository.full_name == github.repository" in condition
-
-
-def test_the_guard_is_told_which_stage_it_guards():
-    for name, stage in (("triage.yml", "triage"), ("code.yml", "code")):
-        runs = [step["run"] for _, job in jobs(name) for step in steps_of(job) if step.get("id") == "guard"]
-        assert runs and all(run.endswith(f'guard.py" --stage {stage}') for run in runs), name
-
-
-def test_no_event_a_fork_can_fire_starts_a_review():
-    assert set(load("review.yml")[True]) == {"workflow_call"}
+def test_no_event_a_fork_can_fire_starts_a_sweep():
     assert set(load("sweep.yml")[True]) == {"workflow_dispatch"}
-
-
-def test_the_review_never_checks_out_the_pull_request():
-    for _, job in jobs("review.yml"):
-        for step in steps_of(job):
-            if str(step.get("uses", "")).startswith("actions/checkout@"):
-                # Ashigaru itself, or the branch the pull request targets.
-                assert step["with"]["ref"] in (MAJOR, "${{ inputs.base }}")
-    assert "pull_request_target" not in (WORKFLOWS / "review.yml").read_text().split("on:")[1]
-
-
-def test_the_review_publisher_can_comment_and_nothing_more():
-    mint = [
-        step["with"]
-        for step in steps_of(load("review.yml")["jobs"]["publish"])
-        if "create-github-app-token" in str(step.get("uses", ""))
-    ]
-    granted = {key: value for key, value in mint[0].items() if key.startswith("permission-")}
-    assert granted == {"permission-pull-requests": "write"}
-
-
-@pytest.mark.parametrize("name", AGENTS)
-def test_no_agent_can_read_its_own_environment(name):
-    """Grep on /proc/self/environ returns the Claude token unless the settings deny it."""
-    seen = False
-    for _, job in jobs(name):
-        for step in steps_of(job):
-            if str(step.get("uses", "")).startswith(BASE_ACTION):
-                seen = True
-                assert "Read(//proc/**)" in json.loads(step["with"]["settings"])["permissions"]["deny"]
-    assert seen

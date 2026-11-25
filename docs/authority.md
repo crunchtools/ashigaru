@@ -44,19 +44,19 @@ Two agents read text a stranger wrote: triage (an outside issue) and review (an 
 
 | Limit | Default | Where |
 |-------|---------|-------|
-| Switch: every workflow that runs a model, and the sweep, stops at its first job unless it is `true`; release tagging (`release-tag.yml`, `major-tag.yml`) does not | n/a | organization variable `ASHIGARU_ENABLED` |
-| Turns per agent step | 40 triage, 80 code and fix | input `max_turns` |
-| Job timeout | 20, 60 and 75 minutes | workflow files |
-| Hook passes fed back to the code agent | 2 | `code.yml` |
-| Fix rounds per pull request | 5 | input `max_rounds` |
+| Switch: the sweep stops at its first job unless it is `true` | n/a | organization variable `ASHIGARU_ENABLED` |
+| Switch: the agents in `ci.yml` run only where the provisioner copied `CLAUDE_CODE_OAUTH_TOKEN` into the repository's `ai` environment; release tagging does not need it | n/a | sdlc's provisioner |
+| Turns per agent step | 40 triage, 80 code and fix | `sdlc_jobs/ai.py` in sdlc |
+| Model time per agent or review | 60 minutes | `MODEL_SECONDS` in sdlc's `sdlc_jobs/ai.py` |
+| Fix rounds per pull request | 5 | `MAX_ROUNDS` in sdlc's `sdlc_jobs/ai.py` |
 | Issues queued for triage per sweep | 20, never more | `sweep.yml` input `limit`, `MAX_LIMIT` in `scripts/sweep.py` |
 | Fixes started by the sweep per hour, fleet-wide | 5, less the pull requests Ashigaru opened in the past hour | `sweep.yml` input `code_per_hour`, `remaining` in `scripts/sweep.py` |
 | Release bump merged without a person | minor, and only with `ashigaru-release-auto` | topics `ashigaru-release-max-patch`, `-minor`, `-major`; `configured` in `scripts/release.py` |
 | Quiet time on the default branch before a release | 20 minutes | `SETTLE` in `scripts/sweep.py` |
 | Outside pull requests reviewed per sweep | 5 | `MAX_REVIEWS` in `scripts/inbox.py` |
-| Runs at a time per issue or pull request branch | 1 | caller `concurrency`, per event kind |
+| `write` runs at a time per issue or pull request | 1 | `write`'s `concurrency` in `ci.yml` |
 
-Each is covered in `tests/test_workflows.py`, `tests/test_findings.py`, `tests/test_sweep.py`, `tests/test_inbox.py` or `tests/test_release.py`.
+The ones in this repository are covered in `tests/test_workflows.py`, `tests/test_findings.py`, `tests/test_sweep.py`, `tests/test_inbox.py` or `tests/test_release.py`; the ones in sdlc and `ci.yml` by sdlc's own tests.
 
 ## Known gaps
 
