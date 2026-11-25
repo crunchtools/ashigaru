@@ -144,9 +144,11 @@ def test_reusable_workflows_fetch_their_scripts_at_the_major_tag(name):
     assert fetches and set(fetches) == {MAJOR}
 
 
-def test_the_caller_uses_the_major_tag_and_matches_the_example():
+def test_the_caller_uses_the_major_tag():
+    """examples/ashigaru.yml is the caller for repos not yet on the fleet ci.yml; this repo is on
+    it, and its `ai` and `write` jobs route the same events."""
     example = (ROOT / "examples" / "ashigaru.yml").read_text()
-    assert (WORKFLOWS / "ashigaru.yml").read_text() == example
+    assert not (WORKFLOWS / "ashigaru.yml").exists()
     calls = {name: job["uses"] for name, job in yaml.safe_load(example)["jobs"].items()}
     assert calls == {"ashigaru": f"crunchtools/ashigaru/.github/workflows/router.yml@{MAJOR}"}
     routes = {name: job["uses"] for name, job in jobs("router.yml") if "uses" in job}

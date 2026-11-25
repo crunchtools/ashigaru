@@ -6,6 +6,10 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- CI is the fleet's one `ci.yml` (sdlc 0.15). The Python 3.15 pytest run that `ci.yml`'s `py315` job did is now declared in `[tool.sdlc.ci]`: an `image-build` of `ci/py315.Containerfile` (Fedora 45, its python3, uv 0.13.7) and a `command` running the locked pytest in it. The image's build and boot gate moved from `container.yml` to `[tool.sdlc.image]`. The contract test (`packaging/container-test.sh`) did not: sdlc does not run `contract-test` until sdlc#118 (sdlc#168), so the image ships without it until then. The key stays in `[tool.sdlc.image]` so the gate returns with that release. The tests that read `container.yml` now check that contract and that a tag push builds nothing. Dependabot is dropped with its auto-merge workflow; Renovate keeps the pins current, as across the fleet.
+
 ### Fixed
 
 - A fix round pushes with `git push --force-with-lease=<branch>:<head> origin HEAD:<branch>`, where `<head>` is the pull request head the round collected its findings and checks on (a1109). A branch that moved since then is refused: the round pushes nothing and answers nothing, and the push that moved it starts a fresh round on the new head. The round also yields, before applying anything, when the branch it checked out is no longer that head, so a patch that conflicts with code the agent never saw no longer hands the PR to a person; and a round with no patch checks the remote head before it answers a finding. Before, a plain push could land a fix written against code the agent never saw. The fleet CI design (sdlc `docs/marketplace-free-ci.md`) requires the leased push, and sdlc's write step calls this script.

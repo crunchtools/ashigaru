@@ -1,9 +1,10 @@
 #!/bin/bash
-# Contract test for the Desk image (constitution container-image VI), run by
-# container.yml against the pushed digest in $IMAGE. Starts the image as
-# production does (read-only root, /data on a volume), waits for /healthz,
-# mints an admin key against /data with ashigaru-desk mint-key, and proves the
-# key authenticates. Also: not root, and HEALTHCHECK present.
+# Contract test for the Desk image (constitution container-image VI), against
+# the image in $IMAGE. [tool.sdlc.image] contract-test names it; nothing runs
+# it in CI until sdlc#118 lands (sdlc#168). Starts the image as production
+# does (read-only root, /data on a volume), waits for /healthz, mints an admin
+# key against /data with ashigaru-desk mint-key, and proves the key
+# authenticates. Also: not root, and HEALTHCHECK present.
 set -euo pipefail
 
 : "${IMAGE:?IMAGE is the digest under test}"

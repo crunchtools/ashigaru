@@ -1,7 +1,7 @@
 # The Ashigaru Desk service: quay.io/crunchtools/ashigaru
 #
-# Built and gated by .github/workflows/container.yml (constitution
-# container-release.yml); not built by hand. The SQLite file lives on the
+# Built, gated and promoted by ci.yml's image and promote jobs ([tool.sdlc.image]
+# in pyproject.toml); not built by hand. The SQLite file lives on the
 # /data volume. The root filesystem can run read-only: nothing writes outside
 # /data. Settings are environment variables (docs/desk-api.md, Deploy).
 
