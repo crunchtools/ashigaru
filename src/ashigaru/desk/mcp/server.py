@@ -277,7 +277,8 @@ def desk_wrap(
 ) -> Item:
     """`ashigaru wrap`, admin only. `wrapping` records that /cc seat was sent. `cleared` refuses until
     CC-DONE (or a `learned`) and an idle turn, unless `force`; then clears the wrap and closes the
-    item in `state`, which frees the seat."""
+    item in `state`, which frees the seat. Even forced, it refuses while an up seat has started no
+    session since taking the item: the /clear has not landed."""
     with desk() as (conn, who):
         return api.wrap(
             conn, api.admin(who), item_id, fields or WrapUp.model_validate({}), api.Guard(version=if_version)

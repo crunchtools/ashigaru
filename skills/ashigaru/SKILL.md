@@ -402,8 +402,12 @@ Auto items only.
    ```
 4. Close it with `ashigaru wrap a7 --if-version 42`, the version from the row
    you just read in `ashigaru get a7`. The Desk refuses without CC-DONE or while
-   the turn is active, then clears the wrap, closes the item `done` and frees
-   the seat. The seat's `next` hook, started by the clear, waits while the
+   the turn is active, and, even with `--force`, until the seat has started a
+   new session since it took the item: `has not landed` means the /clear never
+   reached the pane, so the item stays `wrapping`. Look at the pane and run
+   step 3 again; never route around it. `--force` closes an item uncleared only
+   for a seat that is `missing`. Then it clears the wrap, closes the item `done`
+   and frees the seat. The seat's `next` hook, started by the clear, waits while the
    item is `wrapping` and claims its next work once this closes it. Seat text
    never goes on its command line: the Learned line
    already reached the Desk through `report`, so `--learned` stays unused.

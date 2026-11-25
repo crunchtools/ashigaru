@@ -698,24 +698,41 @@ def wrap(
     """`wrap`, for the CLI and MCP alike. `wrapping` records that /cc seat was sent. `cleared` refuses
     (Refused) until the item is memorized or a Learned line comes with the request, and while its
     seat's turn is active, unless forced; then it clears the wrap and closes an open item, which
-    frees the seat."""
+    frees the seat. Forced or not, it refuses while an up seat holding the item has not started a
+    session since it took it (`_landed`): the /clear never reached the pane, so the item stays
+    wrapping."""
     with store.transaction(conn):
         item = _read(conn, item_id, version)
         fields: dict[str, Any] = {"wrap": request["stage"]}
         if request.get("learned"):
             fields["learned"] = request["learned"]
         if request["stage"] == Wrap.CLEARED:
+            seat = store.get_seat(conn, item["seat"]) if item["seat"] else None
             if not request.get("force"):
                 if not (item["memorized"] or request.get("learned")):
                     raise Refused(f"{item_id}: no CC-DONE yet; send /cc seat first, or force")
-                seat = store.get_seat(conn, item["seat"]) if item["seat"] else None
                 if item["seat"] and seat is None:
                     raise Refused(f"{item['seat']} never reported, so it cannot be seen idle; force to clear")
                 if seat and seat["turn"] == Turn.ACTIVE:
                     raise Refused(f"{item['seat']} is mid-turn; wrap it once it is idle")
+            if seat and not _landed(item, seat, bool(request.get("force"))):
+                raise Refused(
+                    f"{item['seat']} has started no session since it took {item_id} (epoch "
+                    f"{item['epoch']}, seat at {seat['epoch']}): the /clear has not landed; clear its "
+                    "pane, then wrap again"
+                )
             if item["state"] not in CLOSED:
                 fields["state"] = request["state"]
         store.update_item(conn, item_id, fields, actor, source="wrap")
+
+
+def _landed(item: dict[str, Any], seat: dict[str, Any], force: bool) -> bool:
+    """The seat's /clear landed: a session started after the one that took the item, so the seat's
+    epoch is past the item's and it names a session (an epoch `end_session` moved names none until
+    one starts). `force` passes a seat that cannot show it: down, or never in a registered session."""
+    if item["epoch"] is not None and seat["epoch"] > item["epoch"] and seat["session_id"]:
+        return True
+    return force and (not live(seat) or not seat["epoch"] or item["epoch"] is None)
 
 
 def queue(conn: sqlite3.Connection) -> dict[str, Any]:
