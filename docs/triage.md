@@ -30,5 +30,4 @@ The categories, the threshold and the model (`sonnet`, 40 turns) are sdlc's, in 
 ## Related
 
 - [Code](code.md): what `ready-to-code` starts
-- [Sweep](sweep.md): how old issues reach triage
 - [Enrollment](enrollment.md)

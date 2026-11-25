@@ -46,7 +46,7 @@ Below 1.0.0 a breaking change bumps the minor.
 
 Files under a dot directory (`.github/`, `.specify/`) are never edited. If the old version is stated nowhere outside the changelog, nothing is opened and the record says so.
 
-In `auto` mode, with the bump at or under the limit, auto-merge is turned on. Otherwise the pull request waits, says why in its body, and is listed in the [inbox](review.md). The [fix agent](fix.md) does not work on release pull requests. One that conflicts with the default branch is closed and a fresh one opens on a later sweep.
+In `auto` mode, with the bump at or under the limit, auto-merge is turned on. Otherwise the pull request waits, says why in its body, and is listed in the inbox issue. The [fix agent](fix.md) does not work on release pull requests. One that conflicts with the default branch is closed and a fresh one opens on a later sweep.
 
 **Publishing.** When a release pull request written by Ashigaru merges into the default branch, sdlc's `write` job in the fleet's `ci.yml`, on the merge's push, creates the tag `vX.Y.Z` at the merge commit and publishes the GitHub Release with the changelog entry as its notes, within a minute of the merge. This holds in both modes: merging the release pull request is the approval. It calls `release_publish.publish` and runs no model, so it does not depend on Ashigaru being enrolled. The release is created with the app token, not `GITHUB_TOKEN`, so the tag push and `release: published` start the repository's own workflows (a container build, a package upload).
 
@@ -75,6 +75,5 @@ gh repo edit crunchtools/mcp-pcloud --add-topic ashigaru-release-auto
 
 ## Related
 
-- [Sweep](sweep.md)
 - [Authority and limits](authority.md)
 - [Enrollment](enrollment.md)
