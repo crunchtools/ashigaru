@@ -12,7 +12,7 @@ on:
       bot:
         description: "Slug of the app that opens Ashigaru pull requests."
         type: string
-        default: "ashigaru-crunchtools"
+        default: "ashigaru-crunchtools-com"
     secrets:
       ASHIGARU_APP_KEY:
         required: true
