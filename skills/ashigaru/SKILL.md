@@ -406,7 +406,8 @@ Auto items only.
    new session since it took the item: `has not landed` means the /clear never
    reached the pane, so the item stays `wrapping`. Look at the pane and run
    step 3 again; never route around it. `--force` closes an item uncleared only
-   for a seat that is `missing`. Then it clears the wrap, closes the item `done`
+   for a seat that is `missing` or never registered a session, or an item no
+   session took (recorded before 5.0). Then it clears the wrap, closes the item `done`
    and frees the seat. The seat's `next` hook, started by the clear, waits while the
    item is `wrapping` and claims its next work once this closes it. Seat text
    never goes on its command line: the Learned line

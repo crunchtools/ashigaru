@@ -729,7 +729,8 @@ def wrap(
 def _landed(item: dict[str, Any], seat: dict[str, Any], force: bool) -> bool:
     """The seat's /clear landed: a session started after the one that took the item, so the seat's
     epoch is past the item's and it names a session (an epoch `end_session` moved names none until
-    one starts). `force` passes a seat that cannot show it: down, or never in a registered session."""
+    one starts). `force` passes where the seat cannot show it: it is down, never in a registered
+    session, or holds an item no session took (recorded before 5.0, with no epoch)."""
     if item["epoch"] is not None and seat["epoch"] > item["epoch"] and seat["session_id"]:
         return True
     return force and (not live(seat) or not seat["epoch"] or item["epoch"] is None)

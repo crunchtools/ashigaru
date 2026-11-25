@@ -194,6 +194,20 @@ def test_wrap_refuses_cleared_until_the_clear_lands_even_forced(
     assert client.post(f"{path}/wrap", headers=keys[JOSUI], json={"force": True}).json()["wrap"] == "cleared"
 
 
+def test_an_item_recorded_on_a_seat_takes_its_session_so_its_wrap_sees_the_clear(
+    client: TestClient, keys: Keys, conn: sqlite3.Connection
+) -> None:
+    up_seat(conn, SEAT, lane="exedore-max")
+    started(client, keys, SEAT)
+    body = {"task": "t", "seat": SEAT, "state": "review", "memorized": True}
+    item = client.post("/v1/items", headers=keys[JOSUI], json=body).json()
+    assert item["epoch"] == 1
+    path = f"/v1/items/{item['id']}/wrap"
+    assert client.post(path, headers=keys[JOSUI], json={}).status_code == CONFLICT
+    clear(client, keys, SEAT)
+    assert client.post(path, headers=keys[JOSUI], json={}).json()["wrap"] == "cleared"
+
+
 def test_wrap_force_closes_a_down_seats_item_uncleared(
     client: TestClient, keys: Keys, conn: sqlite3.Connection
 ) -> None:

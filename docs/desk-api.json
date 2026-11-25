@@ -5559,7 +5559,7 @@
         ]
       },
       "post": {
-        "description": "Admin: record an item. With `assign`, assign it in the same transaction (`ashigaru assign\n--task`), so no seat can claim it in between; a refused assign (409) records nothing.",
+        "description": "Admin: record an item. With `assign`, assign it in the same transaction (`ashigaru assign\n--task`), so no seat can claim it in between; a refused assign (409) records nothing. An item\nrecorded on a seat takes that seat's current session (`epoch`), as a move to one does.",
         "operationId": "create_item_v1_items_post",
         "requestBody": {
           "content": {

@@ -339,11 +339,14 @@ def with_outcome(conn: sqlite3.Connection, fields: dict[str, Any], actor: str) -
 )
 def create_item(conn: Conn, who: Admin, body: ItemCreate) -> Item:
     """Admin: record an item. With `assign`, assign it in the same transaction (`ashigaru assign
-    --task`), so no seat can claim it in between; a refused assign (409) records nothing."""
+    --task`), so no seat can claim it in between; a refused assign (409) records nothing. An item
+    recorded on a seat takes that seat's current session (`epoch`), as a move to one does."""
     with store.transaction(conn):
         try:
             fields = with_outcome(conn, body.model_dump(exclude_unset=True), who.name)
             target = fields.pop("assign", None)
+            if fields.get("seat") and (taker := store.get_seat(conn, fields["seat"])):
+                fields["epoch"] = taker["epoch"]
             item_id = store.insert_item(conn, fields, who.name)
             if target is not None:
                 dispatch.assign_in(conn, item_id, target, who.name)
