@@ -19,6 +19,8 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- A publish now refuses a staged `.python-version`, `.python-versions` or `uv.toml` at any depth, any change of a file's mode, and a change to `tool.uv` in any `pyproject.toml`, the rule set sdlc's relock already refuses (sdlc#195), so a patch can no longer slip them past `staged_refusal` (#263).
+
 - The app's bot is trusted under its real login, `ashigaru-crunchtools-com[bot]` (GitHub id 340727104; a1409). The image set `ASHIGARU_FORGE_AUTHORS_GITHUB` to `ashigaru-crunchtools[bot]`, a login GitHub does not have, so the Desk sweep listed the app's own release PRs as outsiders in NEEDS YOU instead of queuing them. The scripts' defaults carried the same wrong name: commits now go out as `ashigaru-crunchtools-com[bot]` with its `340727104+` noreply address, a review result finds its earlier comment to update, and the `--bot` defaults of `findings.py`, `release.py`, `release_publish.py` and `sweep.py` name the app `ashigaru-crunchtools-com`.
 
 - A closed subject drops off the sweep's outsiders (a1409). A run no longer lists an outsider's subject the search finds closed, and removes it from the earlier runs' lists, so NEEDS YOU stops showing PRs and issues already closed.

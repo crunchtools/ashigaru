@@ -291,3 +291,67 @@ def test_a_fix_round_hands_off_a_denied_patch_and_pushes_nothing(root, monkeypat
     comments = [c[-1] for c in calls if c[:2] == ("pr", "comment")]
     assert comments == ["**Ashigaru stopped.** The fix touches `CLAUDE.md`, which Ashigaru does not modify."]
     assert not any("push" in c for c in calls)
+
+
+@pytest.mark.parametrize(
+    "path", [".python-version", ".python-versions", "uv.toml", "src/.python-version", "pkg/uv.toml"]
+)
+def test_what_picks_the_relock_interpreter_is_refused_at_any_depth(root, monkeypatch, path):
+    # ashigaru#263: the files sdlc's relock refuses before its sibling runs
+    assert refused(root, monkeypatch, {}, {path: "3.12\n"}) == f"`{path}`"
+
+
+def test_a_mode_change_is_refused(root, monkeypatch):
+    git(root, "init", "-q")
+    write(root, {"pyproject.toml": PYPROJECT, "src/app.py": "a\n"})
+    git(root, "add", "-A")
+    git(root, "commit", "-qm", "base")
+    git(root, "update-index", "--chmod=+x", "src/app.py")
+    monkeypatch.chdir(root)
+    assert staged_refusal() == "the mode of `src/app.py` (100644 to 100755)"
+
+
+def test_a_new_executable_is_published(root, monkeypatch):
+    git(root, "init", "-q")
+    write(root, {"pyproject.toml": PYPROJECT, "bin/run": "#!/bin/sh\n"})
+    (root / "bin/run").chmod(0o755)
+    git(root, "add", "-A")
+    git(root, "commit", "-qm", "base")
+    write(root, {"bin/new": "#!/bin/sh\n"})
+    (root / "bin/new").chmod(0o755)
+    git(root, "add", "-A")
+    monkeypatch.chdir(root)
+    assert staged_refusal() is None
+
+
+@pytest.mark.parametrize(
+    "patched",
+    [
+        PYPROJECT + '\n[tool.uv]\nindex-url = "https://evil.example/simple"\n',
+        PYPROJECT.replace("[tool.ruff]", '[tool]\nuv = {python-preference = "system"}\n\n[tool.ruff]'),
+    ],
+)
+def test_a_change_to_tool_uv_is_refused(root, monkeypatch, patched):
+    assert refused(root, monkeypatch, {}, {"pyproject.toml": patched}) == "`[tool.uv]` in `pyproject.toml`"
+
+
+def test_tool_uv_in_a_nested_pyproject_is_refused(root, monkeypatch):
+    nested = '[project]\nname = "y"\n\n[tool.uv]\ndev-dependencies = []\n'
+    assert (
+        refused(root, monkeypatch, {}, {"sub/pyproject.toml": nested})
+        == "`[tool.uv]` in `sub/pyproject.toml`"
+    )
+    edited = nested.replace("[]", '["x"]')
+    got = refused(root, monkeypatch, {"sub/pyproject.toml": nested}, {"sub/pyproject.toml": edited})
+    assert got == "`[tool.uv]` in `sub/pyproject.toml`"
+
+
+@pytest.mark.parametrize("after", [None, "[broken\n"])
+def test_a_nested_pyproject_deleted_or_broken_is_refused(root, monkeypatch, after):
+    nested = '[project]\nname = "y"\n'
+    got = refused(root, monkeypatch, {"sub/pyproject.toml": nested}, {"sub/pyproject.toml": after})
+    assert got == "`[tool.uv]` in `sub/pyproject.toml`"
+
+
+def test_a_nested_pyproject_without_tool_uv_is_published(root, monkeypatch):
+    assert refused(root, monkeypatch, {}, {"sub/pyproject.toml": '[project]\nname = "y"\n'}) is None
