@@ -31,7 +31,35 @@ from pathlib import Path
 import inbox
 from common import BRANCH_PREFIX, OBSERVE, RELEASES, api, api_pages, gh, git, set_output
 from publish import BOT_EMAIL, BOT_NAME, CONFLICTING, announce
-from sweep import SETTLE, enrolled, open_pulls, stamp
+
+CALLER = ".github/workflows/ashigaru.yml"
+SETTLE = timedelta(minutes=20)
+"""A default branch touched more recently than this may have a fix in flight; leave it for the next run."""
+PULL_FIELDS = (
+    "number,headRefName,headRefOid,baseRefName,mergeable,author,"
+    "isCrossRepository,isDraft,labels,title,url,createdAt,autoMergeRequest,statusCheckRollup"
+)
+
+
+def stamp(moment: datetime) -> str:
+    return moment.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def open_pulls(repo: str) -> list[dict]:
+    listing = gh("pr", "list", "--repo", repo, "--state", "open", "--limit", "100",
+                 "--json", PULL_FIELDS)  # fmt: skip
+    return json.loads(listing)
+
+
+def enrolled(repo: str) -> bool:
+    try:
+        gh("api", f"repos/{repo}/contents/{CALLER}", "--silent")
+    except subprocess.CalledProcessError as error:
+        if "404" not in error.stderr:
+            print(f"::warning::could not check {repo} for {CALLER}: {error.stderr.strip()}")
+        return False
+    return True
+
 
 OFF, PULL, AUTO = "off", "pr", "auto"
 MODES = {f"ashigaru-release-{mode}": mode for mode in (PULL, AUTO)}

@@ -9,8 +9,6 @@ import fix_publish
 import inbox
 import publish
 import release
-import review_publish
-import sweep
 import triage_apply
 from common import OBSERVE
 
@@ -25,10 +23,10 @@ def recorded(monkeypatch):
     calls = []
     monkeypatch.delenv("GITHUB_OUTPUT", raising=False)
     monkeypatch.setattr("common.observing", lambda repo: True)
-    for module in (triage_apply, publish, fix_publish, review_publish):
+    for module in (triage_apply, publish, fix_publish):
         monkeypatch.setattr(module, "observing", lambda repo: True)
     monkeypatch.setattr(inbox, "observe", lambda repo, source, lines: calls.append((repo, source, lines)))
-    for module in (triage_apply, publish, fix_publish, review_publish, release, sweep):
+    for module in (triage_apply, publish, fix_publish, release):
         for name in ("gh", "git", "set_state", "ensure_labels"):
             if name in vars(module):
                 monkeypatch.setattr(module, name, forbid)
@@ -113,23 +111,6 @@ def test_a_fix_round_pushes_and_answers_nothing(recorded, monkeypatch, tmp_path)
     assert recorded == [("o/r", "fix #9", ["Would push fix round 2 and answer its findings."])]
 
 
-def test_a_review_posts_no_comment(recorded, monkeypatch):
-    def gh(*args):
-        if args[:2] == ("pr", "view"):
-            return json.dumps({"state": "OPEN"})
-        forbid()
-
-    monkeypatch.setattr(review_publish, "gh", gh)
-    monkeypatch.setattr(review_publish, "api_pages", forbid)
-    monkeypatch.setattr(
-        "sys.argv",
-        ["review_publish", "--repo", "o/r", "--pull", "4", "--sha", "abc1234",
-         "--result", json.dumps({"recommendation": "merge", "summary": "ok"})],
-    )  # fmt: skip
-    assert review_publish.main() == 0
-    assert recorded == [("o/r", "review #4", ["Would post a first-pass review: merge."])]
-
-
 def test_release_cuts_nothing_in_a_watched_repository(recorded):
     items = [
         {"repo": "o/a", "observe": True, "action": "open", "current": "1.0.0", "next": "1.1.0"},
@@ -149,65 +130,6 @@ def test_release_survey_marks_a_watched_repository(monkeypatch):
     repo = {"full_name": "o/r", "default_branch": "main", "topics": [OBSERVE]}
     assert release.survey(repo, "app/x", "")["observe"] is True
     assert release.survey({**repo, "topics": []}, "app/x", "")["observe"] is False
-
-
-def test_the_sweep_does_not_queue_the_observe_issue():
-    item = {"number": 1, "created_at": "2026-10-31T00:00:00Z", "user": {"type": "User"},
-            "labels": [{"name": OBSERVE}]}  # fmt: skip
-    assert sweep.candidates("o/r", [item]) == []
-
-
-def test_the_sweep_lists_what_it_would_have_done():
-    lines = sweep.would_do([{"number": 1}], [{"number": 2, "pull": 8}], [{"number": 3}])
-    assert lines == [
-        "Would queue #1 for triage.",
-        "Would rebuild #2, whose pull request #8 conflicts.",
-        "Would start the fix for #3.",
-    ]
-
-
-def test_the_sweep_closes_the_observe_issue_when_the_topic_is_gone(monkeypatch):
-    held = [
-        {"repo": "o/a", "number": 1, "url": "u", "body": ""},
-        {"repo": "o/b", "number": 2, "url": "v", "body": ""},
-    ]
-    calls, written = [], []
-    monkeypatch.setattr(sweep, "labeled_issues", lambda org, label: held)
-    monkeypatch.setattr(sweep.inbox, "observe", lambda repo, source, lines: written.append((repo, lines)))
-    monkeypatch.setattr(sweep, "gh", lambda *args: calls.append(args))
-    kept = sweep.keep_watch("o", {"o/a": ["Would start the fix for #3."]}, dry_run=False)
-    assert kept == [held[0]]
-    assert written == [("o/a", ["Would start the fix for #3."])]
-    assert [call[:4] for call in calls] == [("issue", "close", "2", "--repo")]
-
-
-def test_a_dry_run_sweep_writes_nothing_for_watched_repositories(monkeypatch):
-    monkeypatch.setattr(sweep, "labeled_issues", lambda org, label: [{"repo": "o/b", "number": 2}])
-    monkeypatch.setattr(sweep.inbox, "observe", forbid)
-    monkeypatch.setattr(sweep, "gh", forbid)
-    assert sweep.keep_watch("o", {"o/a": ["x"]}, dry_run=True) == []
-
-
-def test_an_unreadable_observe_search_changes_nothing(monkeypatch):
-    def refuse(org, label):
-        raise subprocess.CalledProcessError(1, "gh", stderr="HTTP 502")
-
-    monkeypatch.setattr(sweep, "labeled_issues", refuse)
-    monkeypatch.setattr(sweep, "gh", forbid)
-    assert sweep.keep_watch("o", {"o/a": []}, dry_run=False) == []
-
-
-def test_the_observe_issues_are_one_search_of_the_organization(monkeypatch):
-    paths = []
-    found = {"items": [{"repository_url": "https://api.github.com/repos/o/r", "number": 5,
-                        "html_url": "https://github.com/o/r/issues/5", "body": None}]}  # fmt: skip
-    monkeypatch.setattr(sweep, "api", lambda path: paths.append(path) or found)
-    assert sweep.labeled_issues("o", OBSERVE) == [
-        {"repo": "o/r", "number": 5, "url": "https://github.com/o/r/issues/5", "body": ""}
-    ]
-    assert paths == [
-        "search/issues?q=org%3Ao%20is%3Aissue%20is%3Aopen%20label%3Aashigaru-observe&per_page=100"
-    ]
 
 
 def test_the_watching_part_lists_each_recorded_line_with_its_issue():
@@ -281,35 +203,3 @@ def test_a_record_updates_the_oldest_observe_issue_and_skips_pull_requests(monke
     expected = inbox.record_body(older, "sweep", ["Would start the fix for #5."])
     assert published == [("o/r", expected, OBSERVE, inbox.OBSERVE_TITLE)]
     assert "**triage #2**" in expected and "newer" not in expected
-
-
-def test_the_sweep_records_a_watched_repository_and_dispatches_only_the_others(monkeypatch):
-    listed = [
-        {"full_name": "o/watched", "archived": False, "has_issues": True, "topics": [OBSERVE]},
-        {"full_name": "o/plain", "archived": False, "has_issues": True, "topics": []},
-    ]
-
-    def work(number):
-        def found(repo, *rest):
-            return [{"repo": repo, "number": number, "pull": 8, "created_at": "2026-10-01T00:00:00Z"}]
-
-        return found
-
-    dispatched, watched = [], []
-    monkeypatch.setattr(sweep, "api_pages", lambda path: listed)
-    monkeypatch.setattr(sweep, "enrolled", lambda repo: True)
-    monkeypatch.setattr(sweep, "api", lambda path: [])
-    monkeypatch.setattr(sweep, "open_pulls", lambda repo: [])
-    monkeypatch.setattr(sweep, "candidates", work(1))
-    monkeypatch.setattr(sweep, "conflicted", work(2))
-    monkeypatch.setattr(sweep, "waiting", work(3))
-    monkeypatch.setattr(sweep, "dispatch", lambda args, now, *queues: dispatched.append(queues))
-    monkeypatch.setattr(sweep, "plan_reviews", lambda *args: {})
-    monkeypatch.setattr(sweep, "keep_watch", lambda org, lines, dry_run: watched.append(lines) or [])
-    monkeypatch.setattr("sys.argv", ["sweep.py", "--org", "o"])
-    assert sweep.main() == 0
-    [(stuck, ready, untriaged)] = dispatched
-    assert {item["repo"] for item in [*stuck, *ready, *untriaged]} == {"o/plain"}
-    assert [len(stuck), len(ready), len(untriaged)] == [1, 1, 1]
-    lines = sweep.would_do([{"number": 1}], [{"number": 2, "pull": 8}], [{"number": 3}])
-    assert watched == [{"o/watched": lines}]

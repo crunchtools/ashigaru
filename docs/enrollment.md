@@ -12,9 +12,8 @@ A repository is enrolled by carrying the fleet's one `ci.yml`, the same file in 
 
 1. Create a GitHub App. Repository permissions: Contents, Issues, Pull requests read and write; Metadata read. No Workflows permission, no organization permissions. Install it on the repositories to enroll.
    - Permissions added after installation are not live until accepted. If the app is created or installed before its repository permissions are set, the installation keeps its old permissions until an organization owner accepts the request on the installation's settings page. Until then `actions/create-github-app-token` fails when a workflow asks for `issues: write` or `pull-requests: write`. Check with `gh api orgs/<org>/installations --jq '.installations[] | select(.app_slug=="<slug>") | .permissions'`; `contents`, `issues` and `pull_requests` must show `write`.
-   - The sweep needs the app installed on every repository it should reach. `sweep.yml` mints an owner-wide token and can only label issues in repositories the installation covers.
 2. Secrets: `ASHIGARU_APP_KEY` (the app's private key) and `CLAUDE_CODE_OAUTH_TOKEN` (from `claude setup-token`).
-3. Variables: `ASHIGARU_CLIENT_ID` (the app's client ID, on its settings page — `create-github-app-token` mints every token from it and the `ASHIGARU_APP_KEY` secret) and `ASHIGARU_ENABLED` = `true`, which the sweep reads.
+3. Variables: `ASHIGARU_CLIENT_ID` (the app's client ID, on its settings page — `create-github-app-token` mints every token from it and the `ASHIGARU_APP_KEY` secret) and `ASHIGARU_ENABLED` = `true`.
 4. A branch ruleset with your required checks, without a bypass for the app. Allow auto-merge on each repository.
 
 On a GitHub Free organization, organization secrets reach public repositories only.

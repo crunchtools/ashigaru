@@ -23,7 +23,7 @@ With both mode topics set, `pr` wins. With several limits set, the lowest wins.
 
 **What the repository needs.** A `CHANGELOG.md` in [Keep a Changelog](https://keepachangelog.com/) form: a `## [Unreleased]` heading, and below it a `## [X.Y.Z]` heading for the version already released, whose tag `vX.Y.Z` exists. Changes add their entries under `[Unreleased]`; the code agent's pull requests already do where the repository's instructions ask for it.
 
-**When a release is due.** Each hour the `release` job in `sweep.yml` runs `scripts/release.py` over the enrolled repositories. One is due when:
+**When a release is due.** `scripts/release.py` decides; nothing runs it on a schedule since the hourly sweep was retired, so a release is cut through sdlc's `write` job. One is due when:
 
 - `[Unreleased]` has at least one entry;
 - no pull request from an `ashigaru/` branch is open there, so a batch of fixes lands in one release;
@@ -71,12 +71,6 @@ Turn on automatic patch and minor releases for one repository:
 
 ```bash
 gh repo edit crunchtools/mcp-pcloud --add-topic ashigaru-release-auto
-```
-
-See what the next sweep would do, without doing it:
-
-```bash
-gh workflow run sweep.yml -R crunchtools/ashigaru -f dry_run=true
 ```
 
 ## Related

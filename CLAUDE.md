@@ -8,7 +8,7 @@ Everything runs from containers; the host needs only git, podman, pre-commit and
 # Layout
 
 - `.github/workflows/ci.yml`: the fleet's one file. Its `ai` and `write` jobs run triage, code, fix and release tagging in every enrolled repo, this one included, from the scripts the sdlc image carries.
-- `.github/workflows/sweep.yml`: dispatched here only. `rpm.yml` builds the RPM.
+- `.github/workflows/rpm.yml` builds the RPM. The Desk reads GitHub itself; there is no hourly sweep workflow.
 - `scripts/`: every decision and every write. Standard library and `gh` only. Pure functions are tested in `tests/`; `main()` does the I/O.
 - `prompts/`, `schemas/`: what each agent is told and what it must return.
 - `src/ashigaru/`: 3.x, the Desk and its clients; `docs/desk-api.md` is the contract.
