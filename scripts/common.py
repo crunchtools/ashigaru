@@ -246,7 +246,7 @@ def _uv_moved(path: str) -> bool:
     A file new to the index is compared against {}. Raises ValueError when a side
     does not decode or parse, or the index lacks the file.
     """
-    sides = []
+    sides: list[object] = []
     for spec in (f"HEAD:{path}", f":{path}"):
         try:
             text = git("show", spec)
