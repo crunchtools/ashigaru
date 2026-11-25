@@ -129,9 +129,9 @@ def test_the_search_queues_writers_and_only_lists_everyone_else(conn: sqlite3.Co
         Found(subject(1, lane_hint="vertex"), "MEMBER", ""),
         Found(subject(2, author="outsider"), "CONTRIBUTOR", ""),
         Found(subject(3, author="dependabot[bot]"), "NONE", ""),
-        Found(subject(4, author="ashigaru-crunchtools[bot]"), "NONE", ""),
+        Found(subject(4, author="ashigaru-crunchtools-com[bot]"), "NONE", ""),
     ]
-    run = sweeping(db, FakeForge(hits=hits), frozenset({"ashigaru-crunchtools[bot]"}))
+    run = sweeping(db, FakeForge(hits=hits), frozenset({"ashigaru-crunchtools-com[bot]"}))
     assert run["new"] == WRITERS
     rows = {row["subject_key"]: row for row in store.list_items(conn)}
     assert set(rows) == {"crunchtools/x#1", "crunchtools/x#4"}
@@ -444,16 +444,68 @@ def test_two_runs_racing_for_the_lock_make_one_run(db: Path, conn: sqlite3.Conne
     assert conn.execute("SELECT count(*) FROM sweeps WHERE skipped IS NULL").fetchone()[0] == 1
 
 
+def image_authors() -> frozenset[str]:
+    """The trusted authors the image sets: ASHIGARU_FORGE_AUTHORS_GITHUB in the Containerfile."""
+    containerfile = Path(__file__).parent.parent / "Containerfile"
+    _, _, rest = containerfile.read_text().partition("ASHIGARU_FORGE_AUTHORS_GITHUB=")
+    return frozenset(rest.split()[0].split(","))
+
+
+def test_the_apps_release_pr_is_queued_by_the_images_own_authors(conn: sqlite3.Connection, db: Path) -> None:
+    release = subject(7, author="ashigaru-crunchtools-com[bot]")
+    run = sweeping(db, FakeForge(hits=[Found(release, "NONE", "")]), image_authors())
+    assert run["new"] == 1 and run["outsiders"] == []
+    assert [row["subject_key"] for row in store.list_items(conn)] == ["crunchtools/x#7"]
+    assert sweep.outsiders(conn) == []
+
+
+def test_a_closed_outsider_is_not_listed_and_earlier_runs_forget_it(
+    conn: sqlite3.Connection, db: Path
+) -> None:
+    listed = [Found(subject(number, author="outsider"), "CONTRIBUTOR", "") for number in (2, 3)]
+    sweeping(db, FakeForge(hits=listed))
+    assert {found["subject_key"] for found in sweep.outsiders(conn)} == {"crunchtools/x#2", "crunchtools/x#3"}
+    closed = Found(subject(2, author="outsider", closed=True), "CONTRIBUTOR", "")
+    run = sweeping(db, FakeForge(hits=[closed]))
+    assert run["outsiders"] == []
+    assert [found["subject_key"] for found in sweep.outsiders(conn)] == ["crunchtools/x#3"]
+
+
+def outsiders_of(conn: sqlite3.Connection, run_id: int) -> list[str]:
+    row = conn.execute("SELECT outsiders FROM sweeps WHERE id = ?", (run_id,)).fetchone()
+    return [found["subject_key"] for found in json.loads(row[0])]
+
+
+def test_forgetting_drops_every_closed_key_only_from_the_last_days_runs(conn: sqlite3.Connection) -> None:
+    started = datetime.now(UTC)
+    keys = [f"crunchtools/x#{number}" for number in (2, 3, 4)]
+    listed = json.dumps([{"subject_key": key, "ref": None, "author": "o"} for key in keys])
+    finish = "INSERT INTO sweeps (trigger, started_at, finished_at, outsiders) VALUES ('timer', ?, ?, ?)"
+    old = sweep._stamp(started - sweep.FIRST - HOURS_AGO)
+    recent = sweep._stamp(started - HOURS_AGO)
+    old_run = conn.execute(finish, (old, old, listed)).lastrowid
+    recent_run = conn.execute(finish, (recent, recent, listed)).lastrowid
+    assert old_run and recent_run
+    queries: list[str] = []
+    conn.set_trace_callback(queries.append)
+    sweep._forget(conn, sweep.Counts(), started)
+    conn.set_trace_callback(None)
+    assert not [query for query in queries if "UPDATE sweeps" in query]
+    sweep._forget(conn, sweep.Counts(forgotten={"crunchtools/x#2", "crunchtools/x#4"}), started)
+    assert outsiders_of(conn, recent_run) == ["crunchtools/x#3"]
+    assert outsiders_of(conn, old_run) == keys
+
+
 def test_serve_sweeps_only_with_a_token_and_an_org(monkeypatch: pytest.MonkeyPatch, db: Path) -> None:
     monkeypatch.setenv("ASHIGARU_FORGE_TOKEN_GITHUB", "token")
     assert desk_main.sweeper(str(db)) is None
     monkeypatch.setenv("ASHIGARU_FORGE_ORG_GITHUB", " crunchtools ")
     monkeypatch.setenv("ASHIGARU_SWEEP_EVERY", "120")
-    monkeypatch.setenv("ASHIGARU_FORGE_AUTHORS_GITHUB", "ashigaru-crunchtools[bot]")
+    monkeypatch.setenv("ASHIGARU_FORGE_AUTHORS_GITHUB", "ashigaru-crunchtools-com[bot]")
     made = desk_main.sweeper(str(db))
     assert made is not None
     assert (made.settings.org, made.settings.every, made.settings.token) == (ORG, TWO_MINUTES, "token")
-    assert made.settings.authors == frozenset({"ashigaru-crunchtools[bot]"})
+    assert made.settings.authors == frozenset({"ashigaru-crunchtools-com[bot]"})
     monkeypatch.delenv("ASHIGARU_FORGE_TOKEN_GITHUB")
     assert desk_main.sweeper(str(db)) is None
 

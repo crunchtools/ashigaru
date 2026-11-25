@@ -10,7 +10,8 @@ startup, and as soon as an admin asks (POST /v1/sweep), one run:
    OVERLAP for the search index's lag. A subject with no item is queued, as a
    writer's, only when the search's author_association says OWNER or MEMBER or
    its author is trusted (ASHIGARU_FORGE_AUTHORS, the app's bot). Anyone
-   else's is never stored: it is listed for Scott in the run's `outsiders`,
+   else's is never stored: it is listed for Scott in the run's `outsiders`
+   while it is open, and once a hit shows it closed the last day's runs forget it,
    except a dependency bot's PR (BOTS: Dependabot, Renovate), which is no one's
    to look at by default: its subject is recorded, read back every run while it
    is open, and once it has been open `bot_after` it is queued, auto on
@@ -125,6 +126,18 @@ UNREADABLE = (OSError, ValueError, http.client.HTTPException)
 LAST = "SELECT * FROM sweeps ORDER BY id DESC LIMIT 1"
 RUN = "SELECT * FROM sweeps WHERE id = ?"
 KNOWN = "SELECT subject_key FROM items WHERE subject_key IN (SELECT value FROM json_each(?))"
+FORGET = """
+    UPDATE sweeps SET outsiders = (
+        SELECT json_group_array(json(o.value)) FROM json_each(sweeps.outsiders) o
+        WHERE json_extract(o.value, '$.subject_key') NOT IN (SELECT value FROM json_each(:keys))
+    )
+    WHERE finished_at >= :since AND EXISTS (
+        SELECT 1 FROM json_each(sweeps.outsiders) o
+        WHERE json_extract(o.value, '$.subject_key') IN (SELECT value FROM json_each(:keys))
+    )
+"""
+"""Drop the closed subjects from the outsiders of the runs NEEDS YOU reads (OUTSIDERS: the last day),
+in one statement per run."""
 
 
 class Reader(Protocol):
@@ -164,6 +177,8 @@ class Counts:
     """Set when the lease could not be renewed: another run may start, so this one stops."""
     unasked: dict[tuple[str, str], str] = dataclasses.field(default_factory=dict)
     """Why the forge could not answer for a (repo, author): its hits wait for the next run."""
+    forgotten: set[str] = dataclasses.field(default_factory=set)
+    """Outsiders' subjects the search found closed, for FORGET to drop from earlier runs."""
 
     def error(self) -> str | None:
         more = f" (and {len(self.errors) - 1} more)" if len(self.errors) > 1 else ""
@@ -267,8 +282,13 @@ def _stuck(
 def _outsider(
     conn: sqlite3.Connection, settings: Settings, item: IntakeItem, counts: Counts, started: datetime
 ) -> None:
-    """A new subject by someone neither a member nor trusted: listed for Scott, never stored. A dependency
-    bot's is recorded instead, and queued once it is stuck (`_stuck`)."""
+    """A new subject by someone neither a member nor trusted: listed for Scott while it is open, never
+    stored, and forgotten once it is closed (FORGET). A dependency bot's is recorded instead, and
+    queued once it is stuck (`_stuck`)."""
+    if item.author not in BOTS and item.closed:
+        counts.outsiders = [found for found in counts.outsiders if found["subject_key"] != item.subject_key]
+        counts.forgotten.add(item.subject_key)
+        return
     if item.author not in BOTS:
         outsider = {"subject_key": item.subject_key, "ref": item.ref, "author": item.author}
         if outsider not in counts.outsiders and len(counts.outsiders) < OUTSIDERS_SHOWN:
@@ -456,6 +476,14 @@ def _search(
         store.set_mark(conn, MARK, held, ACTOR)
 
 
+def _forget(conn: sqlite3.Connection, counts: Counts, started: datetime) -> None:
+    """Drop the outsiders the search found closed from the last day's runs, in one statement."""
+    if counts.forgotten:
+        forgotten = {"keys": json.dumps(sorted(counts.forgotten)), "since": _stamp(started - FIRST)}
+        with store.transaction(conn):
+            conn.execute(FORGET, forgotten)
+
+
 def run(db_path: str, settings: Settings, trigger: str) -> dict[str, Any]:
     """One sweep, start to finish, on its own connection, holding the lease. Returns its `sweeps`
     row; a skipped one, saying why, when another run's lease is live."""
@@ -477,6 +505,7 @@ def run(db_path: str, settings: Settings, trigger: str) -> dict[str, Any]:
                 if backfill and not counts.errors:
                     store.set_mark(conn, BACKFILLED, _stamp(started), ACTOR)
                 _search(conn, settings, keys, started, counts)
+                _forget(conn, counts, started)
                 counts.closed += len(subjects.hygiene(conn))
         except LeaseLostError:  # the next run reads it all again; the mark has not moved
             counts.errors.insert(0, "stopped: lost the lease")

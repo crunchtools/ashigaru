@@ -587,7 +587,7 @@ def main() -> int:
     parser.add_argument("step", choices=("plan", "act", "record"))
     parser.add_argument("--plan", required=True, type=Path, help="where the plan is kept between steps")
     parser.add_argument("--org", default="")
-    parser.add_argument("--bot", default="app/ashigaru-crunchtools")
+    parser.add_argument("--bot", default="app/ashigaru-crunchtools-com")
     parser.add_argument("--repo", default="", help="repo whose releases issue is the record")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()

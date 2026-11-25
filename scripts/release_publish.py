@@ -73,7 +73,7 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--repo", required=True)
     parser.add_argument("--pull", required=True, type=int, help="the pull request that closed")
-    parser.add_argument("--bot", default="app/ashigaru-crunchtools")
+    parser.add_argument("--bot", default="app/ashigaru-crunchtools-com")
     args = parser.parse_args()
     # The API names an app's account `<slug>[bot]`; the workflows name it `app/<slug>`.
     login = f"{args.bot.removeprefix('app/')}[bot]"

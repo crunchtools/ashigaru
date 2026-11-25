@@ -205,7 +205,7 @@ sets the subject's review to approved, changes_requested or dismissed). Its perm
 collaborators, metadata (rulesets, branches), checks and commit statuses, issues and pull requests, and the search API, and
 nothing more. GitHub never calls an app's bot a writer, so
 the accounts in `ASHIGARU_FORGE_AUTHORS_GITHUB` (the image sets
-`ashigaru-crunchtools[bot]`) are trusted as authors of their own issues and
+`ashigaru-crunchtools-com[bot]`) are trusted as authors of their own issues and
 PRs, so listing an account makes its own subjects auto-claimable: a `lane:*`
 label on one sets its lane and mode `auto`, as for any writer's. Their lane
 labels on anyone else's subject approve nothing. The record issues the sweep
@@ -386,7 +386,7 @@ Settings are flags on `ashigaru-desk serve`, else these environment variables:
 | `ASHIGARU_WEBHOOK_SECRET_GITHUB_FILE` | a file of GitHub's secrets, one per line, all accepted while one rotates | none |
 | `ASHIGARU_FORGE_TOKEN_GITHUB` | a GitHub token that can read collaborator permissions, rulesets, branches, checks, commit statuses, issues and pull requests, and use the search API; each forge has its own `ASHIGARU_FORGE_TOKEN_<FORGE>` | none: all intake is held for Josui, and no commit's CI is `success` |
 | `ASHIGARU_FORGE_TOKEN_GITHUB_FILE` | a file holding that token | none |
-| `ASHIGARU_FORGE_AUTHORS_GITHUB` | comma-separated accounts, such as the app's bot, whose own issues and PRs are trusted as a writer's, so a lane label on one makes it auto-claimable; each forge has its own `ASHIGARU_FORGE_AUTHORS_<FORGE>` | none; the image sets `ashigaru-crunchtools[bot]` |
+| `ASHIGARU_FORGE_AUTHORS_GITHUB` | comma-separated accounts, such as the app's bot, whose own issues and PRs are trusted as a writer's, so a lane label on one makes it auto-claimable; each forge has its own `ASHIGARU_FORGE_AUTHORS_<FORGE>` | none; the image sets `ashigaru-crunchtools-com[bot]` |
 | `ASHIGARU_FORGE_ORG_GITHUB` | the GitHub org the sweep searches; the sweep runs only with this and the token | none: no sweep |
 | `ASHIGARU_SWEEP_EVERY` | seconds between sweeps | `600` |
 | `ASHIGARU_DEPENDABOT_AFTER` | seconds a Dependabot or Renovate PR may stay open before the sweep queues it for an exedore-max seat to land or close | `86400` |

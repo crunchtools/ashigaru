@@ -78,14 +78,18 @@ def posting(monkeypatch, comments):
 
 def test_the_first_review_is_a_new_comment(monkeypatch):
     calls = posting(monkeypatch, [])
-    assert review_publish.post("o/r", 9, "body", "ashigaru-crunchtools[bot]") == "posted"
+    assert review_publish.post("o/r", 9, "body", "ashigaru-crunchtools-com[bot]") == "posted"
     assert calls == [("gh", "pr", "comment", "9", "--repo", "o/r", "--body", "body")]
 
 
 def test_a_later_review_edits_the_earlier_comment(monkeypatch):
-    earlier = {"id": 55, "body": comment(GOOD, "old", FACTS), "user": {"login": "ashigaru-crunchtools[bot]"}}
+    earlier = {
+        "id": 55,
+        "body": comment(GOOD, "old", FACTS),
+        "user": {"login": "ashigaru-crunchtools-com[bot]"},
+    }
     calls = posting(monkeypatch, [earlier])
-    assert review_publish.post("o/r", 9, "body", "ashigaru-crunchtools[bot]") == "updated"
+    assert review_publish.post("o/r", 9, "body", "ashigaru-crunchtools-com[bot]") == "updated"
     assert calls == [("api", "repos/o/r/issues/comments/55", "-X", "PATCH", "-f", "body=body")]
 
 

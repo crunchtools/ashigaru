@@ -25,7 +25,7 @@ from findings import (
 )
 
 REVIEWER = "github-actions[bot]"
-BOT = "ashigaru-crunchtools"
+BOT = "ashigaru-crunchtools-com"
 
 
 def inline(comment_id, login=REVIEWER, reply_to=None):
@@ -46,7 +46,7 @@ def test_findings_without_a_reply_from_someone_else_are_unanswered():
     comments = [
         inline(1),
         inline(2),
-        inline(3, login="ashigaru-crunchtools[bot]", reply_to=2),
+        inline(3, login="ashigaru-crunchtools-com[bot]", reply_to=2),
         inline(4, login=REVIEWER, reply_to=1),  # the reviewer replying to itself is not an answer
     ]
     assert [finding["id"] for finding in unanswered(comments, REVIEWER)] == [1]
@@ -63,15 +63,15 @@ def test_only_write_access_humans_are_maintainer_findings():
         for inline_comment, login in [
             (inline(1), "maint"),
             (inline(2), "outsider"),
-            (inline(3), "ashigaru-crunchtools"),
+            (inline(3), "ashigaru-crunchtools-com"),
         ]  # fmt: skip
     ]
     reviews = [human({"id": 10, "body": "please redo", "state": "CHANGES_REQUESTED"}, "maint"),
                human({"id": 11, "body": "hi", "state": "COMMENTED"}, "outsider")]  # fmt: skip
     comments = [human({"id": 20, "body": "note"}, "maint"),
                 human({"id": 21, "body": "x"}, "app", "Bot")]  # fmt: skip
-    ok = maintainer_check(REVIEWER, "ashigaru-crunchtools", lambda login: login in writers)
-    found = maintainer_findings(threads, reviews, comments, ok, "ashigaru-crunchtools")
+    ok = maintainer_check(REVIEWER, "ashigaru-crunchtools-com", lambda login: login in writers)
+    found = maintainer_findings(threads, reviews, comments, ok, "ashigaru-crunchtools-com")
     assert [(f["kind"], f["id"]) for f in found] == [("inline", 1), ("review", 10), ("comment", 20)]
     assert {f["origin"] for f in found} == {"maintainer"}
 
@@ -260,8 +260,8 @@ def test_excerpt_with_more_windows_than_the_cap_keeps_the_first_ones_and_counts_
 
 
 def test_only_pull_requests_the_app_opened_are_touched():
-    assert opened_by({"author": {"login": "app/ashigaru-crunchtools"}}, "ashigaru-crunchtools")
-    assert not opened_by({"author": {"login": "somebody"}}, "ashigaru-crunchtools")
+    assert opened_by({"author": {"login": "app/ashigaru-crunchtools-com"}}, "ashigaru-crunchtools-com")
+    assert not opened_by({"author": {"login": "somebody"}}, "ashigaru-crunchtools-com")
 
 
 def test_a_pull_request_merged_during_the_wait_is_nothing_to_do(monkeypatch, tmp_path):
