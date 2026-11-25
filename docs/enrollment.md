@@ -53,4 +53,4 @@ To release `X.Y.Z`: a `chore/release-X.Y.Z` branch moves `VERSION` and the CHANG
 ## Related
 
 - [Authority and limits](authority.md)
-- [Triage](triage.md), [Code](code.md), [Fix](fix.md), [Sweep](sweep.md), [Release](release.md)
+- [Triage](triage.md), [Code](code.md), [Fix](fix.md), [Release](release.md)
