@@ -10,7 +10,7 @@ Triage runs when an issue is opened, so issues that predate enrollment would nev
 
 `sweep.yml` runs in the Ashigaru repository only, dispatched hourly by Kagetora's "Ashigaru Sweep Trigger" Hermes job; GitHub's own schedule fired only every four or five hours. `scripts/sweep.py`:
 
-1. lists the organization's public, non-archived repositories and keeps those that carry `.github/workflows/ashigaru.yml` (the pre-cutover caller, which repositories on the fleet `ci.yml` lack: #268);
+1. lists the organization's public, non-archived repositories and keeps those that carry `.github/workflows/ashigaru.yml` (the pre-cutover caller, which repositories on the fleet `ci.yml` lack until #260 lands: #259);
 2. reads each one's hundred oldest open issues and keeps those a person wrote that carry none of Ashigaru's labels;
 3. walks them oldest first across all repositories and adds `ready-for-triage` to the first `limit` (20 by default, never more than 20). Issues from outside contributors are included; the [guard](authority.md) keeps them to triage.
 
