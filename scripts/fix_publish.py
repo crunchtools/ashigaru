@@ -17,7 +17,7 @@ from pathlib import Path
 import inbox
 from common import NEEDS_HUMAN, gh, git, observing, set_state, staged_refusal
 from findings import ANSWER_MARKER, MAX_ROUNDS, ROUND_MARKER
-from publish import BOT_EMAIL, BOT_NAME, TRAILER
+from publish import BOT_EMAIL, BOT_NAME, TRAILER, rearm
 from relock import relock
 from tidy import tidy
 
@@ -132,7 +132,7 @@ def close_round(repo: str, collected: dict, result: dict, answered: dict[int, st
     elif step == "hand_off":
         hand_off(repo, number, "The round changed no code and work remains, so another round would not help.")
     elif step == "rearm":
-        gh("pr", "merge", str(number), "--repo", repo, "--auto", "--squash")
+        rearm(repo, str(number))
 
 
 def commit_fix(repo: str, number: int, round_number: int, patch_path: Path, patch: str) -> bool:

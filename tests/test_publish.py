@@ -13,9 +13,11 @@ from publish import (
     carry_over,
     commit_message,
     credit,
+    gated,
     hand_off_rest,
     landed,
     pr_body,
+    rearm,
     refusal,
     stale,
 )
@@ -224,3 +226,87 @@ def test_a_partial_fix_hands_the_issue_to_a_human():
         handed.assert_not_called()
         hand_off_rest("o/r", 59, "https://pr/1", {"summary": " ", "partial": True})
         assert handed.call_args.args[2].rstrip().endswith("read the pull request.")
+
+
+def answers(rules: list, protection: dict | None):
+    """A stand-in for `api` serving the branch's active rules and its protection summary."""
+
+    def api(path: str) -> object:
+        if "/rules/branches/" in path:
+            return rules
+        return {"protection": protection} if protection is not None else {}
+
+    return api
+
+
+CHECKS_RULE = {
+    "type": "required_status_checks",
+    "parameters": {"required_status_checks": [{"context": "ci"}]},
+}
+CLASSIC = {"required_status_checks": {"enforcement_level": "non_admins", "contexts": ["ci"], "checks": []}}
+UNPROTECTED = {
+    "enabled": False,
+    "required_status_checks": {"enforcement_level": "off", "contexts": [], "checks": []},
+}
+
+
+@pytest.mark.parametrize(
+    ("rules", "protection", "expected"),
+    [
+        ([CHECKS_RULE], UNPROTECTED, True),
+        ([], CLASSIC, True),
+        ([], UNPROTECTED, False),
+        ([], None, False),
+        ([{"type": "pull_request", "parameters": {}}], UNPROTECTED, False),
+        (
+            [{"type": "required_status_checks", "parameters": {"required_status_checks": []}}],
+            UNPROTECTED,
+            False,
+        ),
+    ],
+)
+def test_only_required_checks_from_a_ruleset_or_protection_gate_the_base(rules, protection, expected):
+    with patch("publish.api", answers(rules, protection)):
+        assert gated("o/r", "main") is expected
+
+
+def test_a_slashed_base_is_read_as_one_path_segment():
+    paths = []
+    with patch("publish.api", lambda path: paths.append(path) or ([] if "/rules/" in path else {})):
+        gated("o/r", "release/1.x")
+    assert paths == ["repos/o/r/rules/branches/release%2F1.x", "repos/o/r/branches/release%2F1.x"]
+
+
+def test_auto_merge_is_armed_only_on_a_gated_base():
+    with patch("publish.gh") as gh, patch("publish.api", answers([CHECKS_RULE], None)):
+        rearm("o/r", "https://pr/1", "main")
+    gh.assert_called_once_with("pr", "merge", "https://pr/1", "--repo", "o/r", "--auto", "--squash")
+
+
+def test_an_ungated_base_leaves_the_pull_request_for_a_person_and_says_why():
+    with patch("publish.gh") as gh, patch("publish.api", answers([], UNPROTECTED)):
+        rearm("o/r", "https://pr/1", "main")
+    gh.assert_called_once()
+    args = gh.call_args.args
+    assert args[:4] == ("pr", "comment", "https://pr/1", "--repo")
+    assert "did not enable auto-merge" in args[-1] and "`main`" in args[-1]
+
+
+def test_an_unreadable_base_is_not_armed():
+    def refused(path: str) -> object:
+        raise subprocess.CalledProcessError(1, "gh", stderr="HTTP 403")
+
+    with patch("publish.gh") as gh, patch("publish.api", refused):
+        rearm("o/r", "https://pr/1", "main")
+    assert all(call.args[1] != "merge" for call in gh.call_args_list)
+    assert "HTTP 403" in gh.call_args.args[-1]
+
+
+def test_a_fix_round_reads_the_base_off_the_pull_request():
+    with (
+        patch("publish.gh", side_effect=['{"baseRefName": "dev"}', ""]) as gh,
+        patch("publish.api", answers([CHECKS_RULE], None)) as _,
+    ):
+        rearm("o/r", "5")
+    assert gh.call_args_list[0].args == ("pr", "view", "5", "--repo", "o/r", "--json", "baseRefName")
+    assert gh.call_args.args == ("pr", "merge", "5", "--repo", "o/r", "--auto", "--squash")
