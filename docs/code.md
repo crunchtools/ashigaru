@@ -8,36 +8,21 @@ A coding agent that can also push is one prompt injection away from pushing some
 
 ## How it works
 
-`code.yml` has two jobs on two runners.
+The fleet's `ci.yml` runs it on the `issues` event, in two of its jobs on two runners.
 
-**Code agent** (read-only token, tools `Read,Edit,Write,Glob,Grep` by default):
+**Code agent** (sdlc's `ai` job: read-only token, tools `Read,Edit,Write,Glob,Grep`):
 
 1. The guard checks the event, then the issue and its maintainer comments are assembled into the prompt.
 2. The agent edits the checkout and returns `status`, `summary` and `reason`.
-3. The repository's pre-commit hooks run over the change, using the hook configuration as it was before the agent ran. If they fail, the output goes back to the same session with `--resume`, at most twice.
-4. The change leaves the job as a patch file and a JSON result. Nothing else does.
+3. The change leaves the job as a patch file and a JSON result. Nothing else does.
 
-**Open pull request** (app token, no model): `scripts/publish.py` applies the patch on a fresh checkout, commits, pushes `ashigaru/issue-N`, opens the pull request with `Closes #N` and runs `gh pr merge --auto --squash`.
+**Open pull request** (sdlc's `write` job: app token, no model): `scripts/publish.py` applies the patch on a fresh checkout, commits, pushes `ashigaru/issue-N`, opens the pull request with `Closes #N` and runs `gh pr merge --auto --squash`.
 
 The publish job refuses, labels the issue `needs-human` and says why when the agent reported no fix, when the patch is empty, or when the applied patch touches what CI runs or what the gates check. That is judged after `git apply --index`, on what git staged against HEAD, so no spelling of the patch hides a path: the `.github/`, `.sdlc/`, `.semgrep/` and `.gourmand-exceptions.d/` directories, `.specify/memory/constitution.md`, the root `AGENTS.md`, `CLAUDE.md` and `.gemini/styleguide.md`, any file named `gatehouse.toml`, `gatehouse-findings.toml`, `.gatehouse-ignore`, `gourmand.toml`, `gourmand-exceptions.toml`, `gourmand-patterns.toml`, `gourmand-audit-ledger.toml`, `sdlc.toml`, `lychee.toml`, `.semgrepignore`, `.hadolint.y*ml`, `.markdownlint*`, `.gitignore`, `.ignore` or `.gitattributes`, a symlink onto any of them or out of the tree, and a change to the parsed `tool.sdlc` table of `pyproject.toml` (or a pyproject that no longer parses). A fix round that touches them hands the pull request to a person instead of pushing. If a pull request is already open for the branch and still merges, it does nothing. If the open pull request conflicts with the default branch, the job first rebases the branch's own commits, fix rounds included, onto the default branch and pushes them, keeping the description, review threads and round count. Only when that rebase conflicts does it rebuild the branch from the new patch: it force-pushes, rewrites the title and description to match, and posts a rebuild comment, after which the round count starts again.
 
-Hook failures that survive two passes do not block the pull request: the repository's required checks are the arbiter, and [fix](fix.md) handles what they report.
+No repository code runs next to the Claude token, so the repository's pre-commit hooks do not run before the pull request opens: its required checks are the arbiter, and [fix](fix.md) handles what they report.
 
-## Example
-
-```yaml
-code:
-  uses: crunchtools/ashigaru/.github/workflows/code.yml@v5
-  with:
-    model: "sonnet"
-    max_turns: 80
-  secrets:
-    CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-    ASHIGARU_APP_KEY: ${{ secrets.ASHIGARU_APP_KEY }}
-    OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}   # for the Gatehouse hook; optional
-```
-
-`allowed_tools` can be widened per repository, for example to let the agent run tests. `Bash` runs repository code next to the Claude token, so widen it only where every issue author is trusted.
+The model (`sonnet`), the turn limit (80) and the tools are sdlc's, in `sdlc_jobs/ai.py`, and the same in every repository.
 
 ## Related
 

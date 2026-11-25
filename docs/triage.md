@@ -8,11 +8,11 @@ Issues filed in passing pile up unlabeled, and nobody goes back to sort them. So
 
 ## How it works
 
-`triage.yml` has two jobs. `Classify` runs the agent with a read-only token and the tools `Read`, `Glob` and `Grep`; it returns a verdict as structured output. Images in the issue are downloaded for it beforehand and listed in the prompt, so a screenshot counts as evidence; the agent itself has no network. `Apply verdict` runs no model: `scripts/triage_apply.py` turns the verdict into a label and a comment.
+Two jobs of the fleet's `ci.yml` share it. sdlc's `ai` job runs the agent with a read-only token and the tools `Read`, `Glob` and `Grep`; it returns a verdict as structured output. Images in the issue are downloaded for it beforehand and listed in the prompt, so a screenshot counts as evidence; the agent itself has no network. Its `write` job runs no model: `scripts/triage_apply.py` turns the verdict into a label and a comment.
 
 | Verdict | Label | What happens next |
 |---------|-------|-------------------|
-| `bug`, `documentation` or `performance`, confidence at or above `min_confidence`, no `needs_decision` | `ready-to-code` | The router chains [code](code.md) in the same run |
+| `bug`, `documentation` or `performance`, confidence at or above 0.7, no `needs_decision` | `ready-to-code` | `ai` runs [code](code.md) in the same job |
 | Any category with `needs_decision` | `triaged` | Waits. Answer the question in a comment, then add `ready-to-code`; the code agent reads maintainer comments |
 | `feature`, or any category below the threshold, or a malformed verdict | `triaged` | Waits. Add `ready-to-code` to have it fixed |
 | `question` or `unclear`, or a bug-class issue with `needs_info` | `needs-info` | Waits. Answer, then add `ready-for-triage` |
@@ -25,20 +25,10 @@ Triage runs when an issue is opened, and when `ready-for-triage` is added.
 
 **Issues from outside.** An issue from an account without write access is triaged the same way, with one difference: a verdict that would have been `ready-to-code` becomes `triaged`, with a comment saying Ashigaru can fix it once a maintainer adds `ready-to-code`. The triage agent can only read, so classifying a stranger's report is safe; writing code from it is a maintainer's decision. An issue written by a bot without write access is not read. See [authority](authority.md).
 
-## Example
-
-```yaml
-triage:
-  uses: crunchtools/ashigaru/.github/workflows/triage.yml@v5
-  with:
-    auto_code_categories: "bug,documentation"   # keep performance work for a person
-    min_confidence: "0.8"
-  secrets:
-    CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-```
+The categories, the threshold and the model (`sonnet`, 40 turns) are sdlc's, in `sdlc_jobs/ai.py`, and the same in every repository.
 
 ## Related
 
 - [Code](code.md): what `ready-to-code` starts
 - [Sweep](sweep.md): how old issues reach triage
-- [Enrollment](enrollment.md): all inputs
+- [Enrollment](enrollment.md)

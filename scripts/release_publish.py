@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Publish a release the moment its pull request merges, instead of at the next hourly sweep.
 
-Runs in the released repository, from release.yml, on `pull_request_target: closed`.
+Runs in the released repository, from sdlc's `write` job, on the release merge's push.
 It reads the pull request from the API, not from the event, and publishes only
 Ashigaru's own release pull request merged into the default branch: the tag at the
 merge commit, the changelog entry as the notes. The sweep publishes whatever this

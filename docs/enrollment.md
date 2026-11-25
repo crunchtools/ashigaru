@@ -4,9 +4,7 @@ Setting up an organization, enrolling a repository, and releasing Ashigaru itsel
 
 ## Why it matters
 
-The supported wiring is one caller file, copied unchanged, so it stays identical across a fleet. It names one workflow, `router.yml`, at the major tag (`@v3`), which the newest release moves, so a release reaches every repository without a change there.
-
-Only a caller can declare triggers and jobs; a called workflow can add neither. So the caller subscribes to a deliberate superset of the events Ashigaru acts on (issues opened, labeled, reopened; comments; Gatehouse completing; pull requests opened, pushed, closed; a run by hand), grants the most any routed job needs, and passes Ashigaru's three secrets by name. Not `secrets: inherit`: that would let whoever can move `v3` read every secret of every enrolled repository. A new secret is the one change that needs a re-copy. `router.yml` decides from the event which of triage, code, fix and release runs, narrows the token and hands each only the secrets it declares. An event nothing acts on ends in one `Nothing to do` step with no permissions and no secrets. A new job is a router change, so it needs no re-copy unless it needs an event, a token permission or a secret the caller does not already carry.
+A repository is enrolled by carrying the fleet's one `ci.yml`, the same file in every repository. Its `ai` job runs triage, code and fix; its `write` job applies what they decide and tags releases. Both run in the sdlc image, which carries this repository's `scripts/`, `prompts/` and `schemas/` at the commit sdlc pins, so a release of Ashigaru reaches the fleet in the next sdlc image, with no change in any repository.
 
 ## How it works
 
@@ -15,15 +13,15 @@ Only a caller can declare triggers and jobs; a called workflow can add neither. 
 1. Create a GitHub App. Repository permissions: Contents, Issues, Pull requests read and write; Metadata read. No Workflows permission, no organization permissions. Install it on the repositories to enroll.
    - Permissions added after installation are not live until accepted. If the app is created or installed before its repository permissions are set, the installation keeps its old permissions until an organization owner accepts the request on the installation's settings page. Until then `actions/create-github-app-token` fails when a workflow asks for `issues: write` or `pull-requests: write`. Check with `gh api orgs/<org>/installations --jq '.installations[] | select(.app_slug=="<slug>") | .permissions'`; `contents`, `issues` and `pull_requests` must show `write`.
    - The sweep needs the app installed on every repository it should reach. `sweep.yml` mints an owner-wide token and can only label issues in repositories the installation covers.
-2. Secrets: `ASHIGARU_APP_KEY` (the app's private key), `CLAUDE_CODE_OAUTH_TOKEN` (from `claude setup-token`), and optionally `OPENROUTER_API_KEY` for the Gatehouse pre-commit hook.
-3. Variables: `ASHIGARU_CLIENT_ID` (the app's client ID, on its settings page — `create-github-app-token` mints every token from it and the `ASHIGARU_APP_KEY` secret) and `ASHIGARU_ENABLED` = `true`.
+2. Secrets: `ASHIGARU_APP_KEY` (the app's private key) and `CLAUDE_CODE_OAUTH_TOKEN` (from `claude setup-token`).
+3. Variables: `ASHIGARU_CLIENT_ID` (the app's client ID, on its settings page — `create-github-app-token` mints every token from it and the `ASHIGARU_APP_KEY` secret) and `ASHIGARU_ENABLED` = `true`, which the sweep reads.
 4. A branch ruleset with your required checks, without a bypass for the app. Allow auto-merge on each repository.
 
 On a GitHub Free organization, organization secrets reach public repositories only.
 
-**Repository.** Copy [`examples/ashigaru.yml`](../examples/ashigaru.yml) to `.github/workflows/ashigaru.yml`. The state labels are created the first time they are needed.
+**Repository.** Convert it to the fleet's `ci.yml` with sdlc (`scripts/convert_repo.py` there). The agents run where sdlc's provisioner has copied `CLAUDE_CODE_OAUTH_TOKEN` into the repository's `ai` environment; that copy is the per-repository switch. The state labels are created the first time they are needed.
 
-**Releases** are off until the repository carries a topic. Topics, not inputs, so the caller file stays identical everywhere and the sweep can read the setting without opening each repository's workflow.
+**Releases** are off until the repository carries a topic. Topics, not inputs, so `ci.yml` stays identical everywhere and the sweep can read the setting without opening each repository's workflow.
 
 | Topic | Effect |
 |-------|--------|
@@ -37,7 +35,7 @@ gh repo edit crunchtools/mcp-pcloud --add-topic ashigaru-release-auto
 
 See [Release](release.md) for what the repository's `CHANGELOG.md` must look like.
 
-**Watch-only mode.** To see Ashigaru's judgement before it acts, add the topic `ashigaru-observe` (admins only), then copy the caller file as usual. It is the only switch: no input or variable.
+**Watch-only mode.** To see Ashigaru's judgement before it acts, add the topic `ashigaru-observe` (admins only). It is the only switch: no input or variable.
 
 ```bash
 gh repo edit crunchtools/mcp-pcloud --add-topic ashigaru-observe
@@ -45,29 +43,13 @@ gh repo edit crunchtools/mcp-pcloud --add-topic ashigaru-observe
 
 While the topic is there, the triage and code agents still run and every step that would write instead records what it would have done in one issue in that repository, labeled `ashigaru-observe` and titled "Ashigaru is watching". The record is rewritten as things change, and the inbox lists it under `## Watching`. Nothing else is written: no label on any other issue, no comment, no branch, no pull request, no review, no fix round, no release. The sweep queues no triage or fix there, and nothing there counts against `code_per_hour`. Removing the topic ends it: the next sweep closes the issue with a comment, and Ashigaru acts normally with no other change. Ashigaru never triages or fixes its own observe issue.
 
-**Inputs.** The router passes none, so every repository runs the defaults below. A repository that must tune one calls the workflow directly from its own caller, as callers did before the router, and gives up automatic new jobs.
+**Settings.** None per repository: the models, turn limits, tools, triage threshold and round limit are sdlc's, in `sdlc_jobs/ai.py`, and the same everywhere.
 
-| Workflow | Input | Default |
-|----------|-------|---------|
-| `triage.yml` | `auto_code_categories` | `bug,documentation,performance` |
-| | `min_confidence` | `0.7` |
-| | `model`, `max_turns` | `sonnet`, 40 |
-| `code.yml` | `allowed_tools` | `Read,Edit,Write,Glob,Grep` |
-| | `model`, `max_turns` | `sonnet`, 80 |
-| `fix.yml` | `max_rounds` | 5 |
-| | `model`, `escalation_model`, `escalate_at` | `sonnet`, `opus`, 3 |
-| | `reviewer`, `bot` | `github-actions[bot]`, `ashigaru-crunchtools` |
-| | `allowed_tools`, `max_turns` | as `code.yml` |
-
-**Turning it off.** Set `ASHIGARU_ENABLED` to `false` to stop every repository at once. Release tagging keeps running: a release pull request that has merged is still tagged and published (docs/release.md). Delete the caller file to remove one repository.
+**Turning it off.** Set `ASHIGARU_ENABLED` to `false` to stop the sweep. To stop the agents in one repository, remove `CLAUDE_CODE_OAUTH_TOKEN` from its `ai` environment. Release tagging keeps running: a release pull request that has merged is still tagged and published (docs/release.md).
 
 ## Releasing
 
-Callers use the major tag, `@v4`, and each reusable workflow fetches its scripts at the same tag: a called workflow cannot name its own ref, so it is a literal. To release `X.Y.Z`: set `VERSION`, add the CHANGELOG entry, merge, then tag `vX.Y.Z` and publish the GitHub Release. Publishing runs `major-tag.yml`, which moves `v3` to the release when it is the newest of its major, and from that moment every enrolled repository runs it. A late patch to an older minor is published without moving `v3`. Unlike the agents it runs while `ASHIGARU_ENABLED` is `false`, so a release still reaches the callers. No file in any other repository changes. `tests/test_workflows.py` fails if a workflow, the example or this repository's caller names anything but the major tag.
-
-**Rolling back.** Every release keeps its own tag. To undo one, move the major tag back: `git tag -f v4 vX.Y.Z && git push -f origin v3`. A repository that needs to stay on one release can call `@vX.Y.Z`, but the scripts are still fetched at `v3`, so this holds only the workflow files.
-
-**A new major.** A change to the public interface is the next major tag (`v4` after `v3`). Repositories move to it by editing their caller file, on their own schedule.
+To release `X.Y.Z`: a `chore/release-X.Y.Z` branch moves `VERSION` and the CHANGELOG, dispatching `ci.yml` with `version: X.Y.Z` has its `write` job open `ashigaru/release-X.Y.Z` as the app, and that pull request's merge is tagged and published by `ci.yml`'s `write` job. The fleet picks it up when sdlc pins the new commit and ships its image.
 
 ## Related
 

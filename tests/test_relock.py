@@ -143,9 +143,3 @@ def test_a_dependency_that_would_build_is_refused_and_its_backend_never_runs(tmp
     assert not marker.exists(), "the dependency's build backend executed in the publish job"
     # Named so the test cannot pass on some unrelated failure before resolution.
     assert refusal is not None and "disabled" in refusal
-
-
-def test_the_agent_still_has_no_shell():
-    text = (Path(__file__).resolve().parents[1] / ".github/workflows/code.yml").read_text()
-    line = next(row for row in text.splitlines() if "default:" in row and "Read,Edit" in row)
-    assert "Bash" not in line

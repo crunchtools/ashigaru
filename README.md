@@ -1,13 +1,13 @@
 # ashigaru
 
-Issues in, fixed bugs out. Ashigaru is a set of reusable GitHub Actions workflows that watch a repository's issues, sort bug-class work from feature work, and fix the bugs: it opens the pull request, answers the code review, and lets GitHub merge when the required checks pass. Feature requests are labeled and left for a maintainer. It runs on GitHub-hosted runners with Claude Code, on a Claude subscription token; there is no server to operate.
+Issues in, fixed bugs out. Ashigaru is the agents and scripts behind the fleet `ci.yml`'s `ai` and `write` jobs: they watch a repository's issues, sort bug-class work from feature work, and fix the bugs: it opens the pull request, answers the code review, and lets GitHub merge when the required checks pass. Feature requests are labeled and left for a maintainer. They run in the sdlc image with Claude Code, on a Claude subscription token.
 
 Named for the *ashigaru* (足軽), the foot soldiers a daimyo sent into the field.
 
 ## Capabilities
 
 1. **[Triage](docs/triage.md)**: every new issue is read against the code and labeled. Bug, documentation and performance issues go to the code agent; features wait for a person. An issue from someone without write access is labeled too, but is fixed only when a maintainer says so.
-2. **[Code](docs/code.md)**: a `ready-to-code` issue becomes a pull request from `ashigaru/issue-N` with auto-merge on. The repository's own pre-commit hooks run before the pull request opens, and failures go back to the same agent session.
+2. **[Code](docs/code.md)**: a `ready-to-code` issue becomes a pull request from `ashigaru/issue-N` with auto-merge on.
 3. **[Fix](docs/fix.md)**: after each review of a pull request the code agent opened, every finding gets an answer in its thread and failed checks get fixed, for at most five rounds.
 4. **[Sweep](docs/sweep.md)**: every hour the oldest untriaged issues across enrolled repositories are queued for triage, and up to five waiting fixes are started, so a backlog drains without spending the model budget.
 5. **[Release](docs/release.md)**: a repository that asks for it with a topic gets its merged work released: a release pull request from the changelog, then the tag and the GitHub Release, so a fix does not sit merged and unshipped.
@@ -20,31 +20,23 @@ Organization, once:
 
 - Create a GitHub App with repository permissions Contents, Issues and Pull requests set to read and write, install it on the organization, and store its private key as the secret `ASHIGARU_APP_KEY` and its client ID as the variable `ASHIGARU_CLIENT_ID` (`create-github-app-token` mints every token from the two).
 - Run `claude setup-token` and store the result as the secret `CLAUDE_CODE_OAUTH_TOKEN`.
-- Set the variable `ASHIGARU_ENABLED` to `true`.
+- Set the variable `ASHIGARU_ENABLED` to `true` for the sweep.
 - Require your CI and review checks in a branch ruleset the app cannot bypass, and allow auto-merge.
 
-Each repository:
-
-```bash
-mkdir -p .github/workflows
-curl -fsSL https://raw.githubusercontent.com/crunchtools/ashigaru/v3/examples/ashigaru.yml \
-  -o .github/workflows/ashigaru.yml
-```
-
-Details and the full list of inputs are in [docs/enrollment.md](docs/enrollment.md).
+Each repository carries the fleet's `ci.yml`, written by sdlc's converter; the agents run where `CLAUDE_CODE_OAUTH_TOKEN` is in its `ai` environment. Details are in [docs/enrollment.md](docs/enrollment.md).
 
 ## Documentation
 
 | Page | What it covers |
 |------|----------------|
 | [docs/triage.md](docs/triage.md) | Categories, the confidence threshold, which labels mean what |
-| [docs/code.md](docs/code.md) | The two-job split, the pre-commit inner loop, what is refused |
+| [docs/code.md](docs/code.md) | The two-job split, what is refused |
 | [docs/fix.md](docs/fix.md) | What triggers a round, how findings are answered, the round limit |
 | [docs/sweep.md](docs/sweep.md) | Backlog selection and the hourly budget |
 | [docs/release.md](docs/release.md) | Turning releases on per repository, how the version is chosen and rewritten, the releases record |
 | [docs/review.md](docs/review.md) | First-pass review of outside pull requests, and the inbox issue |
 | [docs/authority.md](docs/authority.md) | Who holds which credential, untrusted input, the switch and the caps |
-| [docs/enrollment.md](docs/enrollment.md) | Organization setup, enrolling a repository, inputs, releasing |
+| [docs/enrollment.md](docs/enrollment.md) | Organization setup, enrolling a repository, releasing |
 | [docs/desk-cli.md](docs/desk-cli.md) | The `ashigaru` CLI: config, the shared command set, the Claude Code hooks |
 | [docs/design/ashigaru-3.md](docs/design/ashigaru-3.md) | The Ashigaru 3.x design: the Desk, Josui dispatch, Exedore runners (#178) |
 
