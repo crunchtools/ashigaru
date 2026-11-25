@@ -83,10 +83,12 @@ stacks = ["container"]
 # Written by crunchtools/sdlc's scripts/convert_repo.py: moved from the workflows.
 image = "quay.io/crunchtools/ashigaru"
 boot = "healthcheck"
+# Not enforced yet: sdlc runs no contract-test until sdlc#118 (sdlc#168). Kept so
+# the gate returns with it.
 contract-test = "packaging/container-test.sh"
 
 [tool.sdlc.ci]
-# pytest on Python 3.15 as well as the gate's 3.14 (what extra-tests.yml ran).
+# pytest on Python 3.15 as well as the gate's 3.14 (what ci.yml's py315 job ran).
 checks = ["py315-image", "py315"]
 
 [tool.sdlc.ci.py315-image]

@@ -17,5 +17,5 @@ classification = "by_design"
 
 [[locations]]
 path = "packaging/container-test.sh"
-justification = "The image's contract test: .github/workflows/container.yml passes it to the constitution's container-release.yml as contract-test, which runs it against the pushed digest."
+justification = "The image's contract test: [tool.sdlc.image] contract-test in pyproject.toml names it, for sdlc to run against the built image (sdlc#118)."
 classification = "by_design"

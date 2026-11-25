@@ -365,7 +365,7 @@ value outside the Desk's enums, is kept in `extra`.
 
 The service ships two ways, both built on GitHub:
 
-- **Image:** `quay.io/crunchtools/ashigaru` (`Containerfile`, `.github/workflows/container.yml`).
+- **Image:** `quay.io/crunchtools/ashigaru` (`Containerfile`, built by ci.yml's `image` job).
   `:main` follows the default branch; `:latest` and `:X.Y.Z` the 3.x release tags.
   It runs as uid 65532 with a read-only root; the SQLite file is on the `/data`
   volume. Its HEALTHCHECK is `ashigaru-desk health`.
