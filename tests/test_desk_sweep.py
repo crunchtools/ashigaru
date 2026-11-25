@@ -471,6 +471,31 @@ def test_a_closed_outsider_is_not_listed_and_earlier_runs_forget_it(
     assert [found["subject_key"] for found in sweep.outsiders(conn)] == ["crunchtools/x#3"]
 
 
+def outsiders_of(conn: sqlite3.Connection, run_id: int) -> list[str]:
+    row = conn.execute("SELECT outsiders FROM sweeps WHERE id = ?", (run_id,)).fetchone()
+    return [found["subject_key"] for found in json.loads(row[0])]
+
+
+def test_forgetting_drops_every_closed_key_only_from_the_last_days_runs(conn: sqlite3.Connection) -> None:
+    started = datetime.now(UTC)
+    keys = [f"crunchtools/x#{number}" for number in (2, 3, 4)]
+    listed = json.dumps([{"subject_key": key, "ref": None, "author": "o"} for key in keys])
+    finish = "INSERT INTO sweeps (trigger, started_at, finished_at, outsiders) VALUES ('timer', ?, ?, ?)"
+    old = sweep._stamp(started - sweep.FIRST - HOURS_AGO)
+    recent = sweep._stamp(started - HOURS_AGO)
+    old_run = conn.execute(finish, (old, old, listed)).lastrowid
+    recent_run = conn.execute(finish, (recent, recent, listed)).lastrowid
+    assert old_run and recent_run
+    queries: list[str] = []
+    conn.set_trace_callback(queries.append)
+    sweep._forget(conn, sweep.Counts(), started)
+    conn.set_trace_callback(None)
+    assert not [query for query in queries if "UPDATE sweeps" in query]
+    sweep._forget(conn, sweep.Counts(forgotten={"crunchtools/x#2", "crunchtools/x#4"}), started)
+    assert outsiders_of(conn, recent_run) == ["crunchtools/x#3"]
+    assert outsiders_of(conn, old_run) == keys
+
+
 def test_serve_sweeps_only_with_a_token_and_an_org(monkeypatch: pytest.MonkeyPatch, db: Path) -> None:
     monkeypatch.setenv("ASHIGARU_FORGE_TOKEN_GITHUB", "token")
     assert desk_main.sweeper(str(db)) is None
