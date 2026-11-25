@@ -38,6 +38,11 @@ from common import (
 )
 
 CALLER = ".github/workflows/ashigaru.yml"
+FLEET_CI = ".github/workflows/ci.yml"
+FLEET_MARKS = ("quay.io/crunchtools/sdlc-bootstrap@", "sdlc event")
+"""The fleet ci.yml runs `sdlc event` from the sdlc-bootstrap image; its `ai` job acts on the
+labels the sweep adds, as router.yml does for an ashigaru.yml caller. A ci.yml without both
+marks (a repo's own, or one from before the fleet file) would leave those labels unanswered."""
 MAX_LIMIT = 20
 """No run queues more than this, whatever limit it is asked for."""
 WINDOW = timedelta(hours=1)
@@ -409,14 +414,26 @@ def open_pulls(repo: str) -> list[dict]:
     return json.loads(listing)
 
 
-def enrolled(repo: str) -> bool:
+def workflow(repo: str, path: str) -> str | None:
+    """A workflow file from the default branch, or None when the repo has none or it cannot be read."""
     try:
-        gh("api", f"repos/{repo}/contents/{CALLER}", "--silent")
+        return gh("api", f"repos/{repo}/contents/{path}", "-H", "Accept: application/vnd.github.raw")
     except subprocess.CalledProcessError as error:
         if "404" not in error.stderr:
-            print(f"::warning::could not check {repo} for {CALLER}: {error.stderr.strip()}")
-        return False
-    return True
+            print(f"::warning::could not check {repo} for {path}: {error.stderr.strip()}")
+        return None
+
+
+def runs_fleet_ci(text: str) -> bool:
+    return all(mark in text for mark in FLEET_MARKS)
+
+
+def enrolled(repo: str) -> bool:
+    """A repo with the Ashigaru caller, or one on the fleet ci.yml, which routes the same events."""
+    if workflow(repo, CALLER) is not None:
+        return True
+    fleet = workflow(repo, FLEET_CI)
+    return fleet is not None and runs_fleet_ci(fleet)
 
 
 def start_fixes(items: list[dict], budget: int, dry_run: bool) -> None:

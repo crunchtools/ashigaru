@@ -21,7 +21,7 @@ Only a caller can declare triggers and jobs; a called workflow can add neither. 
 
 On a GitHub Free organization, organization secrets reach public repositories only.
 
-**Repository.** Copy [`examples/ashigaru.yml`](../examples/ashigaru.yml) to `.github/workflows/ashigaru.yml`. The state labels are created the first time they are needed.
+**Repository.** Copy [`examples/ashigaru.yml`](../examples/ashigaru.yml) to `.github/workflows/ashigaru.yml`. A repository on the fleet `ci.yml` (crunchtools/sdlc) is already enrolled: its `ai` and `write` jobs route the same events, and the sweep counts it. The state labels are created the first time they are needed.
 
 **Releases** are off until the repository carries a topic. Topics, not inputs, so the caller file stays identical everywhere and the sweep can read the setting without opening each repository's workflow.
 

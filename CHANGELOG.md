@@ -8,6 +8,7 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- The sweep enrolls a repository on the fleet `ci.yml` as well as one with `ashigaru.yml` (#259). The fleet file is recognised by running `sdlc event` from the sdlc-bootstrap image, whose `ai` job answers the sweep's labels; a `ci.yml` without both marks is not enrolled. Before, every repository moved to the fleet `ci.yml` dropped out of the hourly triage, fix starts and release pull requests.
 - A fix round pushes with `git push --force-with-lease=<branch>:<head> origin HEAD:<branch>`, where `<head>` is the pull request head the round collected its findings and checks on (a1109). A branch that moved since then is refused: the round pushes nothing and answers nothing, and the push that moved it starts a fresh round on the new head. The round also yields, before applying anything, when the branch it checked out is no longer that head, so a patch that conflicts with code the agent never saw no longer hands the PR to a person; and a round with no patch checks the remote head before it answers a finding. Before, a plain push could land a fix written against code the agent never saw. The fleet CI design (sdlc `docs/marketplace-free-ci.md`) requires the leased push, and sdlc's write step calls this script.
 
 ## [5.4.0] - 2026-11-23

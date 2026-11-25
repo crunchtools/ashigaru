@@ -4,6 +4,7 @@ import argparse
 import json
 import subprocess
 from datetime import UTC, datetime
+from pathlib import Path
 
 import pytest
 
@@ -412,3 +413,68 @@ def test_a_red_issue_write_that_fails_is_named_in_the_inbox_and_the_rest_still_r
     assert calls[-1][2].endswith(
         "Nothing red.\n- Could not write the red issue in o/r (create); see the sweep log.\n"
     )
+
+
+FLEET_CI = (Path(__file__).parent / "fixtures" / "fleet-ci.yml").read_text()
+PRE_FLEET_CI = """
+name: CI
+on: [push, pull_request]
+jobs:
+  sdlc:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - run: .sdlc/bin/sdlc ci
+"""
+
+
+def serve(files, failing=()):
+    """A `gh api contents` stand-in: the repos' workflow files by path, a 404 for the rest."""
+    calls = []
+
+    def gh(*args):
+        calls.append(args)
+        path = args[1].split("/contents/", 1)[1]
+        if path in failing:
+            raise subprocess.CalledProcessError(1, "gh", stderr="HTTP 502: Bad Gateway")
+        if path not in files:
+            raise subprocess.CalledProcessError(1, "gh", stderr="gh: Not Found (HTTP 404)")
+        return files[path]
+
+    return gh, calls
+
+
+@pytest.mark.parametrize(
+    ("files", "expected"),
+    [
+        ({sweep.CALLER: "jobs: {}"}, True),
+        ({sweep.FLEET_CI: FLEET_CI}, True),
+        ({sweep.CALLER: "jobs: {}", sweep.FLEET_CI: FLEET_CI}, True),
+        ({sweep.FLEET_CI: PRE_FLEET_CI}, False),
+        ({}, False),
+    ],
+    ids=["ashigaru.yml", "fleet ci.yml", "both, mid-move", "a ci.yml from before the fleet file", "neither"],
+)
+def test_a_repo_is_enrolled_by_the_caller_or_by_the_fleet_ci(monkeypatch, files, expected):
+    """#259: a repo on the fleet ci.yml drops ashigaru.yml; its `ai` job answers the sweep's labels."""
+    gh, calls = serve(files)
+    monkeypatch.setattr(sweep, "gh", gh)
+    assert sweep.enrolled("o/r") is expected
+    assert all(call[1].startswith("repos/o/r/contents/.github/workflows/") for call in calls)
+    if sweep.CALLER in files:
+        assert len(calls) == 1, "the caller alone settles it, with no second read"
+
+
+def test_a_ci_yml_is_the_fleet_file_only_with_both_marks():
+    assert sweep.runs_fleet_ci(FLEET_CI)
+    assert not sweep.runs_fleet_ci(FLEET_CI.replace("sdlc event", "sdlc ci"))
+    assert not sweep.runs_fleet_ci(FLEET_CI.replace("quay.io/crunchtools/sdlc-bootstrap@", "quay.io/x/y@"))
+
+
+def test_a_read_that_fails_is_warned_and_not_enrolled(monkeypatch, capsys):
+    gh, _ = serve({sweep.FLEET_CI: FLEET_CI}, failing=(sweep.CALLER, sweep.FLEET_CI))
+    monkeypatch.setattr(sweep, "gh", gh)
+    assert sweep.enrolled("o/r") is False
+    out = capsys.readouterr().out
+    assert f"could not check o/r for {sweep.CALLER}: HTTP 502" in out
+    assert f"could not check o/r for {sweep.FLEET_CI}: HTTP 502" in out
