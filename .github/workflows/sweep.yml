@@ -3,7 +3,8 @@
 # Runs here only, not in consumer repos. It labels the oldest untriaged issues
 # in enrolled repos `ready-for-triage`, using the Ashigaru app token so the
 # label starts each repo's own Ashigaru workflow. A repo is enrolled when it
-# carries .github/workflows/ashigaru.yml.
+# carries .github/workflows/ashigaru.yml, or the fleet ci.yml whose `ai` job
+# answers the labels.
 #
 # It also starts the fixes that are waiting: issues labeled `ready-to-code` with no
 # pull request yet, and Ashigaru pull requests that conflict. `code_per_hour` is
