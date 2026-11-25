@@ -56,7 +56,7 @@ Two agents read text a stranger wrote: triage (an outside issue) and review (an 
 | Outside pull requests reviewed per sweep | 5 | `MAX_REVIEWS` in `scripts/inbox.py` |
 | `write` runs at a time per issue or pull request | 1 | `write`'s `concurrency` in `ci.yml` |
 
-Each is covered in `tests/test_workflows.py`, `tests/test_findings.py`, `tests/test_sweep.py`, `tests/test_inbox.py` or `tests/test_release.py`.
+The ones in this repository are covered in `tests/test_workflows.py`, `tests/test_findings.py`, `tests/test_sweep.py`, `tests/test_inbox.py` or `tests/test_release.py`; the ones in sdlc and `ci.yml` by sdlc's own tests.
 
 ## Known gaps
 
