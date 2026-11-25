@@ -75,14 +75,20 @@ DENIED_NAMES = (
     ".gitignore",
     ".ignore",
     ".gitattributes",
+    ".python-version",
+    ".python-versions",
+    "uv.toml",
 )
 """File names, at any depth, that configure, waive or hide what a gate sees. An agent that edits
 them grades its own work. .gitattributes is here because it can turn a file's diff into a binary
-blob or mark it generated, which hides it from review; .ignore because Gourmand's walker honours it."""
+blob or mark it generated, which hides it from review; .ignore because Gourmand's walker honours it.
+The Python pins and uv.toml choose what sdlc's relock runs, so they are refused as sdlc refuses them."""
 DENIED_PATHS = (".specify/memory/constitution.md", "AGENTS.md", "CLAUDE.md", ".gemini/styleguide.md")
 """Exact paths from the root, matched nowhere else: the constitution, and the root files Gatehouse
 reads from the base branch to build its reviewers' prompt."""
 SYMLINK = "120000"
+GONE = "000000"
+"""git's mode for the side of a raw diff that does not exist."""
 SECRET = re.compile(r"sk-ant-[\w-]{16,}|gh[pousr]_\w{20,}|github_pat_\w{20,}")
 """Anything shaped like a Claude or GitHub token. Blanked out of agent-written text before it
 is posted: the agent jobs are denied the files that hold their token, and this is the second
@@ -234,6 +240,46 @@ def _sdlc_table(spec: str) -> object:
     return tomllib.loads(text).get("tool", {}).get("sdlc")
 
 
+def _uv_moved(path: str) -> bool:
+    """True when pyproject's `tool.uv` at `path` differs, HEAD against the index, parsed.
+
+    A file new to the index is compared against {}. Raises ValueError when a side
+    does not decode or parse, or the index lacks the file.
+    """
+    sides = []
+    for spec in (f"HEAD:{path}", f":{path}"):
+        try:
+            text = git("show", spec)
+        except subprocess.CalledProcessError as error:
+            if spec.startswith("HEAD:"):
+                sides.append({})
+                continue
+            raise ValueError(spec) from error
+        tool = tomllib.loads(text).get("tool", {})
+        sides.append(tool.get("uv", {}) if isinstance(tool, dict) else tool)
+    return sides[0] != sides[1]
+
+
+def _judged(path: str, old_mode: str, new_mode: str, link: str | None) -> str | None:
+    """Why one staged path may not be published, or None; the root pyproject's tool.sdlc aside."""
+    if denied(path):
+        return f"`{path}`"
+    if link is not None:
+        target = posixpath.normpath(posixpath.join(posixpath.dirname(path), link))
+        if _holds_denied(target):
+            return f"`{path}`, a symlink onto `{target}`"
+    if GONE not in (old_mode, new_mode) and old_mode != new_mode:
+        return f"the mode of `{path}` ({old_mode} to {new_mode})"
+    if posixpath.basename(path) == "pyproject.toml":
+        try:
+            moved = _uv_moved(path)
+        except ValueError:  # TOMLDecodeError, bytes that are not UTF-8, the file deleted
+            moved = path != "pyproject.toml"  # the root one is judged with tool.sdlc, which says why
+        if moved:
+            return f"`[tool.uv]` in `{path}`"
+    return None
+
+
 def staged_refusal() -> str | None:
     """What in the index, against HEAD, Ashigaru may not publish, or None.
 
@@ -241,6 +287,8 @@ def staged_refusal() -> str | None:
     patch text: a quoted path, a rename, a binary diff or a diff config cannot
     hide a file. Symlinks onto gate configuration are refused, and pyproject's
     `tool.sdlc` table is compared parsed, so how it is spelt does not matter.
+    As sdlc's relock does, it also refuses any change of a file's mode and any
+    change to `tool.uv` in a pyproject.toml at any depth.
     """
     raw = git_bytes("-c", "core.quotePath=false", "diff", "--cached", "--raw", "-z", "--no-renames",
                     "--no-abbrev", "--no-ext-diff", "--no-textconv", "HEAD")  # fmt: skip
@@ -249,19 +297,16 @@ def staged_refusal() -> str | None:
     for meta, name in zip(fields[0::2], fields[1::2], strict=False):
         if not meta.startswith(b":"):
             continue
-        _, new_mode, _, new_sha, _ = meta[1:].decode("ascii").split(" ")
+        old_mode, new_mode, _, new_sha, _ = meta[1:].decode("ascii").split(" ")
         try:
             path = name.decode("utf-8")
             link = git_bytes("cat-file", "blob", new_sha).decode("utf-8") if new_mode == SYMLINK else None
         except UnicodeDecodeError:
             return f"`{name.decode('utf-8', 'backslashreplace')}`, a path or link that is not UTF-8"
         changed.add(path)
-        if denied(path):
-            return f"`{path}`"
-        if link is not None:
-            target = posixpath.normpath(posixpath.join(posixpath.dirname(path), link))
-            if _holds_denied(target):
-                return f"`{path}`, a symlink onto `{target}`"
+        why = _judged(path, old_mode, new_mode, link)
+        if why is not None:
+            return why
     if "pyproject.toml" in changed:
         try:
             moved = _sdlc_table("HEAD:pyproject.toml") != _sdlc_table(":pyproject.toml")
