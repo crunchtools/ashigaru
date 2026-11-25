@@ -42,6 +42,7 @@ def round_(tmp_path, monkeypatch):
     calls = []
     monkeypatch.setattr(fix_publish, "observing", lambda repo: False)
     monkeypatch.setattr(fix_publish, "gh", lambda *args: calls.append(args))
+    monkeypatch.setattr(fix_publish, "rearm", lambda *args: calls.append(("rearm", *args)))
     monkeypatch.setattr(fix_publish, "set_state", lambda *args: calls.append(("state", *args)))
     monkeypatch.setattr(sys, "argv", ["fix_publish", "--repo", "o/r", "--mode", "fix", "--branch", "b",
                                       "--findings", str(tmp_path / "findings.json"),

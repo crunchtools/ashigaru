@@ -6,6 +6,10 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- Auto-merge is armed only where the base branch requires status checks, read from its rulesets and its classic protection (#257). On a base with none, auto-merge would merge an agent's pull request at once, unreviewed: `publish.py` and the fix round now leave it open for a person and say why on the pull request.
+
 ### Changed
 
 - The hourly GitHub sweep is gone: `sweep.yml`, `scripts/sweep.py`, `scripts/review_publish.py`, their tests and `docs/sweep.md`/`docs/review.md`. The Ashigaru Desk reads GitHub itself every ten minutes, so the workflow only duplicated it. `scripts/release.py` keeps the four helpers it borrowed from the sweep.

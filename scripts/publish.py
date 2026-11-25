@@ -12,6 +12,7 @@ import json
 import subprocess
 import sys
 from pathlib import Path
+from urllib.parse import quote
 
 import inbox
 from common import (
@@ -34,6 +35,10 @@ BOT_NAME = "ashigaru-crunchtools-com[bot]"
 BOT_EMAIL = "340727104+ashigaru-crunchtools-com[bot]@users.noreply.github.com"
 TRAILER = "Co-Authored-By: Claude <noreply@anthropic.com>"
 FOOTER = "Opened by Ashigaru. Merges automatically once the required checks pass."
+UNGATED = (
+    "**Ashigaru did not enable auto-merge**: `{base}` requires no status checks, so nothing would "
+    "stand between this pull request and a merge. A person reviews and merges it."
+)
 CONFLICTING = "CONFLICTING"
 REBASED = (
     "**Ashigaru rebased this pull request** onto the current default branch after a merge conflict. "
@@ -140,23 +145,49 @@ def pr_body(summary: str, issue: int, thanks: str = "", partial: bool = False) -
     return f"{summary}\n\n{issue_link}\n\n{FOOTER}\n"
 
 
-def rearm(url: str) -> None:
-    """Turn auto-merge back on: GitHub turns it off when the branch is force-pushed."""
+def gated(repo: str, base: str) -> bool:
+    """True when `base` requires status checks, through a ruleset or classic branch protection.
+
+    Both are read with repository read access: the branch's active rules, then the
+    protection summary on the branch itself (the protection endpoint needs admin).
+    """
+    branch = quote(base, safe="")
+    for rule in api(f"repos/{repo}/rules/branches/{branch}"):
+        params = rule.get("parameters") or {}
+        if rule.get("type") == "required_status_checks" and params.get("required_status_checks"):
+            return True
+    protection = api(f"repos/{repo}/branches/{branch}").get("protection") or {}
+    checks = protection.get("required_status_checks") or {}
+    enforced = checks.get("enforcement_level", "off") != "off"
+    return enforced and bool(checks.get("contexts") or checks.get("checks"))
+
+
+def rearm(repo: str, pr: str, base: str | None = None) -> None:
+    """Turn auto-merge on, only where required checks gate the merge into `base` (the PR's, if None).
+
+    GitHub turns it off when the branch is force-pushed, so every push re-arms it.
+    Without required checks, auto-merge merges at once: the PR is left for a person.
+    """
     try:
-        gh("pr", "merge", url, "--auto", "--squash")
+        if base is None:
+            base = json.loads(gh("pr", "view", pr, "--repo", repo, "--json", "baseRefName"))["baseRefName"]
+        if not gated(repo, base):
+            gh("pr", "comment", pr, "--repo", repo, "--body", UNGATED.format(base=base))
+            return
+        gh("pr", "merge", pr, "--repo", repo, "--auto", "--squash")
     except subprocess.CalledProcessError as error:
-        gh("pr", "comment", url, "--body",
+        gh("pr", "comment", pr, "--repo", repo, "--body",
            f"**Ashigaru could not enable auto-merge**, so this needs a manual merge.\n\n"
            f"```\n{error.stderr.strip()}\n```")  # fmt: skip
 
 
 def announce(repo: str, branch: str, base: str, title: str, body: str) -> str:
-    """Open the pull request and turn on auto-merge. Returns its URL."""
+    """Open the pull request and turn on auto-merge where the base is gated. Returns its URL."""
     url = gh(
         "pr", "create", "--repo", repo, "--head", branch, "--base", base,
         "--title", title, "--body", body,
     ).strip()  # fmt: skip
-    rearm(url)
+    rearm(repo, url, base)
     return url
 
 
@@ -170,10 +201,10 @@ def watch(repo: str, issue: int, branch: str, title: str, why: str | None) -> No
     set_output("pr", "")
 
 
-def resume(url: str, note: str) -> None:
+def resume(repo: str, base: str, url: str, note: str) -> None:
     """Say on the pull request what the push did, then re-arm the auto-merge it turned off."""
     gh("pr", "comment", url, "--body", note)
-    rearm(url)
+    rearm(repo, url, base)
 
 
 def rebuild(args: argparse.Namespace, found: dict, result: dict, open_prs: list[dict]) -> str:
@@ -193,7 +224,7 @@ def rebuild(args: argparse.Namespace, found: dict, result: dict, open_prs: list[
         return announce(repo, branch, args.base, pr_title, body)
     url = open_prs[0]["url"]
     gh("pr", "edit", url, "--title", pr_title, "--body", body)
-    resume(url, REBUILT)
+    resume(repo, args.base, url, REBUILT)
     return url
 
 
@@ -249,7 +280,7 @@ def main() -> int:
     if open_prs and carry_over(branch, start):
         # The lease refuses the push if a fix round landed on the branch meanwhile.
         git("push", f"--force-with-lease={branch}:origin/{branch}", "origin", branch)
-        resume(open_prs[0]["url"], REBASED)
+        resume(args.repo, args.base, open_prs[0]["url"], REBASED)
         set_output("pr", open_prs[0]["url"])
         return 0
     if not why:
