@@ -251,7 +251,9 @@ def parser() -> argparse.ArgumentParser:
     _wait_parser(sub, common)
 
     wrap = sub.add_parser(
-        "wrap", parents=[common], help="mark wrapping, or confirm idle and CC-DONE, clear, close the item"
+        "wrap",
+        parents=[common],
+        help="mark wrapping, or confirm CC-DONE, idle and the /clear landed, close the item",
     )
     wrap.add_argument("item")
     wrap.add_argument(
@@ -259,7 +261,11 @@ def parser() -> argparse.ArgumentParser:
     )
     wrap.add_argument("--learned", help="the report's Learned: line")
     wrap.add_argument("--state", choices=["done", "wontdo", "abandoned"], default="done")
-    wrap.add_argument("--force", action="store_true", help="skip the idle and CC-DONE checks")
+    wrap.add_argument(
+        "--force",
+        action="store_true",
+        help="skip the idle and CC-DONE checks; not the clear, unless the seat is down",
+    )
 
     _seat_commands(sub, common)
     for name in ("update", "report", "assign", "wrap", "claim", "file"):

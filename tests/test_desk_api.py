@@ -140,25 +140,109 @@ def test_wrap_marks_wrapping_then_clears_once_memorized_and_idle(
     client: TestClient, keys: Keys, conn: sqlite3.Connection
 ) -> None:
     up_seat(conn, SEAT, lane="exedore-max")
+    own = started(client, keys, SEAT)
     item = client.post("/v1/items", headers=keys[JOSUI], json={"task": "t", "lane": "exedore-max"}).json()
     path = f"/v1/items/{item['id']}"
     client.post(f"{path}/assign", headers=keys[JOSUI], json={"seat": SEAT})
-    client.post(f"{path}/report", headers=keys[SEAT], json={"verb": "DONE", "text": "PR #1"})
-    assert client.post(f"{path}/wrap", headers=keys[SEAT], json={}).status_code == FORBIDDEN
+    client.post(f"{path}/report", headers=own, json={"verb": "DONE", "text": "PR #1"})
+    assert client.post(f"{path}/wrap", headers=own, json={}).status_code == FORBIDDEN
     wrapping = client.post(f"{path}/wrap", headers=keys[JOSUI], json={"stage": "wrapping"}).json()
     assert (wrapping["wrap"], wrapping["state"]) == ("wrapping", "review")
 
     early = client.post(f"{path}/wrap", headers=keys[JOSUI], json={})
     assert early.status_code == CONFLICT and "/cc seat" in early.json()["detail"]
-    client.post(f"{path}/report", headers=keys[SEAT], json={"verb": "CC-DONE"})
-    client.patch(f"/v1/seats/{SEAT}", headers=keys[SEAT], json={"turn": "active"})
+    client.post(f"{path}/report", headers=own, json={"verb": "CC-DONE"})
+    client.patch(f"/v1/seats/{SEAT}", headers=own, json={"turn": "active"})
     busy = client.post(f"{path}/wrap", headers=keys[JOSUI], json={})
     assert busy.status_code == CONFLICT and "mid-turn" in busy.json()["detail"]
 
-    client.patch(f"/v1/seats/{SEAT}", headers=keys[SEAT], json={"turn": "idle"})
+    client.patch(f"/v1/seats/{SEAT}", headers=own, json={"turn": "idle"})
+    cleared_too_soon = client.post(f"{path}/wrap", headers=keys[JOSUI], json={})
+    assert cleared_too_soon.status_code == CONFLICT and "has not landed" in cleared_too_soon.json()["detail"]
+    clear(client, keys, SEAT)
     cleared = client.post(f"{path}/wrap", headers=keys[JOSUI], json={"learned": "small PRs"}).json()
     assert (cleared["wrap"], cleared["state"], cleared["learned"]) == ("cleared", "done", "small PRs")
     assert client.get(f"/v1/seats/{SEAT}", headers=keys["ci"]).json()["status"] == "free"
+
+
+def clear(client: TestClient, keys: Keys, name: str, session: str = "s2") -> None:
+    """The seat's SessionStart for a /clear that landed in its pane."""
+    body = {"session_id": session, "source": "clear"}
+    assert client.post(f"/v1/seats/{name}/session", headers=keys[name], json=body).status_code == OK
+
+
+def test_wrap_refuses_cleared_until_the_clear_lands_even_forced(
+    client: TestClient, keys: Keys, conn: sqlite3.Connection
+) -> None:
+    # a1385: `wrap --force` recorded cleared on a seat whose pane never got the /clear.
+    up_seat(conn, SEAT, lane="exedore-max")
+    started(client, keys, SEAT)
+    item = client.post("/v1/items", headers=keys[JOSUI], json={"task": "t", "lane": "exedore-max"}).json()
+    path = f"/v1/items/{item['id']}"
+    client.post(f"{path}/assign", headers=keys[JOSUI], json={"seat": SEAT})
+    client.post(f"{path}/wrap", headers=keys[JOSUI], json={"stage": "wrapping"})
+    for body in ({"learned": "x"}, {"force": True}):
+        refused = client.post(f"{path}/wrap", headers=keys[JOSUI], json=body)
+        assert refused.status_code == CONFLICT and refused.json()["code"] == "not-ready"
+        assert "has not landed" in refused.json()["detail"]
+    found = client.get(path, headers=keys["ci"]).json()
+    assert (found["wrap"], found["state"], found["seat"]) == ("wrapping", "assigned", SEAT)
+
+    dispatch.end_session(conn, SEAT, JOSUI, "lapsed")  # moves the epoch, but no session started
+    assert client.post(f"{path}/wrap", headers=keys[JOSUI], json={"learned": "x"}).status_code == CONFLICT
+    clear(client, keys, SEAT)
+    assert client.post(f"{path}/wrap", headers=keys[JOSUI], json={"force": True}).json()["wrap"] == "cleared"
+
+
+def test_an_item_recorded_on_a_seat_takes_its_session_so_its_wrap_sees_the_clear(
+    client: TestClient, keys: Keys, conn: sqlite3.Connection
+) -> None:
+    up_seat(conn, SEAT, lane="exedore-max")
+    started(client, keys, SEAT)
+    body = {"task": "t", "seat": SEAT, "state": "review", "memorized": True}
+    item = client.post("/v1/items", headers=keys[JOSUI], json=body).json()
+    assert item["epoch"] == 1
+    path = f"/v1/items/{item['id']}/wrap"
+    assert client.post(path, headers=keys[JOSUI], json={}).status_code == CONFLICT
+    clear(client, keys, SEAT)
+    assert client.post(path, headers=keys[JOSUI], json={}).json()["wrap"] == "cleared"
+
+
+def test_wrap_force_closes_a_down_seats_item_uncleared(
+    client: TestClient, keys: Keys, conn: sqlite3.Connection
+) -> None:
+    # The forced close ends the seat's session: back from its lapse, the old context is fenced out
+    # instead of taking new work that a late /clear would then block.
+    up_seat(conn, SEAT, lane="exedore-max")
+    own = started(client, keys, SEAT)
+    item = client.post("/v1/items", headers=keys[JOSUI], json={"task": "t", "lane": "exedore-max"}).json()
+    path = f"/v1/items/{item['id']}"
+    client.post(f"{path}/assign", headers=keys[JOSUI], json={"seat": SEAT})
+    conn.execute("UPDATE seats SET lease_until = '2000-01-01T00:00:00Z' WHERE name = ?", (SEAT,))
+    assert client.post(f"{path}/wrap", headers=keys[JOSUI], json={"learned": "x"}).status_code == CONFLICT
+    assert client.post(f"{path}/wrap", headers=keys[JOSUI], json={"force": True}).json()["wrap"] == "cleared"
+    row = seat_row(conn, SEAT)
+    assert (row["epoch"], row["session_id"], row["lease_until"]) == (2, None, None)
+    back = client.patch(f"/v1/seats/{SEAT}", headers=own, json={"turn": "idle"})
+    assert back.status_code == CONFLICT and back.json()["code"] == "stale-session"
+    client.put("/v1/marks/autodispatch", headers=keys[JOSUI], json={"value": "on"})
+    client.post("/v1/items", headers=keys[JOSUI], json={"task": "next", "lane": "exedore-max"})
+    assert client.post(f"/v1/seats/{SEAT}/next?wait=0", headers=own).status_code == CONFLICT
+
+
+def test_wrap_force_closes_a_pre_5_item_uncleared_and_ends_the_session(
+    client: TestClient, keys: Keys, conn: sqlite3.Connection
+) -> None:
+    up_seat(conn, SEAT, lane="exedore-max")
+    started(client, keys, SEAT)
+    body = {"task": "t", "seat": SEAT, "state": "review", "memorized": True}
+    item = client.post("/v1/items", headers=keys[JOSUI], json=body).json()
+    conn.execute("UPDATE items SET epoch = NULL WHERE id = ?", (item["id"],))  # recorded before 5.0
+    path = f"/v1/items/{item['id']}/wrap"
+    refused = client.post(path, headers=keys[JOSUI], json={})
+    assert refused.status_code == CONFLICT and "has not landed" in refused.json()["detail"]
+    assert client.post(path, headers=keys[JOSUI], json={"force": True}).json()["wrap"] == "cleared"
+    assert seat_row(conn, SEAT)["session_id"] is None
 
 
 def test_wrap_force_clears_a_seat_mid_turn(client: TestClient, keys: Keys) -> None:

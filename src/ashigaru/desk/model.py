@@ -298,7 +298,8 @@ class Queue(BaseModel):
 class WrapUp(BaseModel):
     """`ashigaru wrap`, one meaning for the CLI and MCP. `wrapping` records that /cc seat was sent.
     `cleared` refuses until the item is memorized (CC-DONE) or `learned` is given, and its seat's turn
-    is idle, unless `force`; then it clears the wrap and closes the item in `state`, freeing the seat."""
+    is idle, unless `force`; then it clears the wrap and closes the item in `state`, freeing the seat.
+    Even forced, it refuses while an up seat has started no session since taking the item."""
 
     model_config = ConfigDict(extra="forbid")
 

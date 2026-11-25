@@ -206,8 +206,12 @@ def test_next_waits_out_a_wrap_until_the_item_closes(
     client.post(f"/v1/items/{first}/wrap", headers=keys[JOSUI], json={"stage": "wrapping"})
     assert next_item(client, keys, MINE).status_code == NO_CONTENT
     client.post(f"/v1/items/{first}/report", headers=keys[MINE], json={"verb": "CC-DONE"})
+    assert client.post(f"/v1/items/{first}/wrap", headers=keys[JOSUI], json={}).status_code == CONFLICT
+    body = {"session_id": "s1", "source": "clear"}
+    epoch = client.post(f"/v1/seats/{MINE}/session", headers=keys[MINE], json=body).json()["epoch"]
     assert client.post(f"/v1/items/{first}/wrap", headers=keys[JOSUI], json={}).status_code == OK
-    assert next_item(client, keys, MINE).json()["item"]["id"] == second
+    own = {**keys[MINE], "X-Ashigaru-Epoch": str(epoch)}
+    assert client.post(f"/v1/seats/{MINE}/next?wait=0", headers=own).json()["item"]["id"] == second
 
 
 def test_next_is_busy_while_a_wrapping_seat_is_mid_turn(

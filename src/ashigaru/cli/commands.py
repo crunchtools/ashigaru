@@ -303,8 +303,9 @@ def wrap(
     """`options` are stage, learned, state and force; `if_version` makes it refuse (412) an item that
     has moved on. Stage `wrapping` records that /cc seat was sent.
     `cleared`, the default, refuses until CC-DONE (or a `learned`) and an idle turn, unless `force`;
-    then clears the wrap and closes the item in `state` (default done), which frees the seat. The
-    Desk decides, so the CLI and the MCP tool mean the same thing."""
+    then clears the wrap and closes the item in `state` (default done), which frees the seat. Even
+    forced, it refuses while an up seat has started no session since taking the item. The Desk
+    decides, so the CLI and the MCP tool mean the same thing."""
     body = {k: v for k, v in options.items() if v is not None}
     result: dict[str, Any] = desk.post(f"{_item(item)}/wrap", body, _match(if_version))
     return result
