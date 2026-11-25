@@ -25,7 +25,7 @@ from inbox import (
     unanswered,
 )
 
-BOT = "ashigaru-crunchtools[bot]"
+BOT = "ashigaru-crunchtools-com[bot]"
 
 
 def writes(repo, login):
@@ -133,7 +133,9 @@ def release_pull(number, version="1.2.3", **overrides):
         "isCrossRepository": False,
     }
     return (
-        pull(number, author="app/ashigaru-crunchtools", labels=overrides.pop("labels", ())) | head | overrides
+        pull(number, author="app/ashigaru-crunchtools-com", labels=overrides.pop("labels", ()))
+        | head
+        | overrides
     )
 
 

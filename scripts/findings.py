@@ -315,7 +315,7 @@ def main() -> int:
     parser.add_argument("--repo", required=True)
     parser.add_argument("--branch", required=True)
     parser.add_argument("--reviewer", default="github-actions[bot]")
-    parser.add_argument("--bot", default="ashigaru-crunchtools")
+    parser.add_argument("--bot", default="ashigaru-crunchtools-com")
     parser.add_argument("--max-rounds", default=MAX_ROUNDS, type=int)
     parser.add_argument("--wait-seconds", default=WAIT_SECONDS, type=int)
     parser.add_argument("--model", default="sonnet")

@@ -26,7 +26,9 @@ def test_candidates_skip_touched_issues_and_pull_requests():
         issue(2, "2026-01-02", labels=("triaged",)),
         issue(4, "2026-01-04", pr=True),
         issue(5, "2026-01-05", labels=("enhancement",)),
-        issue(6, "2026-01-06", author="ashigaru-crunchtools[bot]", kind="Bot", labels=("ashigaru-inbox",)),
+        issue(
+            6, "2026-01-06", author="ashigaru-crunchtools-com[bot]", kind="Bot", labels=("ashigaru-inbox",)
+        ),
         issue(7, "2026-01-07", author="spam[bot]", kind="Bot"),
         issue(8, "2026-01-08", labels=("ashigaru-releases",)),
     ]
@@ -54,7 +56,7 @@ def test_no_run_queues_more_than_the_hard_maximum():
     assert len(select(found, 500)) == MAX_LIMIT
 
 
-BOT = "app/ashigaru-crunchtools"
+BOT = "app/ashigaru-crunchtools-com"
 
 
 def pull(number, branch, **overrides):
@@ -181,7 +183,7 @@ def test_issues_already_queued_or_unlabeled_cost_no_lookup():
     [("2026-10-15T23:59:59Z", True), ("2026-10-16T00:00:00Z", False), ("2026-10-16T18:00:00Z", False)],
 )
 def test_the_cutoff_date_itself_is_not_before_it(at, queued):
-    history = [labeled("triaged", "ashigaru-crunchtools[bot]", at)]
+    history = [labeled("triaged", "ashigaru-crunchtools-com[bot]", at)]
     issues = [issue(1, "2026-10-01", labels=("triaged",))]
     assert bool(stale("o/r", issues, FIX, lambda repo, n: history, ASHIGARU)) is queued
 

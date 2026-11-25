@@ -10,7 +10,8 @@ startup, and as soon as an admin asks (POST /v1/sweep), one run:
    OVERLAP for the search index's lag. A subject with no item is queued, as a
    writer's, only when the search's author_association says OWNER or MEMBER or
    its author is trusted (ASHIGARU_FORGE_AUTHORS, the app's bot). Anyone
-   else's is never stored: it is listed for Scott in the run's `outsiders`,
+   else's is never stored: it is listed for Scott in the run's `outsiders`
+   while it is open, and once a hit shows it closed every run forgets it,
    except a dependency bot's PR (BOTS: Dependabot, Renovate), which is no one's
    to look at by default: its subject is recorded, read back every run while it
    is open, and once it has been open `bot_after` it is queued, auto on
@@ -125,6 +126,16 @@ UNREADABLE = (OSError, ValueError, http.client.HTTPException)
 LAST = "SELECT * FROM sweeps ORDER BY id DESC LIMIT 1"
 RUN = "SELECT * FROM sweeps WHERE id = ?"
 KNOWN = "SELECT subject_key FROM items WHERE subject_key IN (SELECT value FROM json_each(?))"
+FORGET = """
+    UPDATE sweeps SET outsiders = (
+        SELECT json_group_array(json(o.value)) FROM json_each(sweeps.outsiders) o
+        WHERE json_extract(o.value, '$.subject_key') IS NOT :key
+    )
+    WHERE EXISTS (
+        SELECT 1 FROM json_each(sweeps.outsiders) o WHERE json_extract(o.value, '$.subject_key') = :key
+    )
+"""
+"""Drop a closed subject from every run's outsiders, so NEEDS YOU stops listing it."""
 
 
 class Reader(Protocol):
@@ -267,8 +278,14 @@ def _stuck(
 def _outsider(
     conn: sqlite3.Connection, settings: Settings, item: IntakeItem, counts: Counts, started: datetime
 ) -> None:
-    """A new subject by someone neither a member nor trusted: listed for Scott, never stored. A dependency
-    bot's is recorded instead, and queued once it is stuck (`_stuck`)."""
+    """A new subject by someone neither a member nor trusted: listed for Scott while it is open, never
+    stored, and forgotten by every run once it is closed. A dependency bot's is recorded instead, and
+    queued once it is stuck (`_stuck`)."""
+    if item.author not in BOTS and item.closed:
+        counts.outsiders = [found for found in counts.outsiders if found["subject_key"] != item.subject_key]
+        with store.transaction(conn):
+            conn.execute(FORGET, {"key": item.subject_key})
+        return
     if item.author not in BOTS:
         outsider = {"subject_key": item.subject_key, "ref": item.ref, "author": item.author}
         if outsider not in counts.outsiders and len(counts.outsiders) < OUTSIDERS_SHOWN:

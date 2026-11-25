@@ -30,8 +30,8 @@ from findings import REBUILD_MARKER
 from relock import relock
 from tidy import tidy
 
-BOT_NAME = "ashigaru-crunchtools[bot]"
-BOT_EMAIL = "ashigaru-crunchtools[bot]@users.noreply.github.com"
+BOT_NAME = "ashigaru-crunchtools-com[bot]"
+BOT_EMAIL = "340727104+ashigaru-crunchtools-com[bot]@users.noreply.github.com"
 TRAILER = "Co-Authored-By: Claude <noreply@anthropic.com>"
 FOOTER = "Opened by Ashigaru. Merges automatically once the required checks pass."
 CONFLICTING = "CONFLICTING"

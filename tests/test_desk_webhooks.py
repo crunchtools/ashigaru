@@ -1127,7 +1127,7 @@ def test_the_subject_key_is_owner_repo_hash_number(fixture: str, event: str, num
     assert [item.subject_key for item in delivery.intake] == [f"crunchtools/ashigaru#{number}"]
 
 
-BOT = "ashigaru-crunchtools[bot]"
+BOT = "ashigaru-crunchtools-com[bot]"
 
 
 @pytest.fixture

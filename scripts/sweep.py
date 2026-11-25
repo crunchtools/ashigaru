@@ -507,7 +507,7 @@ def main() -> int:
     parser.add_argument("--org", required=True)
     parser.add_argument("--limit", default=MAX_LIMIT, type=int, help="issues to queue for triage")
     parser.add_argument("--code-per-hour", default=5, type=int, help="fixes started per hour, fleet-wide")
-    parser.add_argument("--bot", default="app/ashigaru-crunchtools")
+    parser.add_argument("--bot", default="app/ashigaru-crunchtools-com")
     parser.add_argument("--inbox-repo", default="", help="repo whose inbox issue lists what waits on people")
     parser.add_argument(
         "--retriage-before",

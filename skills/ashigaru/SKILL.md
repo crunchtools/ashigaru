@@ -173,7 +173,7 @@ what moved since you last looked instead of the whole table.
 The catch-up is the Desk's own record of the org webhook, so no `gh` sweep
 runs (the Desk's own `sweep` searches the org too). **New** lists every issue and PR first seen in the window: the Desk has
 already queued it, `auto` in its lane when its author may write to the repo or
-is a trusted author (`ashigaru-crunchtools[bot]`), otherwise `held` (no lane, `manual`) until a maintainer adds a lane label. A bot that is not a trusted author (`dependabot[bot]`, `renovate[bot]`) is not queued when first seen; a Dependabot or Renovate PR still open a day later is queued `auto` on exedore-max to land or close, and never listed as an outsider. Its
+is a trusted author (`ashigaru-crunchtools-com[bot]`), otherwise `held` (no lane, `manual`) until a maintainer adds a lane label. A bot that is not a trusted author (`dependabot[bot]`, `renovate[bot]`) is not queued when first seen; a Dependabot or Renovate PR still open a day later is queued `auto` on exedore-max to land or close, and never listed as an outsider. Its
 title is the source's text, never a brief. **Reopened** lists subjects open
 again at the source whose item is closed: requeue the ones that need work with
 `ashigaru update a7 --state queued`, which frees any seat it held.

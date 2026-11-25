@@ -109,7 +109,7 @@ def main() -> int:
     parser.add_argument("--pull", required=True, type=int)
     parser.add_argument("--sha", required=True, help="the head commit the agent was shown")
     parser.add_argument("--result", required=True, help="structured output JSON from the agent")
-    parser.add_argument("--bot", default="ashigaru-crunchtools[bot]")
+    parser.add_argument("--bot", default="ashigaru-crunchtools-com[bot]")
     args = parser.parse_args()
 
     facts = json.loads(gh("pr", "view", str(args.pull), "--repo", args.repo, "--json", FACT_FIELDS))
