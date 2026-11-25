@@ -6,9 +6,7 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
-### Fixed
-
-- Auto-merge is armed only where the base branch requires status checks, read from its rulesets and its classic protection (#257). On a base with none, auto-merge would merge an agent's pull request at once, unreviewed: `publish.py` and the fix round now leave it open for a person and say why on the pull request.
+## [6.0.0] - 2026-11-25
 
 ### Changed
 
@@ -17,11 +15,15 @@ All notable changes to this project are documented here. The format follows
 
 - CI is the fleet's one `ci.yml` (sdlc 0.15). The Python 3.15 pytest run that `ci.yml`'s `py315` job did is now declared in `[tool.sdlc.ci]`: an `image-build` of `ci/py315.Containerfile` (Fedora 45, its python3, uv 0.13.7) and a `command` running the locked pytest in it. The image's build and boot gate moved from `container.yml` to `[tool.sdlc.image]`. The contract test (`packaging/container-test.sh`) did not: sdlc does not run `contract-test` until sdlc#118 (sdlc#168), so the image ships without it until then. The key stays in `[tool.sdlc.image]` so the gate returns with that release. The tests that read `container.yml` now check that contract and that a tag push builds nothing. Dependabot is dropped with its auto-merge workflow; Renovate keeps the pins current, as across the fleet.
 
+- The `assign` brief's Scope line says "One PR per repo; one commit per step." (a872): a change ships as one pull request in each repo it touches, never a PR per part.
+
 ### Removed
 
 - The inbox's "Red on the default branch" part no longer watches the constitution's `fleet-drift.yml` and `validate-cascade.yml` (a1542). crunchtools/constitution#227 deletes both with constitution v1, and every sweep would then list two unreadable workflows. The part is the one GraphQL query over default branches; the two REST requests are gone.
 
 ### Fixed
+
+- Auto-merge is armed only where the base branch requires status checks, read from its rulesets and its classic protection (#257). On a base with none, auto-merge would merge an agent's pull request at once, unreviewed: `publish.py` and the fix round now leave it open for a person and say why on the pull request.
 
 - A publish now refuses a staged `.python-version`, `.python-versions` or `uv.toml` at any depth, any change of a file's mode, and a change to `tool.uv` in any `pyproject.toml`, the rule set sdlc's relock already refuses (sdlc#195), so a patch can no longer slip them past `staged_refusal` (#263).
 
@@ -32,12 +34,6 @@ All notable changes to this project are documented here. The format follows
 - `ashigaru wrap` (and `desk_wrap`) no longer records `cleared` when the /clear never reached the seat's pane (a1385, #261). The `cleared` stage now requires the item's seat to have started a session since it took the item, which every landed /clear does through its SessionStart hook (the seat's epoch is past the item's and it names a session). Until then it is 409 `not-ready` ("the /clear has not landed") and the item stays `wrapping`, `--force` included: `--force` still skips the CC-DONE and idle checks, and passes the clear check only for a seat that cannot show it, one that is missing or never registered a session, or an item recorded before 5.0. An item `POST /v1/items` records on a seat now takes that seat's epoch, as a `PATCH` move to one already did, so it is not left in that last case. A forced close without the clear ends the seat's session, so a seat back from a lapse in its old context is fenced out (`stale-session`) instead of taking new work that the late /clear would then block. Before, a wrap after a /clear that never fired, or a forced one, closed the item and freed a seat that still held the old context. The skill's wrap step says so; its pane recipe already falls back from the claude-agent socket to the default `dev` session, which is where every Dolza and Exedore Max seat runs today.
 
 - A fix round pushes with `git push --force-with-lease=<branch>:<head> origin HEAD:<branch>`, where `<head>` is the pull request head the round collected its findings and checks on (a1109). A branch that moved since then is refused: the round pushes nothing and answers nothing, and the push that moved it starts a fresh round on the new head. The round also yields, before applying anything, when the branch it checked out is no longer that head, so a patch that conflicts with code the agent never saw no longer hands the PR to a person; and a round with no patch checks the remote head before it answers a finding. Before, a plain push could land a fix written against code the agent never saw. The fleet CI design (sdlc `docs/marketplace-free-ci.md`) requires the leased push, and sdlc's write step calls this script.
-
-## [5.4.0] - 2026-11-23
-
-### Changed
-
-- The `assign` brief's Scope line says "One PR per repo; one commit per step." (a872): a change ships as one pull request in each repo it touches, never a PR per part.
 
 ### Security
 
