@@ -61,8 +61,6 @@ FAILED_CHECKS = {"FAILURE", "TIMED_OUT", "STARTUP_FAILURE", "ACTION_REQUIRED"}
 cancels its siblings, and listing them would bury the job that broke."""
 FAILED_STATUSES = {"FAILURE", "ERROR"}
 """Commit status states listed as failing."""
-FAILED_RUNS = {"failure", "timed_out", "startup_failure", "action_required"}
-"""Workflow run conclusions, as REST spells them, that count as red."""
 LINKABLE = re.compile(r"https://[^\s()<>\[\]`]+")
 """A check's link is set by whoever reported the check; anything else is shown without one."""
 Writes = Callable[[str, str], bool]
@@ -478,19 +476,6 @@ def red_branches(repos: list[dict]) -> list[dict]:
     return sorted(red, key=lambda item: item["repo"])
 
 
-def failed_run(repo: str, workflow: str, run: dict | None) -> dict | None:
-    """The latest completed run of a workflow, when it did not pass. None when it did or never ran."""
-    if not run or run.get("conclusion") not in FAILED_RUNS:
-        return None
-    return {
-        "repo": repo,
-        "workflow": workflow,
-        "url": run["html_url"],
-        "conclusion": run["conclusion"],
-        "created_at": run["created_at"],
-    }
-
-
 def check_link(check: dict) -> str:
     """A check's name as inert text, linked when its link is a plain https URL."""
     label = f"`{plain(check['name'])}`"
@@ -526,19 +511,13 @@ def red_issue(item: dict) -> str:
     ])  # fmt: skip
 
 
-def red(branches: list[dict], runs: list[dict], unread: list[str]) -> str:
-    """The inbox part for CI that is red on a default branch, and for watched workflow runs.
+def red(branches: list[dict], unread: list[str]) -> str:
+    """The inbox part for CI that is red on a default branch.
 
     Check names come from other people's workflows, so they are code spans.
     `unread` names what could not be read, so a gap is not taken for green.
     """
     rows = [red_row(item) for item in branches]
-    for item in runs:
-        name = item["repo"].split("/", 1)[-1]
-        rows.append(
-            f"- [{name}]({item['url']}) `{item['workflow']}`, last run {item['created_at'][:10]}: "
-            f"{item['conclusion']}."
-        )
     rows += [f"- Could not read {what}; see the sweep log." for what in unread]
     return "\n".join(section("Red on the default branch", rows, "Nothing red.")).rstrip() + "\n"
 
