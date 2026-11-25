@@ -28,7 +28,7 @@ on:
       bot:
         description: "Slug of the app that opens Ashigaru pull requests."
         type: string
-        default: "ashigaru-crunchtools"
+        default: "ashigaru-crunchtools-com"
       max_rounds:
         type: number
         default: 5
