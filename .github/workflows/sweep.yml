@@ -167,4 +167,3 @@ jobs:
           if [ -n "$RETRIAGE_BEFORE" ]; then args+=(--retriage-before "$RETRIAGE_BEFORE"); fi
           if [ "$DRY_RUN" = "true" ]; then args+=(--dry-run); fi
           python3 scripts/release.py record "${args[@]}"
-
