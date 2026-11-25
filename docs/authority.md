@@ -26,7 +26,7 @@ Agent jobs check out with `persist-credentials: false`. What leaves an agent job
 
 **Releasing.** Off unless a repository carries a release topic, which only its admins can set; the app cannot. The release job runs no model and no repository code: it edits text in a clone and pushes a branch. It tags only the merge commit of a release pull request that Ashigaru wrote and that merged into the default branch, so the required checks and, in `pr` mode, a maintainer stand between the changelog and the tag. See [Release](release.md).
 
-**Watching.** A repository with the topic `ashigaru-observe`, which only its admins can set, is watch-only. This stops every write Ashigaru makes there: labels, comments, branches, pull requests, reviews, fix rounds, auto-merge and releases. The publish steps (`triage_apply.py`, `publish.py`, `fix_publish.py`, `review_publish.py`, `release.py`) and the sweep check the topic and write only to one issue, "Ashigaru is watching", in that repository. A publish step that cannot read the topic fails rather than acts. It does not stop the agents, which run with their read-only token, and it does not change the guard's trust levels. `ASHIGARU_ENABLED` is still the off switch.
+**Watching.** A repository with the topic `ashigaru-observe`, which only its admins can set, is watch-only. This stops every write Ashigaru makes there: labels, comments, branches, pull requests, reviews, fix rounds, auto-merge and releases. The publish steps (`triage_apply.py`, `publish.py`, `fix_publish.py`, `release.py`) check the topic and write only to one issue, "Ashigaru is watching", in that repository. A publish step that cannot read the topic fails rather than acts. It does not stop the agents, which run with their read-only token, and it does not change the guard's trust levels. `ASHIGARU_ENABLED` is still the off switch.
 
 **Untrusted input.** `scripts/guard.py` asks the API for the effective repository permission of the issue's author and of whoever triggered the event, and returns one of three trust levels.
 
@@ -49,14 +49,11 @@ Two agents read text a stranger wrote: triage (an outside issue) and review (an 
 | Turns per agent step | 40 triage, 80 code and fix | `sdlc_jobs/ai.py` in sdlc |
 | Model time per agent or review | 60 minutes | `MODEL_SECONDS` in sdlc's `sdlc_jobs/ai.py` |
 | Fix rounds per pull request | 5 | `MAX_ROUNDS` in sdlc's `sdlc_jobs/ai.py` |
-| Issues queued for triage per sweep | 20, never more | `sweep.yml` input `limit`, `MAX_LIMIT` in `scripts/sweep.py` |
-| Fixes started by the sweep per hour, fleet-wide | 5, less the pull requests Ashigaru opened in the past hour | `sweep.yml` input `code_per_hour`, `remaining` in `scripts/sweep.py` |
 | Release bump merged without a person | minor, and only with `ashigaru-release-auto` | topics `ashigaru-release-max-patch`, `-minor`, `-major`; `configured` in `scripts/release.py` |
-| Quiet time on the default branch before a release | 20 minutes | `SETTLE` in `scripts/sweep.py` |
 | Outside pull requests reviewed per sweep | 5 | `MAX_REVIEWS` in `scripts/inbox.py` |
 | `write` runs at a time per issue or pull request | 1 | `write`'s `concurrency` in `ci.yml` |
 
-The ones in this repository are covered in `tests/test_workflows.py`, `tests/test_findings.py`, `tests/test_sweep.py`, `tests/test_inbox.py` or `tests/test_release.py`; the ones in sdlc and `ci.yml` by sdlc's own tests.
+The ones in this repository are covered in `tests/test_workflows.py`, `tests/test_findings.py`, `tests/test_inbox.py` or `tests/test_release.py`; the ones in sdlc and `ci.yml` by sdlc's own tests.
 
 ## Known gaps
 

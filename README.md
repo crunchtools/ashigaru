@@ -9,10 +9,8 @@ Named for the *ashigaru* (足軽), the foot soldiers a daimyo sent into the fiel
 1. **[Triage](docs/triage.md)**: every new issue is read against the code and labeled. Bug, documentation and performance issues go to the code agent; features wait for a person. An issue from someone without write access is labeled too, but is fixed only when a maintainer says so.
 2. **[Code](docs/code.md)**: a `ready-to-code` issue becomes a pull request from `ashigaru/issue-N` with auto-merge on.
 3. **[Fix](docs/fix.md)**: after each review of a pull request the code agent opened, every finding gets an answer in its thread and failed checks get fixed, for at most five rounds.
-4. **[Sweep](docs/sweep.md)**: every hour the oldest untriaged issues across enrolled repositories are queued for triage, and up to five waiting fixes are started, so a backlog drains without spending the model budget.
-5. **[Release](docs/release.md)**: a repository that asks for it with a topic gets its merged work released: a release pull request from the changelog, then the tag and the GitHub Release, so a fix does not sit merged and unshipped.
-6. **[Review](docs/review.md)**: a pull request from an outside contributor gets one first-pass comment for the maintainers, and everything waiting on a person is listed in a single inbox issue.
-7. **[Authority and limits](docs/authority.md)**: the job that runs the model holds no credential that can write; the job that writes runs no model. One organization variable stops everything.
+4. **[Release](docs/release.md)**: a repository that asks for it with a topic gets its merged work released: a release pull request from the changelog, then the tag and the GitHub Release, so a fix does not sit merged and unshipped.
+5. **[Authority and limits](docs/authority.md)**: the job that runs the model holds no credential that can write; the job that writes runs no model. One organization variable stops everything.
 
 ## Quick Start
 
@@ -20,7 +18,7 @@ Organization, once:
 
 - Create a GitHub App with repository permissions Contents, Issues and Pull requests set to read and write, install it on the organization, and store its private key as the secret `ASHIGARU_APP_KEY` and its client ID as the variable `ASHIGARU_CLIENT_ID` (`create-github-app-token` mints every token from the two).
 - Run `claude setup-token` and store the result as the secret `CLAUDE_CODE_OAUTH_TOKEN`.
-- Set the variable `ASHIGARU_ENABLED` to `true` for the sweep.
+- Set the variable `ASHIGARU_ENABLED` to `true`.
 - Require your CI and review checks in a branch ruleset the app cannot bypass, and allow auto-merge.
 
 Each repository carries the fleet's `ci.yml`, written by sdlc's converter; the agents run where `CLAUDE_CODE_OAUTH_TOKEN` is in its `ai` environment. Details are in [docs/enrollment.md](docs/enrollment.md).
@@ -32,9 +30,7 @@ Each repository carries the fleet's `ci.yml`, written by sdlc's converter; the a
 | [docs/triage.md](docs/triage.md) | Categories, the confidence threshold, which labels mean what |
 | [docs/code.md](docs/code.md) | The two-job split, what is refused |
 | [docs/fix.md](docs/fix.md) | What triggers a round, how findings are answered, the round limit |
-| [docs/sweep.md](docs/sweep.md) | Backlog selection and the hourly budget |
 | [docs/release.md](docs/release.md) | Turning releases on per repository, how the version is chosen and rewritten, the releases record |
-| [docs/review.md](docs/review.md) | First-pass review of outside pull requests, and the inbox issue |
 | [docs/authority.md](docs/authority.md) | Who holds which credential, untrusted input, the switch and the caps |
 | [docs/enrollment.md](docs/enrollment.md) | Organization setup, enrolling a repository, releasing |
 | [docs/desk-cli.md](docs/desk-cli.md) | The `ashigaru` CLI: config, the shared command set, the Claude Code hooks |
