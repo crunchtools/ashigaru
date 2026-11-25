@@ -754,7 +754,8 @@ def wrap(conn: Conn, who: Admin, item_id: str, body: WrapUp, checked: Guarded = 
     until the item is memorized (CC-DONE) or `learned` is sent, and while its seat is mid-turn,
     unless `force`; then it clears the wrap and closes an open item in `state`, freeing the seat.
     Forced or not, 409 while an up seat holding the item has started no session since it took it:
-    the /clear has not landed, and the item stays `wrapping`."""
+    the /clear has not landed, and the item stays `wrapping`. A forced close without the clear ends
+    the seat's session."""
     try:
         dispatch.wrap(conn, item_id, body.model_dump(), who.name, checked.version)
     except KeyError as error:

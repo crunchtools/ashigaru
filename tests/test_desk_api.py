@@ -211,14 +211,38 @@ def test_an_item_recorded_on_a_seat_takes_its_session_so_its_wrap_sees_the_clear
 def test_wrap_force_closes_a_down_seats_item_uncleared(
     client: TestClient, keys: Keys, conn: sqlite3.Connection
 ) -> None:
+    # The forced close ends the seat's session: back from its lapse, the old context is fenced out
+    # instead of taking new work that a late /clear would then block.
     up_seat(conn, SEAT, lane="exedore-max")
-    started(client, keys, SEAT)
+    own = started(client, keys, SEAT)
     item = client.post("/v1/items", headers=keys[JOSUI], json={"task": "t", "lane": "exedore-max"}).json()
     path = f"/v1/items/{item['id']}"
     client.post(f"{path}/assign", headers=keys[JOSUI], json={"seat": SEAT})
     conn.execute("UPDATE seats SET lease_until = '2000-01-01T00:00:00Z' WHERE name = ?", (SEAT,))
     assert client.post(f"{path}/wrap", headers=keys[JOSUI], json={"learned": "x"}).status_code == CONFLICT
     assert client.post(f"{path}/wrap", headers=keys[JOSUI], json={"force": True}).json()["wrap"] == "cleared"
+    row = seat_row(conn, SEAT)
+    assert (row["epoch"], row["session_id"], row["lease_until"]) == (2, None, None)
+    back = client.patch(f"/v1/seats/{SEAT}", headers=own, json={"turn": "idle"})
+    assert back.status_code == CONFLICT and back.json()["code"] == "stale-session"
+    client.put("/v1/marks/autodispatch", headers=keys[JOSUI], json={"value": "on"})
+    client.post("/v1/items", headers=keys[JOSUI], json={"task": "next", "lane": "exedore-max"})
+    assert client.post(f"/v1/seats/{SEAT}/next?wait=0", headers=own).status_code == CONFLICT
+
+
+def test_wrap_force_closes_a_pre_5_item_uncleared_and_ends_the_session(
+    client: TestClient, keys: Keys, conn: sqlite3.Connection
+) -> None:
+    up_seat(conn, SEAT, lane="exedore-max")
+    started(client, keys, SEAT)
+    body = {"task": "t", "seat": SEAT, "state": "review", "memorized": True}
+    item = client.post("/v1/items", headers=keys[JOSUI], json=body).json()
+    conn.execute("UPDATE items SET epoch = NULL WHERE id = ?", (item["id"],))  # recorded before 5.0
+    path = f"/v1/items/{item['id']}/wrap"
+    refused = client.post(path, headers=keys[JOSUI], json={})
+    assert refused.status_code == CONFLICT and "has not landed" in refused.json()["detail"]
+    assert client.post(path, headers=keys[JOSUI], json={"force": True}).json()["wrap"] == "cleared"
+    assert seat_row(conn, SEAT)["session_id"] is None
 
 
 def test_wrap_force_clears_a_seat_mid_turn(client: TestClient, keys: Keys) -> None:

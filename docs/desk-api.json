@@ -6598,7 +6598,7 @@
     },
     "/v1/items/{item_id}/wrap": {
       "post": {
-        "description": "Admin: `wrapping` records that /cc seat was sent. `cleared` (the default) refuses with 409\nuntil the item is memorized (CC-DONE) or `learned` is sent, and while its seat is mid-turn,\nunless `force`; then it clears the wrap and closes an open item in `state`, freeing the seat.\nForced or not, 409 while an up seat holding the item has started no session since it took it:\nthe /clear has not landed, and the item stays `wrapping`.",
+        "description": "Admin: `wrapping` records that /cc seat was sent. `cleared` (the default) refuses with 409\nuntil the item is memorized (CC-DONE) or `learned` is sent, and while its seat is mid-turn,\nunless `force`; then it clears the wrap and closes an open item in `state`, freeing the seat.\nForced or not, 409 while an up seat holding the item has started no session since it took it:\nthe /clear has not landed, and the item stays `wrapping`. A forced close without the clear ends\nthe seat's session.",
         "operationId": "wrap_v1_items__item_id__wrap_post",
         "parameters": [
           {
