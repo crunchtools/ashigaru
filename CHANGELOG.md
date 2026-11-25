@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [6.0.1] - 2026-11-25
+
 ### Fixed
 
 - `scripts/common.py` annotates `_uv_moved`'s `sides`, which mypy in sdlc 0.16.4 refused as untyped, so the gate passes and the release can be cut (a1416).
