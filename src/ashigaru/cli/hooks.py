@@ -29,16 +29,17 @@ seat-state.json hooks and keep their rules.
                   this free seat its next queued item, then prints the brief
                   on stderr and exits 2, which wakes the idle session with it.
                   Its asks are what keeps an idle seat's lease, so while the
-                  seat cannot take work (401, 403, 404, or a 409 that is not
-                  busy, held or stale-session) it checks in again every
+                  seat cannot take work (a 4xx but 408 and 429, or a 409 that
+                  is not busy, held or stale-session) it checks in again every
                   NEXT_CHECK_IN; a busy or held seat is asked again with
                   backoff. On a 409 stale-session it stops silently if the
                   Desk names a newer session as the seat's (a /clear), else
                   exits 2 with a notice that the Desk ended this session. A
                   startup or clear session that session-start did not mark
-                  registered (its POST ran out of time) is not the older one:
-                  the Desk names the session before it, so `next` registers
-                  this one once and asks again.
+                  registered (its POST ran out of time), and is still the
+                  latest session session-start recorded, is not the older
+                  one: the Desk names the session before it, so `next`
+                  registers this one and asks again.
   statusline      The status line command, not a hook: model, context, session
                   tokens and running cost to POST /v1/seats/{name}/usage. It
                   runs on every refresh, so it posts at most once per
@@ -96,7 +97,9 @@ NEXT_BACKOFF = 300.0
 NEXT_PAUSE = 2.0
 # Answers that mean this seat will not get work by asking again soon: check in after NEXT_CHECK_IN. So
 # is any 409 but NEXT_BUSY and the stale-session one.
-NEXT_REFUSED = frozenset({HTTPStatus.UNAUTHORIZED, HTTPStatus.FORBIDDEN, HTTPStatus.NOT_FOUND})
+# Every 4xx is one, so a Desk too old for a request (422) is never asked again with backoff forever,
+# except these, which pass.
+NEXT_PASSING = frozenset({HTTPStatus.REQUEST_TIMEOUT, HTTPStatus.TOO_MANY_REQUESTS})
 # Between check-ins of a seat that cannot take work: each renews its lease, which lapses after 10
 # minutes idle (desk.model.LEASE), so the seat stays on the board.
 NEXT_CHECK_IN = 180.0
@@ -164,6 +167,7 @@ def _start(event: dict[str, Any], desk: Desk, path: str, env: Mapping[str, str])
         return
     session = event.get("session_id")
     if source in SESSION_SOURCES and isinstance(session, str) and session:
+        _latest_is(session, env)
         try:
             desk.post(f"{path}/session", {"session_id": session, "source": source})
         except DeskError as error:
@@ -341,11 +345,15 @@ class _Rejoin:
         self.settled = self.settled or self.source not in NEW_SOURCES or not self.session
 
     def lost(self, stale: _Stale) -> bool:
-        """The Desk never got this session: it names another one, and session-start left no mark, read
-        at this answer, not at the start, when session-start may still be posting. Then the rejoin is
-        pending. A stale answer while it is pending is the Desk refusing the rejoin itself."""
+        """The Desk never got this session: it names another one, session-start left no mark, and no
+        session started after this one in the container (`latest_session`), all read at this answer,
+        not at the start, when session-start may still be posting. Then the rejoin is pending. A
+        stale answer while it is pending is the Desk refusing the rejoin itself."""
         self.pending = not (self.settled or self.pending) and bool(
-            self.session and stale.superseded(self.session) and _unmarked(self.session, self.state)
+            self.session
+            and stale.superseded(self.session)
+            and _latest(self.state) == self.session
+            and _unmarked(self.session, self.state)
         )
         return self.pending
 
@@ -365,8 +373,8 @@ class _Rejoin:
 
 def _ask(desk: Desk, method: str, path: str, deadline: float, body: Any = None, **params: Any) -> Any:
     """One request, retried with backoff while the Desk is down, restarting or throttling (5xx, 429,
-    a 409 busy or held), until `deadline` on the monotonic clock. Raises _Refused on NEXT_REFUSED or any
-    other 409, _Stale on a 409 stale-session, and _Deadline when no request can finish in the time left."""
+    a 409 busy or held), until `deadline` on the monotonic clock. Raises _Refused on any other 4xx but
+    NEXT_PASSING, _Stale on a 409 stale-session, and _Deadline when no request can finish in the time left."""
     pause = NEXT_RETRY
     while True:
         wait = int(min(params.get("wait", 0), deadline - time.monotonic() - NEXT_GRACE))
@@ -387,7 +395,9 @@ def _ask(desk: Desk, method: str, path: str, deadline: float, body: Any = None, 
                         raise _Stale(error.detail, error.session) from error
                     if error.code not in NEXT_BUSY:
                         raise _Refused from error
-                elif error.status in NEXT_REFUSED:
+                elif error.status not in NEXT_PASSING and (
+                    HTTPStatus.BAD_REQUEST <= error.status < HTTPStatus.INTERNAL_SERVER_ERROR
+                ):
                     raise _Refused from error
         time.sleep(min(pause, max(0.0, deadline - time.monotonic())))
         pause = min(pause * 2, NEXT_BACKOFF)
@@ -407,7 +417,7 @@ def _next(
     this seat (`session` is this one) took over, and it stops silently. `source` is that of a new
     session (startup, clear): until an answer that is not stale-session proves the Desk has it, and
     marks it, such an answer with no mark registers it (`_Rejoin`), and it asks again. A rejoin
-    refused (401, 403, 404, another 409) is said on stderr and tried again at the check-in cadence;
+    refused (a 4xx but 408 and 429, another 409) is said on stderr and tried again at the check-in cadence;
     one the Desk answers stale-session (the seat has had this session, so a newer one followed) stops
     it as a newer session would."""
     state = os.environ if env is None else env
@@ -459,12 +469,47 @@ def registered_mark(session: str, env: Mapping[str, str]) -> Path:
     return _state(env) / f"registered-{UNSAFE.sub('_', session)}"
 
 
-def _mark(session: str, env: Mapping[str, str]) -> None:
-    """Mark the session registered, in a directory only this user can write."""
-    mark = registered_mark(session, env)
-    mark.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-    if _private(mark.parent):
-        mark.touch()
+def latest_session(env: Mapping[str, str]) -> Path:
+    """The session that started last in this seat's container, which session-start writes before it
+    posts: only the container knows the order its sessions started in, so `next` rejoins only while
+    its own is the latest."""
+    return _state(env) / "latest-session"
+
+
+def _put(path: Path, text: str, failed: str) -> bool:
+    """Write the state file whole, by replacing it, in a directory only this user can write. False
+    when that cannot be done: said on stderr as `failed` if tmpfs refused, and the hook carries on."""
+    try:
+        path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        if not _private(path.parent):
+            return False
+        partial = path.with_suffix(".tmp")
+        partial.write_text(text)
+        partial.replace(path)
+    except OSError as error:
+        print(f"ashigaru hook: {failed}: {error}", file=sys.stderr)
+        return False
+    return True
+
+
+def _latest_is(session: str, env: Mapping[str, str]) -> bool:
+    """Record the session as the latest started, before session-start posts. When tmpfs refuses, no
+    session of the seat's rejoins."""
+    return _put(latest_session(env), session, "the latest session is not recorded")
+
+
+def _latest(env: Mapping[str, str]) -> str | None:
+    """The latest started session, None when unknown or in a directory another user could write."""
+    latest = latest_session(env)
+    try:
+        return latest.read_text() if _private(latest.parent) else None
+    except OSError:
+        return None
+
+
+def _mark(session: str, env: Mapping[str, str]) -> bool:
+    """Mark the session registered. When tmpfs refuses, the session is never taken for lost."""
+    return _put(registered_mark(session, env), "", f"session {session} is not marked registered")
 
 
 def _unmarked(session: str, env: Mapping[str, str]) -> bool:

@@ -1273,30 +1273,40 @@ def run_dir(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
     return tmp_path / "run"
 
 
+def lost_start(desk: FakeDesk, session: str, source: str = "clear") -> None:
+    """The session's SessionStart, whose POST the Desk never took, as on dmax3: it recorded the
+    session as the container's latest and marked nothing."""
+    desk.on("POST", SESSION, (503, {"detail": "restarting"}))
+    assert hook("session-start", {"session_id": session, "source": source}) == 0
+
+
 def test_next_registers_a_new_session_whose_session_start_ran_out_of_time(
     waking: FakeDesk, run_dir: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     """a1709: the /clear's SessionStart POST gave up at HOOK_SECONDS, so the Desk still named the old
     session and every request of the new one was stale; its next took that for a newer session and
     stopped, and the seat went dark."""
+    lost_start(waking, "s1")
+    capsys.readouterr()
     answers = iter([took_over("s0"), (200, {"brief": "Desk assignment a7"})])
     waking.on("POST", NEXT, lambda seen: next(answers))
     waking.on("POST", SESSION, (200, {"epoch": 25, "seat": SEAT}))
     assert hook("next", {"session_id": "s1", "source": "clear"}) == hooks.WAKE
     assert capsys.readouterr().err.strip() == "Desk assignment a7"
-    (call,) = waking.calls("POST", SESSION)
+    (_, call) = waking.calls("POST", SESSION)
     assert call.body == {"session_id": "s1", "source": "clear", "rejoin": True}
     assert call.headers["X-Ashigaru-Session"] == "s1"
     assert hooks.registered_mark("s1", {"XDG_RUNTIME_DIR": str(run_dir)}).exists()
 
 
 def test_next_registers_a_lost_session_only_once(waking: FakeDesk, run_dir: Path) -> None:
+    lost_start(waking, "s1", "startup")
     waking.on("POST", NEXT, took_over("s0"))
     waking.on("POST", SESSION, (200, {"epoch": 25, "seat": SEAT}))
     assert hook("next", {"session_id": "s1", "source": "startup"}) == 0
-    assert len(waking.calls("POST", SESSION)) == 1 and len(waking.calls("POST", NEXT)) == len(
-        ["stale", "stale"]
-    )
+    assert len(waking.calls("POST", SESSION)) == len(["lost", "rejoin"]) and len(
+        waking.calls("POST", NEXT)
+    ) == len(["stale", "stale"])
 
 
 def test_an_older_sessions_next_never_takes_the_seat_back(waking: FakeDesk, run_dir: Path) -> None:
@@ -1323,25 +1333,68 @@ def test_a_session_the_desk_answered_never_rejoins(
 def test_a_rejoin_the_desk_refuses_as_superseded_stops_silently(
     waking: FakeDesk, run_dir: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
+    lost_start(waking, "s1")
+    capsys.readouterr()
     waking.on("POST", NEXT, took_over("s2"))
     waking.on("POST", SESSION, took_over("s2"))
     assert hook("next", {"session_id": "s1", "source": "clear"}) == 0
-    assert len(waking.calls("POST", SESSION)) == 1 and capsys.readouterr() == ("", "")
+    assert len(waking.calls("POST", SESSION)) == len(["lost", "rejoin"]) and capsys.readouterr() == ("", "")
 
 
+@pytest.mark.parametrize("refused", [403, 422, 400])
 def test_a_refused_rejoin_is_an_error_and_is_tried_again_at_the_check_in_cadence(
-    waking: FakeDesk, run_dir: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+    waking: FakeDesk,
+    run_dir: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    refused: int,
 ) -> None:
+    """422 is a Desk from before `rejoin`: never a silent backoff forever."""
+    lost_start(waking, "s1")
+    capsys.readouterr()
     pauses: list[float] = []
     monkeypatch.setattr(hooks.time, "sleep", pauses.append)
     asks = iter([took_over("s0"), (200, {"brief": "Desk assignment a7"})])
     waking.on("POST", NEXT, lambda seen: next(asks))
-    joins = iter([(403, {"detail": "not your seat"}), (200, {"epoch": 25, "seat": SEAT})])
+    joins = iter([(refused, {"detail": "no"}), (200, {"epoch": 25, "seat": SEAT})])
     waking.on("POST", SESSION, lambda seen: next(joins))
     assert hook("next", {"session_id": "s1", "source": "clear"}) == hooks.WAKE
     err = capsys.readouterr().err
     assert "ashigaru hook next: error: rejoin refused" in err and err.strip().endswith("Desk assignment a7")
-    assert len(waking.calls("POST", SESSION)) == len(["403", "200"]) and hooks.NEXT_CHECK_IN in pauses
+    assert len(waking.calls("POST", SESSION)) == len(["lost", "refused", "200"])
+    assert pauses.count(hooks.NEXT_CHECK_IN) == 1
+
+
+def test_a_session_another_started_after_never_rejoins(
+    waking: FakeDesk, run_dir: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """a1709 round 3: s1's and s2's SessionStart both missed (a Desk restart), s2's next rejoined, and
+    s1's next, hearing stale naming s2 with no mark of its own, must not rejoin over it."""
+    lost_start(waking, "s1")
+    lost_start(waking, "s2")
+    waking.on("POST", NEXT, took_over("s2"))
+    waking.on("POST", SESSION, (200, {"epoch": 26, "seat": SEAT}))
+    assert hook("next", {"session_id": "s1", "source": "clear"}) == 0
+    assert len(waking.calls("POST", SESSION)) == len(["s1 lost", "s2 lost"])
+    assert hooks._latest({"XDG_RUNTIME_DIR": str(run_dir)}) == "s2"
+
+
+def test_a_tmpfs_that_refuses_never_stops_next(
+    waking: FakeDesk, run_dir: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def refuse(self: Path, *args: Any, **kwargs: Any) -> None:
+        raise OSError("read-only file system")
+
+    monkeypatch.setattr(Path, "replace", refuse)
+    waking.on("POST", SESSION, (200, {"epoch": 4, "seat": SEAT}))
+    assert hook("session-start", {"session_id": "s1", "source": "clear"}) == 0
+    assert len(waking.calls("POST", SESSION)) == 1
+    answers = iter([(204, None), (200, {"brief": "Desk assignment a7"})])
+    waking.on("POST", NEXT, lambda seen: next(answers))
+    assert hook("next", {"session_id": "s1", "source": "clear"}) == hooks.WAKE
+    err = capsys.readouterr().err
+    assert "the latest session is not recorded" in err and "s1 is not marked registered" in err
+    assert err.strip().endswith("Desk assignment a7")
 
 
 def test_a_mark_is_written_and_trusted_only_in_a_private_directory(seat: FakeDesk, run_dir: Path) -> None:
@@ -1363,9 +1416,10 @@ def test_a_mark_that_cannot_be_read_is_not_taken_for_missing(tmp_path: Path) -> 
 def test_next_registers_only_a_session_that_started(
     waking: FakeDesk, run_dir: Path, source: str | None
 ) -> None:
+    lost_start(waking, "s1")
     waking.on("POST", NEXT, took_over("s0"))
     assert hook("next", {"session_id": "s1", "source": source}) == 0
-    assert not waking.calls("POST", SESSION)
+    assert len(waking.calls("POST", SESSION)) == 1
 
 
 def test_a_stale_answer_is_superseded_only_when_it_names_another_session() -> None:

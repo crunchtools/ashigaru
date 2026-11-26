@@ -545,6 +545,9 @@ def end_session(conn: sqlite3.Connection, name: str, actor: str, why: str) -> li
     fenced out whichever it names. Josui's work leaves the seat: queued again when it was assigned or
     working, else as it stands, with `why` as its note. Scott's hold and a wrapping item stay for a
     person. Returns the item moved, if any: a seat holds one open item at most."""
+    ending = store.get_seat(conn, name)
+    if ending and ending["session_id"]:
+        store.record_session(conn, name, ending["session_id"], ending["epoch"])
     conn.execute(
         "UPDATE seats SET epoch = epoch + (epoch > 0), session_id = NULL, lease_until = NULL WHERE name = ?",
         (name,),
@@ -604,6 +607,8 @@ def start_session(
         # A new session's first typed prompt becomes the seat's task (`_report_seat`), so startup drops
         # the last one's as /clear does; the /clear's own `task: None` below also ends Scott's hold.
         dropped = {"task": None} if source == "startup" else {}
+        if current and current["session_id"]:  # however it got there: report_usage, epoch 0, before 14
+            store.record_session(conn, name, current["session_id"], current["epoch"])
         store.write_seat(conn, name, {"epoch": epoch, "session_id": session_id, **fresh, **dropped})
         store.record_session(conn, name, session_id, epoch)
         if source != "resume":

@@ -239,6 +239,28 @@ def test_a_rejoin_of_a_session_the_desk_never_got_registers_it(
     assert seat_row(conn, SEAT)["session_id"] == "s2"
 
 
+def test_a_rejoin_of_a_session_the_seat_left_unrecorded_is_stale(
+    client: TestClient, keys: Keys, conn: sqlite3.Connection
+) -> None:
+    """a1709 round 3: a session the seat held without registering it (a usage report at epoch 0) is
+    recorded as the seat's when the next one starts, so it cannot rejoin."""
+    up_seat(conn, SEAT, lane="exedore-max")
+    conn.execute("UPDATE seats SET session_id = 'u0', epoch = 0 WHERE name = ?", (SEAT,))
+    clear(client, keys, SEAT, "s1")
+    assert rejoin(client, keys, SEAT, "u0").json()["code"] == "stale-session"
+
+
+def test_a_session_the_desk_ended_cannot_rejoin(
+    client: TestClient, keys: Keys, conn: sqlite3.Connection
+) -> None:
+    up_seat(conn, SEAT, lane="exedore-max")
+    started(client, keys, SEAT)
+    conn.execute("DELETE FROM seat_sessions")  # as a session from before schema 14
+    with store.transaction(conn):
+        dispatch.end_session(conn, SEAT, JOSUI, "lapsed")
+    assert rejoin(client, keys, SEAT, "s1").json()["code"] == "stale-session"
+
+
 def test_the_migration_records_each_seats_current_session(tmp_path: Path) -> None:
     old = store.connect(tmp_path / "old.db")
     for number, script in enumerate(store.MIGRATIONS[:-1], start=1):
