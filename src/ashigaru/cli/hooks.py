@@ -7,7 +7,8 @@ seat-state.json hooks and keep their rules.
                   clear also drop the task). A resume of a session the Desk
                   ended (409 stale-session) prints a notice on stdout, which
                   SessionStart adds to the session's context: stop work on any
-                  earlier assignment. A Desk without the route (404, 405) gets
+                  earlier assignment. A registration that lands is marked on
+                  tmpfs, for `next`. A Desk without the route (404, 405) gets
                   the old PATCH of turn idle (clear also task null). compact can
                   come mid-turn and changes nothing.
   prompt-submit   UserPromptSubmit. turn active. A prompt a person typed is sent
@@ -33,7 +34,11 @@ seat-state.json hooks and keep their rules.
                   NEXT_CHECK_IN; a busy or held seat is asked again with
                   backoff. On a 409 stale-session it stops silently if the
                   Desk names a newer session as the seat's (a /clear), else
-                  exits 2 with a notice that the Desk ended this session.
+                  exits 2 with a notice that the Desk ended this session. A
+                  startup or clear session that session-start did not mark
+                  registered (its POST ran out of time) is not the older one:
+                  the Desk names the session before it, so `next` registers
+                  this one once and asks again.
   statusline      The status line command, not a hook: model, context, session
                   tokens and running cost to POST /v1/seats/{name}/usage. It
                   runs on every refresh, so it posts at most once per
@@ -41,8 +46,8 @@ seat-state.json hooks and keep their rules.
                   and prints nothing, not even its failures.
 
 Every request names the session the hook runs for as X-Ashigaru-Session, which
-is all the Desk fences on: nothing is kept on disk but the status line's tmpfs
-throttle.
+is all the Desk fences on: nothing is kept on disk but tmpfs state, the status
+line's throttle and the marks of sessions registered.
 
 A hook must never stand between a person and their prompt: the whole run is
 bounded at HOOK_SECONDS, every failure (no config, no network, a refusal) goes
@@ -52,6 +57,7 @@ stale notice. Nothing goes to stdout, which UserPromptSubmit would add to the
 conversation.
 """
 
+import dataclasses
 import json
 import os
 import re
@@ -100,6 +106,8 @@ NEXT_BUSY = frozenset({"busy", "held"})
 STALE = "stale-session"
 # The sources a session is registered for; compact is not a new session.
 SESSION_SOURCES = frozenset({"startup", "resume", "clear"})
+# The sources that start a session, which `next` registers when session-start did not.
+NEW_SOURCES = frozenset({"startup", "clear"})
 # Claude Code's asyncRewake: an async hook exiting 2 wakes the idle session with its stderr.
 WAKE = 2
 TASK_LENGTH = 120
@@ -121,6 +129,8 @@ STATUSLINE_EVERY = 30.0
 TRANSCRIPT_CHUNK = 4 << 20
 # A session's state is dropped this long after its last post, so tmpfs holds only live sessions.
 STATE_KEPT = timedelta(days=1)
+# What a session id may not carry into a tmpfs file name.
+UNSAFE = re.compile(r"[^A-Za-z0-9_-]")
 TOKEN_FIELDS = ("input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens", "output_tokens")
 
 
@@ -148,7 +158,7 @@ def _stale(detail: str) -> str:
     )
 
 
-def _start(event: dict[str, Any], desk: Desk, path: str) -> None:
+def _start(event: dict[str, Any], desk: Desk, path: str, env: Mapping[str, str]) -> None:
     source = event.get("source")
     if source == "compact":
         return
@@ -163,6 +173,7 @@ def _start(event: dict[str, Any], desk: Desk, path: str) -> None:
             if error.status not in (HTTPStatus.NOT_FOUND, HTTPStatus.METHOD_NOT_ALLOWED):
                 raise
         else:
+            _mark(session, env)
             return
     desk.request(
         "PATCH", path, body={"turn": "idle", "task": None} if source == "clear" else {"turn": "idle"}
@@ -313,7 +324,26 @@ class _Stale(Exception):
         return self.session is not None and self.session != own
 
 
-def _ask(desk: Desk, method: str, path: str, deadline: float, **params: Any) -> Any:
+@dataclasses.dataclass(frozen=True)
+class _Rejoin:
+    """A new session (`source` startup or clear) its `next` registers if session-start did not (a1709:
+    its POST ran out of time)."""
+
+    source: str
+    session: str
+    state: Mapping[str, str]
+
+    @property
+    def body(self) -> dict[str, str]:
+        return {"session_id": self.session, "source": self.source}
+
+    def lost(self, stale: _Stale) -> bool:
+        """The Desk never got this session: it names another one, and session-start left no mark. The
+        mark is read at that answer, not at the start, when session-start may still be posting."""
+        return stale.superseded(self.session) and _unmarked(self.session, self.state)
+
+
+def _ask(desk: Desk, method: str, path: str, deadline: float, body: Any = None, **params: Any) -> Any:
     """One request, retried with backoff while the Desk is down, restarting or throttling (5xx, 429,
     a 409 busy or held), until `deadline` on the monotonic clock. Raises _Refused on NEXT_REFUSED or any
     other 409, _Stale on a 409 stale-session, and _Deadline when no request can finish in the time left."""
@@ -327,6 +357,7 @@ def _ask(desk: Desk, method: str, path: str, deadline: float, **params: Any) -> 
                 method,
                 path,
                 params={"wait": wait} if "wait" in params else None,
+                body=body,
                 send=Send(timeout=wait + NEXT_GRACE),
             )
         except (DeskError, Unreachable) as error:
@@ -342,15 +373,25 @@ def _ask(desk: Desk, method: str, path: str, deadline: float, **params: Any) -> 
         pause = min(pause * 2, NEXT_BACKOFF)
 
 
-def _next(desk: Desk, seat: str | None, session: str | None = None) -> str | None:
+def _next(
+    desk: Desk,
+    seat: str | None,
+    session: str | None = None,
+    source: str | None = None,
+    env: Mapping[str, str] | None = None,
+) -> str | None:
     """The brief of the item the Desk hands this seat, or None once the wait runs out. Every request
     ends before NEXT_SECONDS, so no claim lands on a hook already gone. While the seat cannot take work
     it checks in every NEXT_CHECK_IN, which keeps its lease. On a stale-session answer it returns the
     notice for the model, unless the answer names another session as the seat's: a newer session on
-    this seat (`session` is this one) took over, and it stops silently."""
+    this seat (`session` is this one) took over, and it stops silently. `source` is that of a new
+    session (startup, clear), which the first such answer registers if session-start left no mark
+    (`_Rejoin`), and it asks again."""
+    state = os.environ if env is None else env
     deadline = time.monotonic() + NEXT_SECONDS
     time.sleep(NEXT_SETTLE)
     name = seat
+    rejoin = _Rejoin(source, session, state) if source and session else None
     try:
         while True:
             try:
@@ -358,6 +399,13 @@ def _next(desk: Desk, seat: str | None, session: str | None = None) -> str | Non
                 found = _ask(desk, "POST", f"/v1/seats/{quote(name, safe='')}/next", deadline, wait=NEXT_WAIT)
             except _Refused:
                 time.sleep(min(NEXT_CHECK_IN, max(0.0, deadline - time.monotonic())))
+                continue
+            except _Stale as stale:
+                if rejoin is None or name is None or not rejoin.lost(stale):
+                    raise stale
+                _ask(desk, "POST", f"/v1/seats/{quote(name, safe='')}/session", deadline, body=rejoin.body)
+                _mark(rejoin.session, rejoin.state)
+                rejoin = None
                 continue
             brief = found.get("brief") if isinstance(found, dict) else None
             if isinstance(brief, str) and brief.strip():
@@ -369,12 +417,42 @@ def _next(desk: Desk, seat: str | None, session: str | None = None) -> str | Non
         return None
 
 
-def usage_state(session: str, env: Mapping[str, str]) -> Path:
-    """Where the status line keeps its throttle and transcript offset: tmpfs, private to the user,
-    since it is looked at on every refresh."""
+def _state(env: Mapping[str, str]) -> Path:
+    """The hooks' tmpfs directory, private to the user."""
     runtime = env.get("XDG_RUNTIME_DIR")
-    directory = Path(runtime) / "ashigaru" if runtime else Path(f"/dev/shm/ashigaru-{os.getuid()}")
-    return directory / f"usage-{re.sub(r'[^A-Za-z0-9_-]', '_', session)}.json"
+    return Path(runtime) / "ashigaru" if runtime else Path(f"/dev/shm/ashigaru-{os.getuid()}")
+
+
+def usage_state(session: str, env: Mapping[str, str]) -> Path:
+    """Where the status line keeps its throttle and transcript offset: tmpfs, since it is looked at
+    on every refresh."""
+    return _state(env) / f"usage-{UNSAFE.sub('_', session)}.json"
+
+
+def registered_mark(session: str, env: Mapping[str, str]) -> Path:
+    """The mark that the Desk registered this session: the `next` of a session without one
+    registers it."""
+    return _state(env) / f"registered-{UNSAFE.sub('_', session)}"
+
+
+def _mark(session: str, env: Mapping[str, str]) -> None:
+    """Mark the session registered, in a directory only this user can write."""
+    mark = registered_mark(session, env)
+    mark.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    if _private(mark.parent):
+        mark.touch()
+
+
+def _unmarked(session: str, env: Mapping[str, str]) -> bool:
+    """True when the session is surely not marked registered. A directory another user could write
+    proves nothing, so it is False there, and `next` keeps its old answer."""
+    mark = registered_mark(session, env)
+    try:
+        return _private(mark.parent) and not mark.exists()
+    except FileNotFoundError:
+        return True
+    except OSError:
+        return False
 
 
 def _private(directory: Path) -> bool:
@@ -462,7 +540,7 @@ def _throttled(event: dict[str, Any], env: Mapping[str, str]) -> bool:
     partial = state_path.with_suffix(".tmp")
     partial.write_text(json.dumps(state))
     partial.replace(state_path)
-    for old in state_path.parent.glob("usage-*.json"):
+    for old in [*state_path.parent.glob("usage-*.json"), *state_path.parent.glob("registered-*")]:
         if now - old.stat().st_mtime > STATE_KEPT.total_seconds():
             old.unlink(missing_ok=True)
     return False
@@ -470,7 +548,6 @@ def _throttled(event: dict[str, Any], env: Mapping[str, str]) -> bool:
 
 Handler = Callable[[dict[str, Any], Desk, str], str | None]
 HANDLERS: dict[str, Handler] = {
-    "session-start": _start,
     "prompt-submit": _prompt,
     "stop": _stop,
     "statusline": _statusline,
@@ -483,16 +560,21 @@ def _report(name: str, stdin: TextIO, env: Mapping[str, str] | None, transport: 
     event = {} if stdin.isatty() else json.loads(stdin.read() or "{}")
     if not isinstance(event, dict):
         raise ValueError("the hook event is not a JSON object")
-    if name == "statusline" and _throttled(event, os.environ if env is None else env):
+    state = os.environ if env is None else env
+    if name == "statusline" and _throttled(event, state):
         return None
     config = load(env)
     session = str(event.get("session_id") or "") or None
     desk = Desk(config, HOOK_SECONDS, transport, session)
     try:
         if name == "next":
-            return _next(desk, config.seat, session)
-        seat = config.seat or desk.get("/v1/me")["name"]
-        return HANDLERS[name](event, desk, f"/v1/seats/{quote(seat, safe='')}")
+            source = event.get("source")
+            return _next(desk, config.seat, session, source if source in NEW_SOURCES else None, state)
+        path = f"/v1/seats/{quote(config.seat or desk.get('/v1/me')['name'], safe='')}"
+        if name == "session-start":
+            _start(event, desk, path, state)
+            return None
+        return HANDLERS[name](event, desk, path)
     finally:
         desk.close()
 

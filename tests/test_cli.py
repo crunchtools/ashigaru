@@ -1267,6 +1267,55 @@ def test_next_tells_the_model_when_the_desk_names_no_newer_session(
     assert capsys.readouterr().err.startswith("Ashigaru Desk: this session is stale:")
 
 
+@pytest.fixture
+def run_dir(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path / "run"))
+    return tmp_path / "run"
+
+
+def test_next_registers_a_new_session_whose_session_start_ran_out_of_time(
+    waking: FakeDesk, run_dir: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """a1709: the /clear's SessionStart POST gave up at HOOK_SECONDS, so the Desk still named the old
+    session and every request of the new one was stale; its next took that for a newer session and
+    stopped, and the seat went dark."""
+    answers = iter([took_over("s0"), (200, {"brief": "Desk assignment a7"})])
+    waking.on("POST", NEXT, lambda seen: next(answers))
+    waking.on("POST", SESSION, (200, {"epoch": 25, "seat": SEAT}))
+    assert hook("next", {"session_id": "s1", "source": "clear"}) == hooks.WAKE
+    assert capsys.readouterr().err.strip() == "Desk assignment a7"
+    (call,) = waking.calls("POST", SESSION)
+    assert call.body == {"session_id": "s1", "source": "clear"} and call.headers["X-Ashigaru-Session"] == "s1"
+    assert hooks.registered_mark("s1", {"XDG_RUNTIME_DIR": str(run_dir)}).exists()
+
+
+def test_next_registers_a_lost_session_only_once(waking: FakeDesk, run_dir: Path) -> None:
+    waking.on("POST", NEXT, took_over("s0"))
+    waking.on("POST", SESSION, (200, {"epoch": 25, "seat": SEAT}))
+    assert hook("next", {"session_id": "s1", "source": "startup"}) == 0
+    assert len(waking.calls("POST", SESSION)) == 1 and len(waking.calls("POST", NEXT)) == len(
+        ["stale", "stale"]
+    )
+
+
+def test_an_older_sessions_next_never_takes_the_seat_back(waking: FakeDesk, run_dir: Path) -> None:
+    """The /clear's own session-start registered s2; s1's next, marked by its session-start, stops."""
+    waking.on("POST", SESSION, (200, {"epoch": 4, "seat": SEAT}))
+    assert hook("session-start", {"session_id": "s1", "source": "clear"}) == 0
+    waking.on("POST", NEXT, took_over("s2"))
+    assert hook("next", {"session_id": "s1", "source": "clear"}) == 0
+    assert len(waking.calls("POST", SESSION)) == 1
+
+
+@pytest.mark.parametrize("source", ["resume", None])
+def test_next_registers_only_a_session_that_started(
+    waking: FakeDesk, run_dir: Path, source: str | None
+) -> None:
+    waking.on("POST", NEXT, took_over("s0"))
+    assert hook("next", {"session_id": "s1", "source": source}) == 0
+    assert not waking.calls("POST", SESSION)
+
+
 def test_a_stale_answer_is_superseded_only_when_it_names_another_session() -> None:
     assert hooks._Stale("x", "s2").superseded("s1")
     assert not hooks._Stale("x", "s1").superseded("s1")

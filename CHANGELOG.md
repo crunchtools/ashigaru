@@ -6,6 +6,10 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- A seat whose `session-start` hook ran out of its 2 seconds is registered by its `next` hook instead of going dark (a1709). The Desk never got the new session, so it still named the old one, and every request of the new session was 409 `stale-session`. `next` took that answer for a newer session taking over and stopped silently, so nothing checked in and the seat went missing until someone noticed. A later restart that resumed the unregistered session was refused as stale too, and `wrap` stayed 409 "the /clear has not landed", `--force` included, while the old session's `next` hook kept the seat live. Now `session-start` marks each session it registers on tmpfs. A startup or `/clear` session's `next` that hears `stale-session` naming another session, with no mark for its own, registers its session once and asks again. An older session's `next` carries its mark, so it still stops and never takes the seat back.
+
 ## [6.0.1] - 2026-11-25
 
 ### Fixed
