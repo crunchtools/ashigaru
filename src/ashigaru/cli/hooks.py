@@ -476,6 +476,34 @@ def latest_session(env: Mapping[str, str]) -> Path:
     return _state(env) / "latest-session"
 
 
+def seat_name(api_key: str, env: Mapping[str, str]) -> Path:
+    """Where the hooks keep the name the key's identity answered: a key names one identity for life,
+    so a seat without ASHIGARU_SEAT asks once, and session-start spends HOOK_SECONDS on one round
+    trip to the Desk instead of two (a1716). Named by the key's id (`ash_<id>_<secret>`), never its
+    secret."""
+    key_id = api_key.removeprefix("ash_").partition("_")[0]
+    return _state(env) / f"seat-{UNSAFE.sub('_', key_id)}"
+
+
+def _seat_name(desk: Desk, api_key: str, env: Mapping[str, str]) -> str:
+    """The seat the key's identity names: kept on tmpfs once the Desk has said, read back only from a
+    directory no other user could write."""
+    kept = seat_name(api_key, env)
+    if name := _kept(kept):
+        return name
+    name = str(desk.get("/v1/me")["name"])
+    _put(kept, name, "the seat name is not kept")
+    return name
+
+
+def _kept(path: Path) -> str | None:
+    """A state file's text, None when missing or in a directory another user could write."""
+    try:
+        return path.read_text() if _private(path.parent) else None
+    except OSError:
+        return None
+
+
 def _put(path: Path, text: str, failed: str) -> bool:
     """Write the state file whole, by replacing it, in a directory only this user can write. False
     when that cannot be done: said on stderr as `failed` if tmpfs refused, and the hook carries on."""
@@ -639,7 +667,7 @@ def _report(name: str, stdin: TextIO, env: Mapping[str, str] | None, transport: 
         if name == "next":
             source = event.get("source")
             return _next(desk, config.seat, session, source if source in NEW_SOURCES else None, state)
-        path = f"/v1/seats/{quote(config.seat or desk.get('/v1/me')['name'], safe='')}"
+        path = f"/v1/seats/{quote(config.seat or _seat_name(desk, config.api_key, state), safe='')}"
         if name == "session-start":
             _start(event, desk, path, state)
             return None
