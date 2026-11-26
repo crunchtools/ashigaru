@@ -619,7 +619,8 @@ def patch_seat(conn: Conn, who: Who, name: str, body: SeatPatch, checked: Guarde
         409: {
             "model": Problem,
             "description": "`stale-session`: a resume of a session the Desk has ended (its lease ran out, or"
-            " a newer session started); the session must not act on what it remembers.",
+            " a newer session started), or a rejoin of a session the seat has had before; the session must"
+            " not act on what it remembers.",
         },
     },
 )
@@ -629,10 +630,12 @@ def start_session(conn: Conn, who: Who, name: str, body: SessionStart) -> Sessio
     before: Josui's item it was working is blocked (cleared before its wrap), Scott's hold ends on a
     clear, and the task is dropped for the new session's first typed prompt to set. A resume stays
     the seat's current session while its lease is live; any other resume is 409 stale-session, and
-    the session must not act on what it remembers. The epoch answered is for 5.0 clients."""
+    the session must not act on what it remembers. A `rejoin` (a1709) registers a new session whose
+    SessionStart request ran out of time: a no-op for the seat's current session, and 409
+    stale-session for one the seat has had. The epoch answered is for 5.0 clients."""
     own_seat(who, name)
     try:
-        epoch, seat = dispatch.start_session(conn, name, body.session_id, body.source, who.name)
+        epoch, seat = dispatch.start_session(conn, name, body, who.name)
     except store.Conflict as error:
         raise _conflict(error) from error
     return SessionStarted(epoch=epoch, seat=Seat.model_validate(dispatch.seat(conn, name)))

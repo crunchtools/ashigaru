@@ -314,6 +314,19 @@ MIGRATIONS: tuple[str, ...] = (
     """
     UPDATE seats SET session_id = NULL WHERE epoch > 0 AND lease_until IS NULL;
     """,
+    # Every session a seat registered, so a `next` rejoining one the seat has had since (a1709) is
+    # refused rather than taking the seat back. The seats' current sessions are its first rows.
+    """
+    CREATE TABLE seat_sessions (
+        seat TEXT NOT NULL,
+        session_id TEXT NOT NULL,
+        epoch INTEGER NOT NULL,
+        started_at TEXT NOT NULL,
+        PRIMARY KEY (seat, session_id)
+    );
+    INSERT INTO seat_sessions (seat, session_id, epoch, started_at)
+        SELECT name, session_id, epoch, updated_at FROM seats WHERE session_id IS NOT NULL AND epoch > 0;
+    """,
 )
 
 ITEM_DEFAULTS: dict[str, Any] = {
@@ -773,6 +786,20 @@ def list_seats(conn: sqlite3.Connection) -> list[dict[str, Any]]:
 def get_seat(conn: sqlite3.Connection, name: str) -> dict[str, Any] | None:
     row = conn.execute("SELECT * FROM seats WHERE name = ?", (name,)).fetchone()
     return dict(row) if row else None
+
+
+def record_session(conn: sqlite3.Connection, seat: str, session_id: str, epoch: int) -> None:
+    """Record that the seat registered the session; the caller holds the transaction."""
+    conn.execute(
+        "INSERT OR IGNORE INTO seat_sessions (seat, session_id, epoch, started_at) VALUES (?, ?, ?, ?)",
+        (seat, session_id, epoch, now()),
+    )
+
+
+def had_session(conn: sqlite3.Connection, seat: str, session_id: str) -> bool:
+    """The seat registered the session at some time."""
+    found = conn.execute("SELECT 1 FROM seat_sessions WHERE seat = ? AND session_id = ?", (seat, session_id))
+    return found.fetchone() is not None
 
 
 def write_seat(conn: sqlite3.Connection, name: str, fields: dict[str, Any]) -> dict[str, Any]:

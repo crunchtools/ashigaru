@@ -3624,6 +3624,12 @@
         "additionalProperties": false,
         "description": "POST /v1/seats/{name}/session: the seat's SessionStart hook registering its Claude Code session.",
         "properties": {
+          "rejoin": {
+            "default": false,
+            "description": "Sent by a new session's `next` hook when its SessionStart request ran out of time: a no-op for the seat's current session, and 409 stale-session for a session the seat has had.",
+            "title": "Rejoin",
+            "type": "boolean"
+          },
           "session_id": {
             "minLength": 1,
             "title": "Session Id",
@@ -7371,7 +7377,7 @@
     },
     "/v1/seats/{name}/session": {
       "post": {
-        "description": "The seat's SessionStart hook. A new session (startup, clear) becomes the seat's current one,\nwhich every later request names as X-Ashigaru-Session, at the next epoch, and ends the one\nbefore: Josui's item it was working is blocked (cleared before its wrap), Scott's hold ends on a\nclear, and the task is dropped for the new session's first typed prompt to set. A resume stays\nthe seat's current session while its lease is live; any other resume is 409 stale-session, and\nthe session must not act on what it remembers. The epoch answered is for 5.0 clients.",
+        "description": "The seat's SessionStart hook. A new session (startup, clear) becomes the seat's current one,\nwhich every later request names as X-Ashigaru-Session, at the next epoch, and ends the one\nbefore: Josui's item it was working is blocked (cleared before its wrap), Scott's hold ends on a\nclear, and the task is dropped for the new session's first typed prompt to set. A resume stays\nthe seat's current session while its lease is live; any other resume is 409 stale-session, and\nthe session must not act on what it remembers. A `rejoin` (a1709) registers a new session whose\nSessionStart request ran out of time: a no-op for the seat's current session, and 409\nstale-session for one the seat has had. The epoch answered is for 5.0 clients.",
         "operationId": "start_session_v1_seats__name__session_post",
         "parameters": [
           {
@@ -7433,7 +7439,7 @@
                 }
               }
             },
-            "description": "`stale-session`: a resume of a session the Desk has ended (its lease ran out, or a newer session started); the session must not act on what it remembers."
+            "description": "`stale-session`: a resume of a session the Desk has ended (its lease ran out, or a newer session started), or a rejoin of a session the seat has had before; the session must not act on what it remembers."
           },
           "422": {
             "content": {

@@ -116,9 +116,19 @@ wakes the idle session with it. The Desk claims only while the seat's turn is
 idle, so a seat reading a brief that came another way is never handed a second.
 A transient 409 (`busy`, `held`) is asked again with backoff. On `stale-session` it
 wakes the seat with "this session is stale... /clear to rejoin", unless a newer
-session on the seat superseded the hook, which then stops silently. Its asks
+session on the seat superseded the hook, which then stops silently. A startup or
+`/clear` session whose `session-start` POST ran out of its 2 seconds is not
+registered, so the Desk names the session before it. `session-start` records
+each session as the container's latest before it posts, and marks each one it
+registers, on tmpfs; `next` marks it too once any other answer shows the Desk
+has it. Until then, a `next` whose session has no mark and is still the latest
+registers it (`POST /v1/seats/{name}/session` with `rejoin: true`) and asks
+again; a session another started after never does. The Desk
+refuses a rejoin of a session the seat has had, which stops the hook as a newer
+session would; a refused rejoin is logged and tried again every 3 minutes. Its asks
 are what keeps an idle seat's lease, so on any other 409 (`unseen`, `no-lane`),
-or when its key is refused (401, 403, 404), it checks in again every 3 minutes
+or on any other 4xx but 408 and 429 (a refused key, a Desk too old for the
+request), it checks in again every 3 minutes
 rather than exiting; a Desk that is down or restarting (5xx, 429) is
 asked again with backoff up to 5 minutes. Nothing flows until an admin sets the `autodispatch` mark to
 `on` (`ashigaru mark autodispatch --set on`); any other value is off.

@@ -782,7 +782,8 @@ def test_the_migration_drops_the_id_of_a_session_a_5_0_desk_ended(
 ) -> None:
     """A 5.0 Desk ended a session by moving the epoch and clearing the lease, and kept its id."""
     old = store.connect(tmp_path / "old.db")
-    monkeypatch.setattr(store, "MIGRATIONS", store.MIGRATIONS[:-1])
+    ends = next(i for i, script in enumerate(store.MIGRATIONS) if "SET session_id = NULL" in script)
+    monkeypatch.setattr(store, "MIGRATIONS", store.MIGRATIONS[:ends])
     store.migrate(old)
     for name, epoch_now, lease_until in ((MINE, 3, None), (OTHER, 2, ago(minutes=-5)), (CI, 0, None)):
         old.execute(

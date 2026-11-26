@@ -24,6 +24,7 @@ from .model import (
     Mode,
     Role,
     SeatStatus,
+    SessionStart,
     State,
     Turn,
     Wrap,
@@ -544,6 +545,9 @@ def end_session(conn: sqlite3.Connection, name: str, actor: str, why: str) -> li
     fenced out whichever it names. Josui's work leaves the seat: queued again when it was assigned or
     working, else as it stands, with `why` as its note. Scott's hold and a wrapping item stay for a
     person. Returns the item moved, if any: a seat holds one open item at most."""
+    ending = store.get_seat(conn, name)
+    if ending and ending["session_id"]:
+        store.record_session(conn, name, ending["session_id"], ending["epoch"])
     conn.execute(
         "UPDATE seats SET epoch = epoch + (epoch > 0), session_id = NULL, lease_until = NULL WHERE name = ?",
         (name,),
@@ -560,7 +564,7 @@ def end_session(conn: sqlite3.Connection, name: str, actor: str, why: str) -> li
 
 
 def start_session(
-    conn: sqlite3.Connection, name: str, session_id: str, source: str, actor: str
+    conn: sqlite3.Connection, name: str, start: SessionStart, actor: str
 ) -> tuple[int, dict[str, Any]]:
     """POST /seats/{name}/session: the seat's SessionStart. A new session (startup, clear) gets the
     next epoch, which ends the one before it (`_cleared`: its context is gone). A resume keeps its
@@ -568,10 +572,24 @@ def start_session(
     was idle, unless the Desk ended it (a newer session started, or reconcile ended it after
     STALE_SEAT of silence), which is Conflict (stale-session): what it remembers is no longer its own.
     A seat that never registered a session (no row, or epoch 0: a 4.x seat resuming across the
-    upgrade) adopts this one at epoch 1, its work untouched. Returns the epoch and the seat."""
+    upgrade) adopts this one at epoch 1, its work untouched. A `rejoin` is a new session's `next`
+    registering it after its SessionStart's own request ran out of time (a1709): one of the seat's
+    current session changes nothing, so a retry is safe, and one of a session the seat has had before
+    is Conflict (stale-session), since that request may have landed and a newer session followed it.
+    Returns the epoch and the seat."""
+    session_id, source, rejoin = start.session_id, start.source, start.rejoin
     with store.transaction(conn):
         current = store.get_seat(conn, name)
         registered = current is not None and current["epoch"] > 0
+        if rejoin and current and current["session_id"] == session_id:
+            return current["epoch"], current
+        if rejoin and current and store.had_session(conn, name, session_id):
+            raise store.Conflict(
+                f"seat {name!r}: session {session_id} was superseded (the seat is in session "
+                f"{current['session_id']}); /clear to rejoin",
+                "stale-session",
+                current["session_id"],
+            )
         if source == "resume" and registered and current:
             if current["session_id"] != session_id or current["lease_until"] is None:
                 raise store.Conflict(
@@ -589,7 +607,10 @@ def start_session(
         # A new session's first typed prompt becomes the seat's task (`_report_seat`), so startup drops
         # the last one's as /clear does; the /clear's own `task: None` below also ends Scott's hold.
         dropped = {"task": None} if source == "startup" else {}
+        if current and current["session_id"]:  # however it got there: report_usage, epoch 0, before 14
+            store.record_session(conn, name, current["session_id"], current["epoch"])
         store.write_seat(conn, name, {"epoch": epoch, "session_id": session_id, **fresh, **dropped})
+        store.record_session(conn, name, session_id, epoch)
         if source != "resume":
             held = store.get_item(conn, current["item"]) if current and current["item"] else None
             _cleared(conn, held, name, actor, "clear" if source == "clear" else "startup")

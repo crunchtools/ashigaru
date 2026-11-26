@@ -540,6 +540,11 @@ class SessionStart(BaseModel):
 
     session_id: str = Field(min_length=1)
     source: Literal["startup", "resume", "clear"]
+    rejoin: bool = Field(
+        False,
+        description="Sent by a new session's `next` hook when its SessionStart request ran out of time: "
+        "a no-op for the seat's current session, and 409 stale-session for a session the seat has had.",
+    )
 
 
 class SessionStarted(BaseModel):
