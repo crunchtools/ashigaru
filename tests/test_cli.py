@@ -31,6 +31,7 @@ def item(**fields: Any) -> dict[str, Any]:
 @pytest.fixture
 def desk(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iterator[FakeDesk]:
     monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path / "run"))
     for name in ("ASHIGARU_API_KEY_FILE", "ASHIGARU_SEAT"):
         monkeypatch.delenv(name, raising=False)
     with serve() as fake:
@@ -1081,6 +1082,29 @@ def test_the_seat_defaults_to_the_keys_identity(desk: FakeDesk) -> None:
     desk.on("PATCH", "/v1/seats/Vertex%202", (200, SEAT))
     hook("stop", {"hook_event_name": "Stop"})
     assert desk.calls("PATCH", "/v1/seats/Vertex%202")[0].body == {"turn": "idle"}
+
+
+def test_the_keys_identity_is_asked_once_so_session_start_makes_one_round_trip(desk: FakeDesk) -> None:
+    desk.on("GET", "/v1/me", (200, {"name": "Vertex 2", "role": "seat", "key_id": "k1"}))
+    desk.on("PATCH", "/v1/seats/Vertex%202", (200, SEAT))
+    desk.on("POST", "/v1/seats/Vertex%202/session", (200, {"epoch": 2, "seat": SEAT}))
+    hook("stop", {"hook_event_name": "Stop"})
+    hook("session-start", {"session_id": "s2", "source": "clear"})
+    assert len(desk.calls("GET", "/v1/me")) == 1
+    assert len(desk.calls("POST", "/v1/seats/Vertex%202/session")) == 1
+
+
+def test_a_seat_name_kept_where_another_user_could_write_is_asked_again(
+    desk: FakeDesk, tmp_path: Path
+) -> None:
+    desk.on("GET", "/v1/me", (200, {"name": "Vertex 2", "role": "seat", "key_id": "k1"}))
+    desk.on("PATCH", "/v1/seats/Vertex%202", (200, SEAT))
+    kept = hooks.seat_name(KEY, {"XDG_RUNTIME_DIR": str(tmp_path / "run")})
+    kept.parent.mkdir(mode=0o777, parents=True)
+    kept.parent.chmod(0o777)
+    kept.write_text("Max 1")
+    hook("stop", {"hook_event_name": "Stop"})
+    assert len(desk.calls("GET", "/v1/me")) == 1 and not desk.calls("PATCH", "/v1/seats/Max%201")
 
 
 def test_a_stop_the_desk_ended_tells_the_model_and_wakes_it(
