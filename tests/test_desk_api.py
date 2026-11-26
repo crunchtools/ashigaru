@@ -6,6 +6,7 @@ import stat
 from datetime import UTC, datetime
 from http.client import CONFLICT, CREATED, FORBIDDEN, NO_CONTENT, NOT_FOUND, OK, UNPROCESSABLE_ENTITY
 from pathlib import Path
+from typing import Any
 
 import pytest
 from conftest import Keys, up_seat
@@ -192,6 +193,64 @@ def test_wrap_refuses_cleared_until_the_clear_lands_even_forced(
     assert client.post(f"{path}/wrap", headers=keys[JOSUI], json={"learned": "x"}).status_code == CONFLICT
     clear(client, keys, SEAT)
     assert client.post(f"{path}/wrap", headers=keys[JOSUI], json={"force": True}).json()["wrap"] == "cleared"
+
+
+def rejoin(client: TestClient, keys: Keys, name: str, session: str) -> Any:
+    """A new session's `next` registering it after its SessionStart request ran out of time."""
+    body = {"session_id": session, "source": "clear", "rejoin": True}
+    return client.post(f"/v1/seats/{name}/session", headers=keys[name], json=body)
+
+
+def test_a_rejoin_of_the_seats_current_session_changes_nothing(
+    client: TestClient, keys: Keys, conn: sqlite3.Connection
+) -> None:
+    """a1709: the rejoin's own retry, or one whose SessionStart landed late, must not move the epoch."""
+    up_seat(conn, SEAT, lane="exedore-max")
+    started(client, keys, SEAT)
+    before = seat_row(conn, SEAT)
+    for _ in range(2):
+        answer = rejoin(client, keys, SEAT, "s1")
+        assert answer.status_code == OK and answer.json()["epoch"] == before["epoch"]
+    assert seat_row(conn, SEAT)["epoch"] == before["epoch"]
+
+
+def test_a_rejoin_of_a_superseded_session_is_stale(
+    client: TestClient, keys: Keys, conn: sqlite3.Connection
+) -> None:
+    """a1709: s1's SessionStart landed after its hook gave up, so s1 has no mark; once /clear made s2
+    the seat's, s1's next must not take the seat back."""
+    up_seat(conn, SEAT, lane="exedore-max")
+    started(client, keys, SEAT)
+    clear(client, keys, SEAT, "s2")
+    epoch = seat_row(conn, SEAT)["epoch"]
+    refused = rejoin(client, keys, SEAT, "s1")
+    assert refused.status_code == CONFLICT and refused.json()["code"] == "stale-session"
+    assert refused.json()["session"] == "s2"
+    assert (seat_row(conn, SEAT)["session_id"], seat_row(conn, SEAT)["epoch"]) == ("s2", epoch)
+
+
+def test_a_rejoin_of_a_session_the_desk_never_got_registers_it(
+    client: TestClient, keys: Keys, conn: sqlite3.Connection
+) -> None:
+    up_seat(conn, SEAT, lane="exedore-max")
+    started(client, keys, SEAT)
+    epoch = int(str(seat_row(conn, SEAT)["epoch"]))
+    assert rejoin(client, keys, SEAT, "s2").json()["epoch"] == epoch + 1
+    assert seat_row(conn, SEAT)["session_id"] == "s2"
+
+
+def test_the_migration_records_each_seats_current_session(tmp_path: Path) -> None:
+    old = store.connect(tmp_path / "old.db")
+    for number, script in enumerate(store.MIGRATIONS[:-1], start=1):
+        for statement in filter(str.strip, script.split(";")):
+            old.execute(statement)
+        old.execute("INSERT INTO schema_version (version, applied_at) VALUES (?, 'x')", (number,))
+    old.execute(
+        "INSERT INTO seats (name, status, since, updated_at, session_id, epoch)"
+        " VALUES ('m', 'free', 'x', 'x', 's9', 3)"
+    )
+    store.migrate(old)
+    assert store.had_session(old, "m", "s9") and not store.had_session(old, "m", "s1")
 
 
 def test_an_item_recorded_on_a_seat_takes_its_session_so_its_wrap_sees_the_clear(

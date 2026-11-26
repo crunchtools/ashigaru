@@ -324,23 +324,43 @@ class _Stale(Exception):
         return self.session is not None and self.session != own
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclasses.dataclass
 class _Rejoin:
     """A new session (`source` startup or clear) its `next` registers if session-start did not (a1709:
-    its POST ran out of time)."""
+    its POST ran out of time). It is `settled` once the session is marked registered, here by any
+    answer that is not stale-session, and from the start for any other source. The POST says
+    `rejoin`, so the Desk refuses a session the seat has had and takes a retry as a no-op."""
 
-    source: str
-    session: str
+    session: str | None
+    source: str | None
     state: Mapping[str, str]
+    settled: bool = False
+    pending: bool = False
 
-    @property
-    def body(self) -> dict[str, str]:
-        return {"session_id": self.session, "source": self.source}
+    def __post_init__(self) -> None:
+        self.settled = self.settled or self.source not in NEW_SOURCES or not self.session
 
     def lost(self, stale: _Stale) -> bool:
-        """The Desk never got this session: it names another one, and session-start left no mark. The
-        mark is read at that answer, not at the start, when session-start may still be posting."""
-        return stale.superseded(self.session) and _unmarked(self.session, self.state)
+        """The Desk never got this session: it names another one, and session-start left no mark, read
+        at this answer, not at the start, when session-start may still be posting. Then the rejoin is
+        pending. A stale answer while it is pending is the Desk refusing the rejoin itself."""
+        self.pending = not (self.settled or self.pending) and bool(
+            self.session and stale.superseded(self.session) and _unmarked(self.session, self.state)
+        )
+        return self.pending
+
+    def send(self, desk: Desk, name: str, deadline: float) -> None:
+        """Register the session if the rejoin is pending."""
+        if self.pending:
+            body = {"session_id": self.session, "source": self.source, "rejoin": True}
+            _ask(desk, "POST", f"/v1/seats/{quote(name, safe='')}/session", deadline, body=body)
+            self.settle()
+
+    def settle(self) -> None:
+        """The Desk has this session: mark it, once."""
+        if not self.settled and self.session:
+            _mark(self.session, self.state)
+        self.settled, self.pending = True, False
 
 
 def _ask(desk: Desk, method: str, path: str, deadline: float, body: Any = None, **params: Any) -> Any:
@@ -385,28 +405,32 @@ def _next(
     it checks in every NEXT_CHECK_IN, which keeps its lease. On a stale-session answer it returns the
     notice for the model, unless the answer names another session as the seat's: a newer session on
     this seat (`session` is this one) took over, and it stops silently. `source` is that of a new
-    session (startup, clear), which the first such answer registers if session-start left no mark
-    (`_Rejoin`), and it asks again."""
+    session (startup, clear): until an answer that is not stale-session proves the Desk has it, and
+    marks it, such an answer with no mark registers it (`_Rejoin`), and it asks again. A rejoin
+    refused (401, 403, 404, another 409) is said on stderr and tried again at the check-in cadence;
+    one the Desk answers stale-session (the seat has had this session, so a newer one followed) stops
+    it as a newer session would."""
     state = os.environ if env is None else env
     deadline = time.monotonic() + NEXT_SECONDS
     time.sleep(NEXT_SETTLE)
     name = seat
-    rejoin = _Rejoin(source, session, state) if source and session else None
+    rejoin = _Rejoin(session, source, state)
     try:
         while True:
             try:
                 name = name or _ask(desk, "GET", "/v1/me", deadline)["name"]
+                rejoin.send(desk, name, deadline)
                 found = _ask(desk, "POST", f"/v1/seats/{quote(name, safe='')}/next", deadline, wait=NEXT_WAIT)
-            except _Refused:
+            except _Refused as refused:
+                if rejoin.pending:
+                    print(f"ashigaru hook next: error: rejoin refused: {refused.__cause__}", file=sys.stderr)
                 time.sleep(min(NEXT_CHECK_IN, max(0.0, deadline - time.monotonic())))
                 continue
             except _Stale as stale:
-                if rejoin is None or name is None or not rejoin.lost(stale):
+                if not rejoin.lost(stale):
                     raise stale
-                _ask(desk, "POST", f"/v1/seats/{quote(name, safe='')}/session", deadline, body=rejoin.body)
-                _mark(rejoin.session, rejoin.state)
-                rejoin = None
                 continue
+            rejoin.settle()  # an answer that is not stale-session: the Desk has this session
             brief = found.get("brief") if isinstance(found, dict) else None
             if isinstance(brief, str) and brief.strip():
                 return brief

@@ -119,8 +119,11 @@ wakes the seat with "this session is stale... /clear to rejoin", unless a newer
 session on the seat superseded the hook, which then stops silently. A startup or
 `/clear` session whose `session-start` POST ran out of its 2 seconds is not
 registered, so the Desk names the session before it: `session-start` marks each
-session it registers on tmpfs, and a `next` whose session has no mark registers
-it once (`POST /v1/seats/{name}/session`) and asks again. Its asks
+session it registers on tmpfs, as `next` does once any other answer shows the
+Desk has it, and until then a `next` whose session has no mark registers it
+(`POST /v1/seats/{name}/session` with `rejoin: true`) and asks again. The Desk
+refuses a rejoin of a session the seat has had, which stops the hook as a newer
+session would; a refused rejoin is logged and tried again every 3 minutes. Its asks
 are what keeps an idle seat's lease, so on any other 409 (`unseen`, `no-lane`),
 or when its key is refused (401, 403, 404), it checks in again every 3 minutes
 rather than exiting; a Desk that is down or restarting (5xx, 429) is

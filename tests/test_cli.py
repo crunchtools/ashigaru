@@ -1285,7 +1285,8 @@ def test_next_registers_a_new_session_whose_session_start_ran_out_of_time(
     assert hook("next", {"session_id": "s1", "source": "clear"}) == hooks.WAKE
     assert capsys.readouterr().err.strip() == "Desk assignment a7"
     (call,) = waking.calls("POST", SESSION)
-    assert call.body == {"session_id": "s1", "source": "clear"} and call.headers["X-Ashigaru-Session"] == "s1"
+    assert call.body == {"session_id": "s1", "source": "clear", "rejoin": True}
+    assert call.headers["X-Ashigaru-Session"] == "s1"
     assert hooks.registered_mark("s1", {"XDG_RUNTIME_DIR": str(run_dir)}).exists()
 
 
@@ -1305,6 +1306,57 @@ def test_an_older_sessions_next_never_takes_the_seat_back(waking: FakeDesk, run_
     waking.on("POST", NEXT, took_over("s2"))
     assert hook("next", {"session_id": "s1", "source": "clear"}) == 0
     assert len(waking.calls("POST", SESSION)) == 1
+
+
+def test_a_session_the_desk_answered_never_rejoins(
+    waking: FakeDesk, run_dir: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """a1709 review: s1's SessionStart landed after its hook gave up, so s1 has no mark; its next was
+    answered, then /clear made s2 the seat's. s1 must stop, not take the seat back."""
+    answers = iter([(204, None), took_over("s2"), took_over("s2")])
+    waking.on("POST", NEXT, lambda seen: next(answers))
+    assert hook("next", {"session_id": "s1", "source": "startup"}) == 0
+    assert not waking.calls("POST", SESSION) and capsys.readouterr() == ("", "")
+    assert hooks.registered_mark("s1", {"XDG_RUNTIME_DIR": str(run_dir)}).exists()
+
+
+def test_a_rejoin_the_desk_refuses_as_superseded_stops_silently(
+    waking: FakeDesk, run_dir: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    waking.on("POST", NEXT, took_over("s2"))
+    waking.on("POST", SESSION, took_over("s2"))
+    assert hook("next", {"session_id": "s1", "source": "clear"}) == 0
+    assert len(waking.calls("POST", SESSION)) == 1 and capsys.readouterr() == ("", "")
+
+
+def test_a_refused_rejoin_is_an_error_and_is_tried_again_at_the_check_in_cadence(
+    waking: FakeDesk, run_dir: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    pauses: list[float] = []
+    monkeypatch.setattr(hooks.time, "sleep", pauses.append)
+    asks = iter([took_over("s0"), (200, {"brief": "Desk assignment a7"})])
+    waking.on("POST", NEXT, lambda seen: next(asks))
+    joins = iter([(403, {"detail": "not your seat"}), (200, {"epoch": 25, "seat": SEAT})])
+    waking.on("POST", SESSION, lambda seen: next(joins))
+    assert hook("next", {"session_id": "s1", "source": "clear"}) == hooks.WAKE
+    err = capsys.readouterr().err
+    assert "ashigaru hook next: error: rejoin refused" in err and err.strip().endswith("Desk assignment a7")
+    assert len(waking.calls("POST", SESSION)) == len(["403", "200"]) and hooks.NEXT_CHECK_IN in pauses
+
+
+def test_a_mark_is_written_and_trusted_only_in_a_private_directory(seat: FakeDesk, run_dir: Path) -> None:
+    seat.on("POST", SESSION, (200, {"epoch": 4, "seat": SEAT}))
+    (run_dir / "ashigaru").mkdir(parents=True)
+    (run_dir / "ashigaru").chmod(0o777)
+    hook("session-start", {"session_id": "s1", "source": "clear"})
+    env = {"XDG_RUNTIME_DIR": str(run_dir)}
+    assert not hooks.registered_mark("s1", env).exists() and not hooks._unmarked("s1", env)
+
+
+def test_a_mark_that_cannot_be_read_is_not_taken_for_missing(tmp_path: Path) -> None:
+    (tmp_path / "file").write_text("")
+    assert not hooks._unmarked("s1", {"XDG_RUNTIME_DIR": str(tmp_path / "file")})
+    assert hooks._unmarked("s1", {"XDG_RUNTIME_DIR": str(tmp_path / "none")})
 
 
 @pytest.mark.parametrize("source", ["resume", None])
