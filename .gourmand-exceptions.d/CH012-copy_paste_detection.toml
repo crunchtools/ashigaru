@@ -24,3 +24,8 @@ classification = "gourmand_bug"
 path = "src/ashigaru/desk/importer.py"
 justification = "apply() folds one ledger line into an item and records the line; store.write_seat() patches a seat row and stamps since and turn_started_at. They share only a get-current, merge, write shape over different tables and fields."
 classification = "gourmand_bug"
+
+[[locations]]
+path = "scripts/inbox.py"
+justification = "publish() finds or edits the inbox issue through the GitHub API; store.retire_identity() disables an identity and revokes its keys in SQLite. They share only statement shape (a lookup, a guard, a loop of updates), not code."
+classification = "gourmand_bug"

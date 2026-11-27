@@ -19,3 +19,8 @@ classification = "by_design"
 path = "packaging/container-test.sh"
 justification = "The image's contract test: [tool.sdlc.image] contract-test in pyproject.toml names it, for sdlc to run against the built image (sdlc#118)."
 classification = "by_design"
+
+[[locations]]
+path = "packaging/smoke-in-container.sh"
+justification = "The smoke test's body, run in the fresh container by packaging/smoke.sh and by packaging/rpm.Containerfile, which sdlc ci's rpm-* checks build."
+classification = "by_design"

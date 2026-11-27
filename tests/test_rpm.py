@@ -19,13 +19,30 @@ def test_it_starts_from_no_permissions_and_every_job_has_a_timeout() -> None:
         assert isinstance(job["timeout-minutes"], int)
 
 
-def test_only_publish_writes_and_never_for_a_pull_request() -> None:
+def test_only_publish_writes_and_no_pull_request_runs_the_workflow() -> None:
+    """Pull requests build and smoke-test in sdlc ci (the rpm-* checks); rpm.yml only attaches."""
     jobs = WORKFLOW["jobs"]
     writers = [name for name, job in jobs.items() if "write" in job["permissions"].values()]
     assert writers == ["publish"]
     assert jobs["publish"]["permissions"] == {"contents": "write"}
-    assert "github.event_name != 'pull_request'" in jobs["publish"]["if"]
+    assert set(WORKFLOW[True]) == {"release", "workflow_dispatch"}
     assert not any("run" in step and "packaging/" in step["run"] for step in jobs["publish"]["steps"])
+
+
+def test_every_target_is_an_sdlc_check_on_a_digest_pinned_root() -> None:
+    """rpm.yml's pull-request half: each target builds packaging/rpm.Containerfile on its own
+    root, pinned by digest (constitution S2), and the build fails if the smoke test does."""
+    ci = tomllib.loads((ROOT / "pyproject.toml").read_text())["tool"]["sdlc"]["ci"]
+    containerfile = (ROOT / "packaging" / "rpm.Containerfile").read_text()
+    for target in ("fc43", "fc45", "el10"):
+        check = ci[f"rpm-{target}"]
+        assert f"rpm-{target}" in ci["checks"]
+        assert check["kind"] == "image-build"
+        assert check["containerfile"] == "packaging/rpm.Containerfile"
+        assert check["build_args"] == {"TARGET": target}
+        assert re.search(rf"^FROM \S+@sha256:[0-9a-f]{{64}} AS root-{target}$", containerfile, re.M)
+    assert "FROM root-${TARGET} AS build" in containerfile
+    assert containerfile.rstrip().endswith("RUN bash /packaging/smoke-in-container.sh")
 
 
 def test_actions_are_pinned_by_commit_and_event_values_go_through_env() -> None:
@@ -52,8 +69,9 @@ def test_the_cli_package_ships_the_skill_and_smoke_checks_it() -> None:
     skill = "%{_datadir}/ashigaru/skills/ashigaru/SKILL.md"
     assert f"install -Dpm 0644 skills/ashigaru/SKILL.md %{{buildroot}}{skill}" in SPEC
     assert "%doc README.md\n%{_datadir}/ashigaru/\n" in SPEC
-    assert "skills/**" in WORKFLOW[True]["pull_request"]["paths"]
-    assert "/usr/share/ashigaru/skills/ashigaru/SKILL.md" in (ROOT / "packaging" / "smoke.sh").read_text()
+    assert "COPY skills/ /tree/skills/" in (ROOT / "packaging" / "rpm.Containerfile").read_text()
+    smoke = (ROOT / "packaging" / "smoke-in-container.sh").read_text()
+    assert "/usr/share/ashigaru/skills/ashigaru/SKILL.md" in smoke
 
 
 def test_the_build_refuses_a_tag_that_does_not_name_version(tmp_path: Path) -> None:

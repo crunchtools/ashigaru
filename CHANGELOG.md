@@ -6,6 +6,10 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- Pull requests build and smoke-test the RPMs in `sdlc ci` (a1790): the `rpm-fc43`, `rpm-fc45` and `rpm-el10` checks build `packaging/rpm.Containerfile`, which runs `rpmbuild-in-container.sh` on the target and `smoke-in-container.sh` in a fresh one. `rpm.yml` no longer runs on pull requests; it keeps the release attach, which has no sdlc route yet (crunchtools/sdlc#263).
+
 ## [6.1.0] - 2026-11-27
 
 ### Added

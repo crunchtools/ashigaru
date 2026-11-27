@@ -1,0 +1,11 @@
+# Keep the build context to what rpm.Containerfile copies.
+.git
+.venv
+.mypy_cache
+.pytest_cache
+.ruff_cache
+.gourmand-cache
+tests
+worker
+docs
+**/__pycache__

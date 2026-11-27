@@ -89,7 +89,7 @@ contract-test = "packaging/container-test.sh"
 
 [tool.sdlc.ci]
 # pytest on Python 3.15 as well as the gate's 3.14 (what ci.yml's py315 job ran).
-checks = ["py315-image", "py315"]
+checks = ["py315-image", "py315", "rpm-fc43", "rpm-fc45", "rpm-el10"]
 
 [tool.sdlc.ci.py315-image]
 kind = "image-build"
@@ -104,3 +104,23 @@ argv = ["uv", "run", "--locked", "--python", "/usr/bin/python3", "pytest", "-q",
 env = { UV_PROJECT_ENVIRONMENT = "/tmp/venv", UV_PYTHON_DOWNLOADS = "never" }
 # uv sync fetches uv.lock's wheels from PyPI.
 network = true
+
+# The RPMs on every target, built and smoke-tested (what rpm.yml's pull-request
+# build ran): packaging/rpm.Containerfile fails the build when either fails.
+[tool.sdlc.ci.rpm-fc43]
+kind = "image-build"
+containerfile = "packaging/rpm.Containerfile"
+build_args = { TARGET = "fc43" }
+tag = "localhost/ashigaru:rpm-fc43"
+
+[tool.sdlc.ci.rpm-fc45]
+kind = "image-build"
+containerfile = "packaging/rpm.Containerfile"
+build_args = { TARGET = "fc45" }
+tag = "localhost/ashigaru:rpm-fc45"
+
+[tool.sdlc.ci.rpm-el10]
+kind = "image-build"
+containerfile = "packaging/rpm.Containerfile"
+build_args = { TARGET = "el10" }
+tag = "localhost/ashigaru:rpm-el10"

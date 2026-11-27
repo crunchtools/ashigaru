@@ -1,0 +1,7 @@
+[
+  {
+    "rule": "py/overly-permissive-file",
+    "path": "worker/roles/seat_host/files/ashigaru-seats",
+    "fingerprint": "83f4b760e38b21da:1"
+  }
+]

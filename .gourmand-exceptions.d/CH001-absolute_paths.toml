@@ -1,0 +1,6 @@
+check = "CH001-absolute_paths"
+
+[[locations]]
+path = "worker/roles/seat_host/files/seat-fence.json"
+justification = "An OCI hooks.d file: the runtime requires hook.path to be absolute, and /usr/local/libexec/seat-fence-hook is where the seat_host role installs it."
+classification = "by_design"

@@ -9,25 +9,5 @@ image=$1
 rpms=$(realpath "$2")
 require=${3:-}
 
-podman run --rm -v "$rpms:/rpms:ro,Z" -e REQUIRE="$require" "$image" bash -euo pipefail -c '
-    . /etc/os-release
-    if [ "$ID" != fedora ]; then
-        dnf -y -q install dnf-plugins-core epel-release
-        dnf config-manager --set-enabled crb
-    fi
-    dnf -y -q install $(ls /rpms/*.noarch.rpm)
-    commands=$(rpm -ql ashigaru ashigaru-desk | grep "^/usr/bin/")
-    echo "installed: $commands"
-    if [ -n "$REQUIRE" ] && ! grep -qx /usr/bin/ashigaru <<< "$commands"; then
-        echo "no /usr/bin/ashigaru in the package" >&2
-        exit 1
-    fi
-    skill=/usr/share/ashigaru/skills/ashigaru/SKILL.md
-    rpm -ql ashigaru | grep -qx "$skill" || { echo "no $skill in the package" >&2; exit 1; }
-    head -2 "$skill" | grep -qx "name: ashigaru"
-    echo "installed: $skill"
-    for command in $commands; do
-        "$command" --help > /dev/null
-        echo "ok: $command --help"
-    done
-'
+podman run --rm -v "$rpms:/rpms:ro,Z" -v "$(dirname "$(realpath "$0")"):/packaging:ro,Z" \
+    -e REQUIRE="$require" "$image" bash /packaging/smoke-in-container.sh
