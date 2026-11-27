@@ -1,0 +1,178 @@
+#!/usr/bin/python3 -I
+"""ashigaru-seats: the seat registry of one host (Ashigaru Worker).
+
+One JSON file per seat under /etc/ashigaru/seats, root-owned. It is the
+record of what this host runs: each seat's kind, fence class, PID slot and
+address, so that two seats never share a slot or an address and nothing has
+to be derived from a seat's name. The seat role writes it; the fence hook,
+the fence check and the audit map read it.
+
+  ashigaru-seats allocate --name N --kind K --class C [--unit U] [--desk D]
+                          [--key K] [--avail always|scott-first]
+                          [--slot S] [--address A] --pool KIND=FIRST-LAST ...
+  ashigaru-seats release  --name N
+  ashigaru-seats show     --name N
+  ashigaru-seats list
+  ashigaru-seats tsv      --host H
+
+allocate is idempotent: a seat already recorded keeps its slot and address
+(a differing --kind is refused), and prints its record as JSON. A new seat
+takes --slot/--address when given (the adoption of seats that predate the
+registry), otherwise the lowest free slot from 1 (Prime is 0) and the lowest
+free address of its kind's pool. tsv prints the seats.tsv rows the fence
+check reads (seat host billing class slot address key avail desk).
+
+Names are the seat's container name: lower-case letters, digits and hyphens,
+starting with a letter, at most 26 characters (the audit key is seat:<name>
+and the kernel keeps 31 bytes).
+"""
+from __future__ import annotations
+
+import argparse
+import ipaddress
+import json
+import os
+import re
+import sys
+import tempfile
+
+DIR = "/etc/ashigaru/seats"
+if os.environ.get("ASHIGARU_SEATS_SELFTEST") == "1":  # the selftest's scratch registry only
+    DIR = os.environ.get("ASHIGARU_SEATS_DIR", DIR)
+NAME = re.compile(r"^[a-z][a-z0-9-]{0,25}$")
+KINDS = ("max", "vertex", "prime")
+SLOTS = 64  # pid_max is split into 64 bases; slot 0 is Prime's
+
+
+def die(msg: str, code: int = 1) -> None:
+    print(f"ashigaru-seats: {msg}", file=sys.stderr)
+    sys.exit(code)
+
+
+def records() -> dict[str, dict]:
+    out = {}
+    if not os.path.isdir(DIR):
+        return out
+    for f in sorted(os.listdir(DIR)):
+        if f.endswith(".json"):
+            with open(os.path.join(DIR, f)) as fh:
+                rec = json.load(fh)
+            out[rec["name"]] = rec
+    return out
+
+
+def write(rec: dict) -> None:
+    os.makedirs(DIR, mode=0o755, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=DIR, prefix=".tmp-")
+    with os.fdopen(fd, "w") as fh:
+        json.dump(rec, fh, indent=1, sort_keys=True)
+        fh.write("\n")
+    os.chmod(tmp, 0o644)
+    os.replace(tmp, os.path.join(DIR, rec["name"] + ".json"))
+
+
+def pools(specs: list[str]) -> dict[str, list[str]]:
+    out: dict[str, list[str]] = {}
+    for spec in specs or []:
+        kind, _, rng = spec.partition("=")
+        first, _, last = rng.partition("-")
+        a, b = ipaddress.IPv4Address(first), ipaddress.IPv4Address(last)
+        if b < a:
+            die(f"pool {spec}: last is before first", 2)
+        out[kind] = [str(ipaddress.IPv4Address(i)) for i in range(int(a), int(b) + 1)]
+    return out
+
+
+def allocate(a: argparse.Namespace) -> None:
+    if not NAME.match(a.name):
+        die(f"bad seat name {a.name!r}: lower-case letters, digits, hyphens, at most 26", 2)
+    if a.kind not in KINDS:
+        die(f"bad kind {a.kind!r}: one of {', '.join(KINDS)}", 2)
+    recs = records()
+    if a.name in recs:
+        rec = recs[a.name]
+        if rec["kind"] != a.kind:
+            die(f"{a.name} is already a {rec['kind']} seat, not {a.kind}")
+        print(json.dumps(rec, sort_keys=True))
+        return
+    others = recs.values()
+    used_slots = {r["slot"] for r in others}
+    used_addrs = {r["address"] for r in others}
+    if a.slot is not None:
+        slot = a.slot
+    elif a.kind == "prime":
+        slot = 0
+    else:
+        slot = next((s for s in range(1, SLOTS) if s not in used_slots), None)
+    if slot is None or not 0 <= slot < SLOTS:
+        die("no free PID slot on this host")
+    if slot in used_slots:
+        die(f"slot {slot} is taken")
+    if (slot == 0) != (a.kind == "prime"):
+        die("slot 0 is Prime's, and only Prime's")
+    if a.address:
+        address = a.address
+    else:
+        address = next((x for x in pools(a.pool).get(a.kind, []) if x not in used_addrs), None)
+    if not address:
+        die(f"no free address in the {a.kind} pool")
+    if address in used_addrs:
+        die(f"address {address} is taken")
+    rec = {"name": a.name, "kind": a.kind, "class": a.fence_class, "slot": slot,
+           "address": address, "unit": a.unit or f"{a.name}.service",
+           "desk": a.desk or a.name, "key": a.key or a.name, "avail": a.avail}
+    write(rec)
+    print(json.dumps(rec, sort_keys=True))
+
+
+def release(a: argparse.Namespace) -> None:
+    path = os.path.join(DIR, a.name + ".json")
+    if os.path.exists(path):
+        os.unlink(path)
+        print(f"released {a.name}")
+
+
+def main() -> None:
+    p = argparse.ArgumentParser(prog="ashigaru-seats")
+    sub = p.add_subparsers(dest="cmd", required=True)
+    al = sub.add_parser("allocate")
+    al.add_argument("--name", required=True)
+    al.add_argument("--kind", required=True)
+    al.add_argument("--class", dest="fence_class", default="-")
+    al.add_argument("--unit")
+    al.add_argument("--desk")
+    al.add_argument("--key")
+    al.add_argument("--avail", default="always", choices=("always", "scott-first"))
+    al.add_argument("--slot", type=int)
+    al.add_argument("--address")
+    al.add_argument("--pool", action="append")
+    rl = sub.add_parser("release")
+    rl.add_argument("--name", required=True)
+    sh = sub.add_parser("show")
+    sh.add_argument("--name", required=True)
+    sub.add_parser("list")
+    ts = sub.add_parser("tsv")
+    ts.add_argument("--host", required=True)
+    a = p.parse_args()
+    if a.cmd == "allocate":
+        allocate(a)
+    elif a.cmd == "release":
+        release(a)
+    elif a.cmd == "show":
+        rec = records().get(a.name)
+        if rec is None:
+            die(f"no seat {a.name}", 3)
+        print(json.dumps(rec, sort_keys=True))
+    elif a.cmd == "list":
+        print(json.dumps(sorted(records().values(), key=lambda r: r["slot"]), sort_keys=True))
+    elif a.cmd == "tsv":
+        print("# Generated by ashigaru-seats from /etc/ashigaru/seats. Do not edit.")
+        for r in sorted(records().values(), key=lambda r: r["slot"]):
+            if r["kind"] == "prime":
+                continue
+            print("\t".join([r["name"], a.host, "vertex" if r["kind"] == "vertex" else "max",
+                             r["class"], str(r["slot"]), r["address"], r["key"], r.get("avail", "always"), r["desk"]]))
+
+
+if __name__ == "__main__":
+    main()

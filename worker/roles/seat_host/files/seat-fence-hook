@@ -1,0 +1,154 @@
+#!/usr/bin/bash
+# seat-fence-hook: OCI createRuntime hook that readies each seat container
+# before its process runs (a1711, one container per seat). Installed
+# root-owned at /usr/local/libexec/ on Dolza and breetai (same file), beside seat-fence-load, and
+# named by /etc/containers/oci/hooks.d/seat-fence.json. Root-installed only:
+# there is no user-path variant.
+#
+# The hook file matches every container annotated
+# io.crunchtools.seat-fence=<class> (max, vertex; dmax, bmax, bvertex before the Worker), and
+# nothing else: Prime and every other container never meet it. At
+# createRuntime the seat's namespaces exist and its process does not run
+# yet, whoever starts it (the unit, `podman start`, `podman restart`). In
+# that window, in order:
+#
+#   0. namespaces: the seat must get a new PID namespace and a new netns of
+#      its own, made by the runtime for it (allowlist below), and new user,
+#      IPC and UTS namespaces too (not --userns/--ipc/--uts host, nor joined).
+#      Anything else would put the pid base or the fence into someone else's
+#      namespace, or share one with the host. And it must be the seat its
+#      labels say: a seat made by the Ashigaru Worker carries
+#      io.crunchtools.seat-name (its container name, which must match) and
+#      io.crunchtools.seat-slot (1-63, unique on the host: the registry
+#      allocates it). A seat from before the Worker carries only
+#      io.crunchtools.seat-index N (1-4) and must be named <class><N>.
+#   1. pid base: seed the seat's PID namespace's ns_last_pid so its pids
+#      count from a base of its own. Every seat has a PID namespace of its
+#      own but they share Claude Code's registry, which names a session by
+#      bare pid (README). The bases are spaced evenly across pid_max, 64
+#      slots each pid_max/64 wide: slot 0 is Prime (from 1), a Worker seat's
+#      is its seat-slot, and a pre-Worker seat's is N (max) or 4+N (vertex).
+#   2. fence: load the class's seat_fence into the seat's own netns.
+#   3. verify: that netns must hold exactly the class ruleset.
+#
+# Fails closed: any step failing exits non-zero, and crun refuses the
+# create. The runtime runs this as root in smccarty's rootless user
+# namespace (checked: uid=0, container_runtime_t), which owns the seat's
+# namespaces, so neither nft nor the ns_last_pid write needs `podman
+# unshare`. OCI state (pid, bundle) arrives on stdin.
+set -euo pipefail
+# The loader installed beside this script, in /usr/local/libexec. The
+# selftest's override counts only with SEAT_FENCE_SELFTEST=1 (and the hook
+# file's env is all a hook gets: the shipped one sets neither).
+# The name prefix lets the selftest's stand-ins (sfdmax1) be seats.
+# No HOME or XDG_RUNTIME_DIR needed: nothing here runs podman (the loader's
+# pid:N form uses nsenter and nft only).
+LOADER=$(dirname "$(readlink -f "$0")")/seat-fence-load NAME_PREFIX=
+if [[ ${SEAT_FENCE_SELFTEST:-} == 1 ]]; then
+    LOADER=${SEAT_FENCE_LOADER:-$LOADER} NAME_PREFIX=${SEAT_FENCE_NAME_PREFIX:-}
+fi
+
+refuse() {
+    echo "seat-fence-hook: REFUSING the seat: $*" >&2
+    logger -p user.err -t seat-fence -- "hook REFUSING a seat: $*" 2>/dev/null || true
+    exit 1
+}
+
+state=$(cat)
+out=$(python3 -I -c '
+import json, os, sys
+state = json.load(sys.stdin)
+cfg = json.load(open(state["bundle"] + "/config.json"))
+ann = {**cfg.get("annotations", {}), **state.get("annotations", {})}
+pid = int(state["pid"])
+ns = {n["type"]: n.get("path") for n in cfg["linux"]["namespaces"]}
+
+def netns_verdict():
+    """Allowlist: a network entry with no path, i.e. a netns the runtime makes
+    new for this container, and nothing else. That is what rootless podman
+    writes for a bridge network (checked, podman 5.8.4): crun creates the
+    netns, and podman wires it to the bridge after this stage, then binds it
+    at /run/user/<uid>/netns/netns-<uuid>. Host networking has no entry;
+    container:X and ns:<path> name an existing netns by path."""
+    if "network" not in ns:
+        return "no network namespace entry (host networking)"
+    if ns["network"]:
+        return "it joins an existing netns (%s)" % ns["network"]
+    # Belt: fresh means no other process is in it. Unreadable processes are
+    # not ours.
+    try:
+        inode = os.stat("/proc/%d/ns/net" % pid).st_ino
+    except OSError as e:
+        return "cannot read the seat'"'"'s own netns: %s" % e
+    for p in os.listdir("/proc"):
+        if not p.isdigit() or int(p) == pid:
+            continue
+        try:
+            if os.stat("/proc/%s/ns/net" % p).st_ino == inode:
+                return "its netns is shared with process %s" % p
+        except OSError:
+            pass
+    return "own"
+
+def name():
+    """The container name, from c/storage beside the bundle
+    (overlay-containers/<id>/userdata): the OCI config does not carry it.
+    A --rm container, which every quadlet seat is, is recorded in
+    volatile-containers.json, not containers.json (podman 5.8.4), so both."""
+    d = os.path.dirname(os.path.dirname(state["bundle"]))
+    names = []
+    for f in ("containers.json", "volatile-containers.json"):
+        try:
+            recs = json.load(open(os.path.join(d, f)))
+            names += [r.get("names") for r in recs if r.get("id") == state["id"]]
+        except FileNotFoundError:
+            continue
+        except (OSError, ValueError, KeyError, AttributeError):
+            return "-"
+    return names[0][0] if len(names) == 1 and isinstance(names[0], list) and len(names[0]) == 1 else "-"
+
+pidns = "own" if "pid" in ns and not ns["pid"] else "joined"
+shared = ",".join(t for t in ("user", "ipc", "uts") if t not in ns or ns[t]) or "-"
+print(ann.get("io.crunchtools.seat-fence", "-"), ann.get("io.crunchtools.seat-index", "-"),
+      ann.get("io.crunchtools.seat-slot", "-"), ann.get("io.crunchtools.seat-name", "-").replace(" ", "\x1f") or "-", pid, pidns,
+      shared, name().replace(" ", "\x1f") or "-", netns_verdict().replace(" ", "\x1f"))
+' <<<"$state" 2>&1) || refuse "cannot read the OCI state: ${out//$'\n'/ }"
+read -r class index sslot sname pid pidns shared name netns <<<"$out"
+netns=${netns//$'\x1f'/ } name=${name//$'\x1f'/ } sname=${sname//$'\x1f'/ }
+
+# No annotation: not a seat. The shipped hook file never matches one, but a
+# hook file that matches more (9e9db65's seat-fence-infra.json, should it
+# survive the cutover) must not stop Prime or any other container.
+[[ $class == - ]] && exit 0
+[[ $class =~ ^(max|vertex|dmax|bmax|bvertex)$ ]] || refuse "unknown class '$class'"
+[[ $pid =~ ^[1-9][0-9]*$ ]] || refuse "no container pid in the OCI state"
+[[ $pidns == own ]] || refuse "it joins a PID namespace it does not own"
+[[ $shared == - ]] || refuse "it shares the host's or another's $shared namespace (not its own)"
+[[ $netns == own ]] || refuse "$netns"
+if [[ $sslot != - ]]; then
+    # A Worker seat: its slot and name are its labels.
+    [[ $sslot =~ ^([1-9]|[1-5][0-9]|6[0-3])$ ]] || refuse "io.crunchtools.seat-slot '$sslot' is not 1-63"
+    [[ $sname =~ ^[a-z][a-z0-9-]{0,25}$ ]] || refuse "io.crunchtools.seat-name '$sname' is not a seat name"
+    [[ $name == "$NAME_PREFIX$sname" ]] || refuse "it is named '$name', not $NAME_PREFIX$sname as its seat-name says"
+    slot=$sslot
+else
+    [[ $index =~ ^[1-4]$ ]] || refuse "io.crunchtools.seat-index '$index' is not 1-4"
+    [[ $name == "$NAME_PREFIX$class$index" ]] || refuse "it is named '$name', not $NAME_PREFIX$class$index as its seat index says"
+    slot=$index; [[ $class == vertex || $class == bvertex ]] && slot=$((index + 4))
+fi
+
+# 1. The base: slot * pid_max/64. The write must come from a process inside
+#    the seat's PID namespace (ns_last_pid is per the writer's namespace),
+#    hence nsenter --pid, which forks. Read back from inside too: the
+#    seeding is proved, not assumed.
+max=$(cat /proc/sys/kernel/pid_max)
+base=$((slot * (max / 64)))
+got=$(nsenter --pid="/proc/$pid/ns/pid" -- sh -c "echo $base > /proc/sys/kernel/ns_last_pid && cat /proc/sys/kernel/ns_last_pid" 2>&1) || true
+if ! [[ $got =~ ^[0-9]+$ ]] || (( got < base || got >= base + 1000 )); then
+    refuse "could not seed the PID namespace at $base (${got//$'\n'/ })"
+fi
+
+# 2 and 3. The loader in the hook's mode (pid:<N>): the netns named by the
+# seat's pid, already root in the rootless user namespace.
+"$LOADER" "$class" load "pid:$pid" || refuse "the $class fence did not load"
+"$LOADER" "$class" --table "pid:$pid" || refuse "the $class fence is not exactly the class ruleset"

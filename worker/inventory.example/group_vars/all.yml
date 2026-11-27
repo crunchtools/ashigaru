@@ -1,0 +1,17 @@
+---
+ashigaru_url: https://ashigaru.example.com
+seat_image: quay.io/crunchtools/claude:latest
+
+# Where a seat's key is a login, by kind. `kinds` get `users` on the host;
+# `own_kinds` get `own_users` only on the host the seat runs on.
+seat_access_targets:
+  - {host: server1, users: [root], kinds: [max, vertex, prime]}
+  - {host: desk1, users: [root, alice], kinds: [vertex, prime], own_kinds: [max], own_users: [root]}
+
+# sshd lets root in by key from these addresses only.
+seat_root_from: [192.0.2.20]
+
+# Optional: the Prime seat's key, root on every seat host.
+# seat_prime_key: "ssh-ed25519 AAAA... desk1-prime"
+# seat_prime_from: 192.0.2.20
+# seat_prime_fingerprint: "SHA256:..."

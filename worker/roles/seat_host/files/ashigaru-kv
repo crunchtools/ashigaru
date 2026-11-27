@@ -1,0 +1,54 @@
+#!/usr/bin/bash
+# ashigaru-kv: a seat's secrets in this host's OpenBao (Ashigaru Worker).
+#
+#   ashigaru-kv put <service> <file>     the file's bytes from stdin
+#   ashigaru-kv has <service> <file>     exit 0 if it is stored
+#   ashigaru-kv delete <service>         every file of the service, metadata too
+#
+# The layout is srv-secrets@'s: kv <mount>/data/<prefix>/<service>/<file>
+# holding {"b64": <the file, base64>}, so srv-secrets@<service> lands it at
+# $XDG_RUNTIME_DIR/srv-secrets/<service>/<file>. Logs in as the host's
+# <prefix>-operator AppRole from ~/.config/openbao (tools.env names the
+# server, CA, mount and prefix). A value never reaches argv or stdout.
+set -euo pipefail
+env_file=${OPENBAO_TOOLS_ENV:-$HOME/.config/openbao/tools.env}
+# shellcheck disable=SC1090
+. "$env_file"
+: "${OPENBAO_ADDR:?}" "${OPENBAO_CREDDIR:?}" "${OPENBAO_KVMOUNT:?}" "${OPENBAO_PREFIX:?}"
+CA=${OPENBAO_CA:-$HOME/.config/openbao/tls/ca.pem}
+ROLE=${OPENBAO_ROLE_OPERATOR:-$OPENBAO_PREFIX-operator}
+cmd=${1:-} svc=${2:-} file=${3:-}
+die() { echo "ashigaru-kv: $*" >&2; exit 1; }
+[[ $svc =~ ^[a-z0-9][a-z0-9_.-]{0,62}$ ]] || die "bad service name '$svc'"
+[[ $cmd == delete || $file =~ ^[A-Za-z0-9][A-Za-z0-9_.-]{0,62}$ ]] || die "bad file name '$file'"
+
+tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
+jq -n --rawfile r "$OPENBAO_CREDDIR/$ROLE.role_id" --rawfile s "$OPENBAO_CREDDIR/$ROLE.secret_id" \
+    '{role_id: ($r | sub("\\s+$"; "")), secret_id: ($s | sub("\\s+$"; ""))}' \
+  | curl -sS --cacert "$CA" --max-time 30 -X PUT --data-binary @- "$OPENBAO_ADDR/v1/auth/approle/login" \
+  | jq -r '.auth.client_token // empty' > "$tmp/tok"
+[[ -s $tmp/tok ]] || die "login as $ROLE failed"
+printf 'header = "X-Vault-Token: %s"\n' "$(cat "$tmp/tok")" > "$tmp/curlrc"
+api() { curl -sS --cacert "$CA" --max-time 30 -K "$tmp/curlrc" "$@"; }
+base=$OPENBAO_ADDR/v1/$OPENBAO_KVMOUNT
+
+case $cmd in
+put)
+    base64 -w0 > "$tmp/b64"
+    [[ -s $tmp/b64 ]] || die "nothing on stdin"
+    jq -n --rawfile b "$tmp/b64" '{data: {b64: $b}}' \
+      | api -X POST --data-binary @- -o "$tmp/out" -w '%{http_code}' "$base/data/$OPENBAO_PREFIX/$svc/$file" > "$tmp/code"
+    [[ $(cat "$tmp/code") == 200 || $(cat "$tmp/code") == 204 ]] || die "write $svc/$file: HTTP $(cat "$tmp/code")"
+    ;;
+has)
+    code=$(api -o /dev/null -w '%{http_code}' "$base/data/$OPENBAO_PREFIX/$svc/$file")
+    [[ $code == 200 ]]
+    ;;
+delete)
+    for f in $(api -X LIST "$base/metadata/$OPENBAO_PREFIX/$svc" | jq -r '.data.keys[]? // empty'); do
+        [[ $f =~ ^[A-Za-z0-9][A-Za-z0-9_.-]*$ ]] || continue
+        api -X DELETE -o /dev/null "$base/metadata/$OPENBAO_PREFIX/$svc/$f"
+    done
+    ;;
+*) die "usage: ashigaru-kv put|has <service> <file> | delete <service>" ;;
+esac

@@ -1,0 +1,7 @@
+# {{ ansible_managed }}
+# Seat keys and Josui Prime are root by key on this host, from the seat
+# hosts' addresses only (ssh pins each key with from= as well). The CSB build
+# sets PermitRootLogin no; 01- so this is read before the distribution's
+# drop-ins: sshd keeps the first value it obtains.
+Match Address {{ seat_root_from | join(',') }}
+    PermitRootLogin prohibit-password

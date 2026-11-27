@@ -1,0 +1,13 @@
+# /etc/systemd/system/seat-audit-check.service on all four hosts (a1753, a1057).
+# The root half of check_seat_audit: auditctl -s and the heartbeat that proves
+# auditd still writes its log; the verdict goes to /var/lib/seat-audit/stalled,
+# which the unprivileged checks read (check_seat_fence on Dolza and breetai).
+# On gloval, which has no seat-fence check and whose Nagios agent can't see
+# these host files, a broken seat audit is also a failed unit, which the host's
+# failed-unit monitoring reports.
+[Unit]
+Description=Seat audit health (auditd recording, exec rule, backlog, heartbeat)
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/libexec/check_seat_audit

@@ -1,0 +1,81 @@
+#!/usr/bin/python3 -I
+"""ashigaru-grant: add or remove one seat's /32 in a gateway profile's
+client_egress source_networks (Ashigaru Worker).
+
+  ashigaru-grant add|remove --file profiles.yaml --profile P --source 10.0.0.5/32
+
+Edits only that profile's one `source_networks: [...]` line, so every other
+byte of the file (comments, order, anchors) is kept. Prints "changed" or
+"unchanged"; exit 1 if the profile or its line is not there, or if the file
+does not parse afterwards (when PyYAML is present), in which case nothing is
+written. The gateway reads the file at reload or start.
+"""
+import argparse
+import ipaddress
+import os
+import re
+import sys
+import tempfile
+
+
+def main() -> int:
+    p = argparse.ArgumentParser(prog="ashigaru-grant")
+    p.add_argument("op", choices=("add", "remove"))
+    p.add_argument("--file", required=True)
+    p.add_argument("--profile", required=True)
+    p.add_argument("--source", required=True)
+    a = p.parse_args()
+    src = str(ipaddress.IPv4Network(a.source))
+    if not re.fullmatch(r"[a-z0-9][a-z0-9-]*", a.profile):
+        print("ashigaru-grant: bad profile name", file=sys.stderr)
+        return 1
+    lines = open(a.file).read().split("\n")
+    head = re.compile(r"^(\s*)" + re.escape(a.profile) + r":\s*$")
+    start = next((i for i, l in enumerate(lines) if head.match(l)), None)
+    if start is None:
+        print(f"ashigaru-grant: no profile {a.profile}", file=sys.stderr)
+        return 1
+    indent = len(head.match(lines[start]).group(1))
+    target = None
+    for i in range(start + 1, len(lines)):
+        l = lines[i]
+        if l.strip() and not l.lstrip().startswith("#") and len(l) - len(l.lstrip()) <= indent:
+            break
+        if re.match(r"^\s*source_networks:\s*\[.*\]\s*$", l):
+            target = i
+            break
+    if target is None:
+        print(f"ashigaru-grant: {a.profile} has no one-line source_networks", file=sys.stderr)
+        return 1
+    m = re.match(r"^(\s*source_networks:\s*)\[(.*)\]\s*$", lines[target])
+    items = [x.strip() for x in m.group(2).split(",") if x.strip()]
+    if a.op == "add" and src not in items:
+        items.append(src)
+    elif a.op == "remove" and src in items:
+        items.remove(src)
+    else:
+        print("unchanged")
+        return 0
+    lines[target] = m.group(1) + "[" + ", ".join(items) + "]"
+    text = "\n".join(lines)
+    try:
+        import yaml  # noqa: PLC0415
+        yaml.safe_load(text)
+    except ImportError:
+        pass
+    except Exception as exc:  # noqa: BLE001
+        print(f"ashigaru-grant: the edit would not parse: {exc}", file=sys.stderr)
+        return 1
+    d = os.path.dirname(os.path.abspath(a.file))
+    fd, tmp = tempfile.mkstemp(dir=d, prefix=".grant-")
+    with os.fdopen(fd, "w") as fh:
+        fh.write(text)
+    st = os.stat(a.file)
+    os.chmod(tmp, st.st_mode & 0o7777)
+    os.replace(tmp, a.file)
+    print("changed")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

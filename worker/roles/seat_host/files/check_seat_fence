@@ -1,0 +1,161 @@
+#!/usr/bin/bash
+# check_seat_fence <host> -- is every seat of this host its own container,
+# and fenced (a1038, per container since a1711, per host since a1753)? A
+# Nagios plugin: one line, exit 0 OK / 1 WARNING / 2 CRITICAL / 3 UNKNOWN.
+# Runs as smccarty on Dolza and on breetai, from seat-fence-push.timer: they
+# have no NRPE agent, so the result reaches gloval's Nagios as a marker on
+# pCloud, the route Skills Sync dolza takes.
+#
+# <host> (dolza or breetai) is a fixed argument of the timer's unit, and the
+# seats are the rows of seats.tsv whose host column is that. Not the
+# environment, not hostname(1): one file serves both hosts, so the host cannot
+# be in it, and an argument in a unit file the host owner installs is
+# something a seat cannot steer. seats.tsv is read root-owned from
+# /usr/local/libexec like the loader (else ~/.local/libexec).
+# Dolza also has Prime (josui), whose PID namespace and netns must differ
+# from every seat's; breetai has no Prime, and that check is just not made.
+#
+# CRITICAL, because each one is a seat with a way out or a way into another:
+#   - a running seat's netns has no seat_fence, or one that is not exactly
+#     its class ruleset (seat-fence-load --table);
+#   - a seat runs in a pod;
+#   - two of Prime and the running seats share a PID namespace (one could
+#     read the other through /proc) or a netns (one would ride the other's
+#     fence, or none);
+#   - a container other than the seat holds a seat's address, and with it
+#     that seat's gateway grant, or cannot be inspected, so might;
+#   - the seat fence hook (or the conf that enables it) is missing;
+#   - seat audit is broken (audit-broken, from audit/check_seat_audit, without its
+#     root-only auditctl part).
+# WARNING: a running seat carries no HTTPS_PROXY (fenced, but cannot work),
+# or runs at an address other than its own (its grant does not match it).
+# CRITICAL too when an expected seat is not running, or podman cannot
+# inspect it (seat-down): all of Dolza's eight run. A seat of a scott-first
+# host (breetai, a laptop Scott uses first) that is not running is only a
+# WARNING. UNKNOWN when podman itself fails: then nothing here can be judged.
+set -uo pipefail
+
+out() { echo "SEAT FENCE $1 - $2"; exit "$3"; }
+HOST=${1:-}
+case $HOST in
+    dolza) PRIME=josui ;;
+    breetai) PRIME='' ;;
+    *) out UNKNOWN "usage: check_seat_fence <dolza|breetai>" 3 ;;
+esac
+NET=crunchtools LOADER=/usr/local/libexec/seat-fence-load TSV=/usr/local/libexec/seats.tsv
+[[ -x $LOADER ]] || LOADER=$HOME/.local/libexec/seat-fence-load
+[[ -r $TSV ]] || TSV=$HOME/.local/libexec/seats.tsv
+# The SEAT_FENCE_* overrides exist for the selftests only, and count only
+# with SEAT_FENCE_SELFTEST=1. SEAT_FENCE_SEATS is name:class:address[:avail].
+if [[ ${SEAT_FENCE_SELFTEST:-} == 1 ]]; then
+    TSV=${SEAT_FENCE_TSV:-$TSV} PRIME=${SEAT_FENCE_PRIME-$PRIME}
+    NET=${SEAT_FENCE_NET:-$NET} LOADER=${SEAT_FENCE_LOADER:-$LOADER}
+fi
+# name:class:address:avail for each seat of this host, from seats.tsv
+# (seat host billing prefix index address key avail).
+SEATS=$(awk -F'\t' -v h="$HOST" '$0 !~ /^#/ && $2 == h { printf "%s:%s:%s:%s ", $1, $4, $6, $8 }' "$TSV" 2>/dev/null)
+if [[ ${SEAT_FENCE_SELFTEST:-} == 1 ]]; then SEATS=${SEAT_FENCE_SEATS:-$SEATS}; fi
+[[ -n $SEATS ]] || out UNKNOWN "no seats for $HOST in $TSV" 3
+read -r _ class0 _ <<<"${SEATS//:/ }"
+
+# Nothing below means anything if podman itself cannot answer.
+if ! running_now=$(podman ps --format '{{.Names}}' 2>&1); then
+    out UNKNOWN "podman ps failed: ${running_now//$'\n'/ }" 3
+fi
+
+addr() { podman inspect -f "{{with index .NetworkSettings.Networks \"$NET\"}}{{.IPAddress}}{{end}}" "$1" 2>/dev/null; }
+pid_of() { podman inspect -f '{{.State.Pid}}' "$1" 2>/dev/null; }
+
+problems=() warnings=() fenced=() running=() ns_pid=() ns_net=()
+declare -A OWNER=()
+p=; [[ -z $PRIME ]] || p=$(pid_of "$PRIME")
+if [[ $p =~ ^[1-9][0-9]*$ ]]; then
+    ns_pid+=("$(readlink "/proc/$p/ns/pid") $PRIME")
+    ns_net+=("$(readlink "/proc/$p/ns/net") $PRIME")
+fi
+for s in $SEATS; do
+    IFS=: read -r name class want avail <<<"$s"
+    OWNER[$want]=$name
+    if ! p=$(podman inspect -f '{{.State.Pid}} {{if .Pod}}pod{{else}}-{{end}}' "$name" 2>&1); then
+        # A scott-first seat that was never created is just off; one that
+        # exists but cannot be inspected is still a problem.
+        ex=0; [[ $avail != scott-first ]] || { podman container exists "$name" >/dev/null 2>&1 || ex=$?; }
+        if [[ $ex == 1 ]]; then
+            warnings+=("$name is not running (scott-first)")
+        else
+            problems+=("$name: inspect failed: ${p//$'\n'/ }")
+        fi
+        continue
+    fi
+    read -r p pod <<<"$p"
+    if ! [[ $p =~ ^[1-9][0-9]*$ ]]; then
+        if [[ $avail == scott-first ]]; then warnings+=("$name is not running (scott-first)"); else problems+=("$name is not running"); fi
+        continue
+    fi
+    running+=("$name")
+    ns_pid+=("$(readlink "/proc/$p/ns/pid") $name")
+    ns_net+=("$(readlink "/proc/$p/ns/net") $name")
+    [[ $pod == pod ]] && problems+=("$name runs in a pod")
+    if t=$(bash "$LOADER" "$class" --table "$name" 2>/dev/null); then
+        fenced+=("$name")
+    elif [[ $t == missing* ]]; then
+        problems+=("$name runs WITHOUT seat_fence: it is unfenced")
+    else
+        problems+=("$name's seat_fence differs from the $class ruleset")
+    fi
+    got=$(addr "$name") || problems+=("$name: inspect failed (address)")
+    [[ $got == "$want" ]] || warnings+=("$name runs at ${got:-no address on $NET}, not its own $want")
+    # Captured first: grep -q on podman's pipe would SIGPIPE it under pipefail.
+    env=$(podman inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$name" 2>/dev/null) || problems+=("$name: inspect failed (env)")
+    grep -q '^HTTPS_PROXY=http' <<<"$env" || warnings+=("$name runs without HTTPS_PROXY (60-seat-fence.conf missing?)")
+done
+
+shared() {  # shared <what> <"inode name" ...>: names that share an inode
+    printf '%s\n' "${@:2}" | sort | awk -v what="$1" '
+        $1 == prev { dup[$1] = dup[$1] " " $2 } { if (!($1 in first)) first[$1] = $2; prev = $1 }
+        END { for (i in dup) printf "%s share a %s;", first[i] dup[i], what }'
+}
+# Nothing running (a laptop with every seat off) has nothing to share.
+if (( ${#ns_pid[@]} )); then
+    d=$(shared "PID namespace" "${ns_pid[@]}"); [[ -n $d ]] && problems+=("${d%;}")
+    d=$(shared netns "${ns_net[@]}"); [[ -n $d ]] && problems+=("${d%;}")
+fi
+
+# A seat's address carries its gateway grant: nobody else may hold it. A
+# container that cannot be inspected is not passed over: it might hold one.
+# Only one podman says is gone since podman ps (exit 1) holds nothing.
+while read -r c ip; do
+    if [[ $ip == '?' ]]; then
+        problems+=("$c: inspect failed, so it may hold a seat's address and gateway grant")
+    elif [[ -n $ip && -n ${OWNER[$ip]:-} && ${OWNER[$ip]} != "$c" ]]; then
+        problems+=("$c holds $ip, ${OWNER[$ip]}'s address and gateway grant")
+    fi
+done < <(while read -r c; do
+    [[ -n $c ]] || continue
+    if ip=$(addr "$c"); then echo "$c $ip"
+    else podman container exists "$c" >/dev/null 2>&1; [[ $? == 1 ]] || echo "$c ?"; fi
+done <<<"$running_now")
+
+# The hook fails open if missing: a podman start would then bring a seat up
+# unfenced, so its absence is CRITICAL even while all looks well.
+hk=$(bash "$LOADER" "$class0" --hooks 2>&1) || problems+=("seat fence hooks not installed, a seat restart would run unfenced: ${hk//$'\n'/; }")
+
+# Seat audit (audit/check_seat_audit): auditd active, and the root half's verdict
+# (seat-audit-check.timer) read from its flag: --no-auditctl. Root-owned copy only: a
+# Vertex seat is smccarty and could replace a user-path one. The selftests skip it
+# unless they name a checker (SEAT_FENCE_AUDIT, selftest only).
+AUDIT=/usr/local/libexec/check_seat_audit
+if [[ ${SEAT_FENCE_SELFTEST:-} == 1 ]]; then AUDIT=${SEAT_FENCE_AUDIT:-}; fi
+if [[ -n $AUDIT ]]; then
+    if [[ -x $AUDIT ]]; then
+        ao=$("$AUDIT" --no-auditctl 2>&1) || { ao=${ao#SEAT AUDIT CRITICAL - }; problems+=("${ao//$'\n'/ }"); }
+    else
+        problems+=("audit-broken: $AUDIT is not installed")
+    fi
+fi
+
+if (( ${#problems[@]} )); then
+    out CRITICAL "$(IFS=';'; echo "${problems[*]}")" 2
+fi
+(( ${#warnings[@]} )) && out WARNING "seats fenced, but $(IFS=';'; echo "${warnings[*]}")" 1
+out OK "one container per seat; seat_fence exact in ${fenced[*]:-no running seat}; ${#running[@]} seats proxied at their own addresses" 0

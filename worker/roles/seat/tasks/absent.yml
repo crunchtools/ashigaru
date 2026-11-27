@@ -1,0 +1,143 @@
+---
+# Remove one seat: every step of present.yml undone, in reverse. Its data
+# directories stay unless seat_purge_data is true. A seat never added, or
+# already removed, is a no-op.
+
+- name: Its record, if it has one
+  ansible.builtin.command:
+    argv: [/usr/local/libexec/ashigaru-seats, show, --name, "{{ seat_name }}"]
+  register: seat_show
+  changed_when: false
+  failed_when: seat_show.rc not in [0, 3]
+
+- name: The seat's record
+  ansible.builtin.set_fact:
+    seat: "{{ seat_show.stdout | from_json if seat_show.rc == 0 else {} }}"
+
+- name: Refuse to remove a seat that predates the Worker
+  ansible.builtin.assert:
+    that: seat.unit | default(seat_name ~ '.service') == seat_name ~ '.service'
+    fail_msg: "{{ seat_name }} runs as {{ seat.unit | default('?') }}, a template unit from before the Worker; remove it by hand"
+
+- name: Stop it
+  ansible.builtin.systemd_service:
+    name: "{{ seat_name }}.service"
+    state: stopped
+    scope: user
+  become_user: "{{ seat_user }}"
+  environment: "{{ seat_user_env }}"
+  failed_when: false
+
+- name: Its unit goes
+  ansible.builtin.file:
+    path: "/home/{{ seat_user }}/.config/containers/systemd/{{ seat_name }}.container"
+    state: absent
+  register: seat_unit_gone
+
+- name: systemd forgets it
+  ansible.builtin.systemd_service:
+    daemon_reload: true
+    scope: user
+  become_user: "{{ seat_user }}"
+  environment: "{{ seat_user_env }}"
+  when: seat_unit_gone is changed
+
+- name: Its shortcut goes
+  ansible.builtin.file:
+    path: "/home/{{ seat_user }}/.local/bin/{{ seat_name }}"
+    state: absent
+
+- name: Its address leaves its kind's egress grant
+  ansible.builtin.command:
+    argv: [/usr/local/libexec/ashigaru-grant, remove, --file, "{{ seat_gateway_profiles }}",
+           --profile, "{{ seat_kc.profile }}", --source, "{{ seat.address }}/32"]
+  become_user: "{{ seat_user }}"
+  register: seat_grant
+  changed_when: seat_grant.stdout == 'changed'
+  when: seat_kc.profile is defined and seat_kc.grant | default(true) and seat.address is defined
+
+- name: The gateway reads the grant
+  ansible.builtin.systemd_service:
+    name: "{{ seat_gateway_unit }}"
+    state: restarted
+    scope: user
+  become_user: "{{ seat_user }}"
+  environment: "{{ seat_user_env }}"
+  when: seat_grant is changed
+
+- name: Its key stops being a login on each target
+  ansible.builtin.lineinfile:
+    path: "{{ item[1] }}"
+    regexp: " {{ seat_key_comment | regex_escape }}$"
+    state: absent
+  delegate_to: "{{ item[0] }}"
+  loop: >-
+    {{ seat_access_targets | map(attribute='host')
+       | product(['/root/.ssh/authorized_keys'] + (seat_access_targets | map(attribute='users') | flatten | unique
+                 | reject('equalto', 'root') | map('regex_replace', '^(.*)$', '/home/\1/.ssh/authorized_keys') | list))
+       | list }}
+  loop_control:
+    label: "{{ item[1] }} on {{ item[0] }}"
+  failed_when: false
+
+- name: Its fingerprint leaves every audit map
+  ansible.builtin.lineinfile:
+    path: /etc/seat-audit/seat-keys
+    regexp: " {{ seat_name | regex_escape }}$"
+    state: absent
+  delegate_to: "{{ item }}"
+  loop: "{{ groups['seat_audit_hosts'] }}"
+
+- name: Its Desk keys
+  ansible.builtin.uri:
+    url: "{{ ashigaru_url }}/v1/identities/{{ seat_desk | urlencode }}/keys"
+    headers:
+      Authorization: "Bearer {{ lookup('ansible.builtin.file', ashigaru_admin_key_file) }}"
+    status_code: [200, 404]
+  delegate_to: localhost
+  become: false
+  no_log: true
+  register: seat_desk_keys
+
+- name: Revoke them (the Desk keeps the identity; it shows as missing)
+  ansible.builtin.uri:
+    url: "{{ ashigaru_url }}/v1/identities/{{ seat_desk | urlencode }}/keys/{{ item.key_id }}"
+    method: DELETE
+    headers:
+      Authorization: "Bearer {{ lookup('ansible.builtin.file', ashigaru_admin_key_file) }}"
+    status_code: [200, 204, 404]
+  delegate_to: localhost
+  become: false
+  no_log: true
+  loop: "{{ (seat_desk_keys.json | default([])) | selectattr('revoked_at', 'none') | list if seat_desk_keys.status == 200 else [] }}"
+  loop_control:
+    label: "{{ item.key_id }}"
+
+- name: Its secrets leave the vault
+  ansible.builtin.command:
+    argv: [/usr/local/libexec/ashigaru-kv, delete, "{{ item }}"]
+  become_user: "{{ seat_user }}"
+  environment: "{{ seat_user_env }}"
+  loop: ["ssh-{{ seat_name }}", "ashigaru-{{ seat_name }}"]
+  changed_when: true
+
+- name: Its data, only when asked
+  ansible.builtin.command:
+    argv: [podman, unshare, rm, -rf, "{{ seat_dir }}"]
+  become_user: "{{ seat_user }}"
+  environment: "{{ seat_user_env }}"
+  when: seat_purge_data | bool
+  changed_when: true
+
+- name: Its record and public key go
+  ansible.builtin.file:
+    path: "/etc/ashigaru/seats/{{ seat_name }}.{{ item }}"
+    state: absent
+  loop: [json, pub]
+
+- name: The fence check's seat list follows the registry
+  ansible.builtin.shell: >-
+    /usr/local/libexec/ashigaru-seats tsv --host {{ inventory_hostname }} > /usr/local/libexec/seats.tsv.new
+    && mv /usr/local/libexec/seats.tsv.new /usr/local/libexec/seats.tsv
+  when: seat_registry_owns_tsv | default(false)
+  changed_when: true

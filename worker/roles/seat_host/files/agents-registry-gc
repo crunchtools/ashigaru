@@ -1,0 +1,133 @@
+#!/usr/bin/bash
+# agents-registry-gc <container> <pre|post>: keep Claude Code's shared peer
+# registry clean (a1038; one GC domain per container since a1711). Installed
+# at ~/.local/libexec/agents-registry-gc on Dolza and breetai (a1753).
+#
+# On breetai there is no Prime: bmax1-2 and bvertex1-2 share a registry of
+# their own (~/Projects/breetai-services/agents, assumed: confirm against the
+# live vertex@.container) in the same way, and the rest of this describes Dolza.
+#
+# Prime (josui), dmax1-4 and vertex1-4 are nine containers with nine PID
+# namespaces, sharing one registry (agents/sessions, mounted as
+# ~/.claude/sessions) and one socket directory (agents/run/cc-socks), so
+# Prime and the seats still see and message each other. Claude Code tags each
+# record with its pidDomain ("linux:<machine-id>:pid:[<pid-ns inode>]") and
+# sweeps only dead records of its OWN domain; a record from another domain
+# counts as live. A restarted container gets a new PID namespace, so nobody
+# would ever sweep what its last run left behind. Each container is its own
+# GC domain:
+#   pre   (its unit's ExecStartPre, the container is down): delete the
+#         records, keys and sockets whose pidDomain is the one this container
+#         had last time;
+#   post  (its unit's ExecStartPost): remember this run's pidDomain.
+# Both run with "-" in the units: housekeeping never keeps a container down.
+# A failed post, or a start that bypassed the unit (`podman restart`), only
+# means that run's records outlive it: their sockets are dead, so ListAgents
+# does not show them, and the seat's next run, counting from the same pid
+# base, overwrites them by name.
+set -euo pipefail
+name=${1:?container name} phase=${2:?pre or post} dir=${3:-}
+if [[ -n $dir ]]; then
+    # A seat made by the Ashigaru Worker: any seat name, and its unit names
+    # the shared registry directory.
+    [[ $name =~ ^[a-z][a-z0-9-]{0,25}$ ]] || { echo "agents-registry-gc: bad seat name $name" >&2; exit 2; }
+    [[ $dir == /* && -d $dir ]] || { echo "agents-registry-gc: no registry directory $dir" >&2; exit 2; }
+    base=$dir target=$name
+else
+    # A seat from before the Worker: the name says which host's registry, b* is breetai's.
+    [[ $name =~ ^(josui|dmax[1-4]|vertex[1-4]|bmax[1-2]|bvertex[1-2])$ ]] || { echo "agents-registry-gc: unknown container $name" >&2; exit 2; }
+    base=$HOME/Projects/dolza-services/agents target=$name
+    [[ $name == b* ]] && base=$HOME/Projects/breetai-services/agents
+fi
+# AGENTS_DIR and AGENTS_GC_TARGET exist for the selftest only, and count only
+# with SEAT_FENCE_SELFTEST=1.
+if [[ ${SEAT_FENCE_SELFTEST:-} == 1 ]]; then base=${AGENTS_DIR:-$base} target=${AGENTS_GC_TARGET:-$target}; fi
+sessions=$base/sessions socks=$base/run/cc-socks state=$base/run/pidns.$name
+mkdir -p "$sessions" "$socks"
+
+case $phase in
+    post)
+        pid=$(podman inspect -f '{{.State.Pid}}' "$target")
+        ns=$(readlink "/proc/$pid/ns/pid")
+        printf 'linux:%s:%s\n' "$(tr -d '[:space:]' < "$base/machine-id")" "$ns" > "$state.tmp"
+        mv "$state.tmp" "$state"
+        echo "agents-registry-gc: $name is $(cat "$state")"
+        ;;
+    pre)
+        [[ -s $state ]] || { echo "agents-registry-gc: no previous domain for $name, nothing to clear"; exit 0; }
+        old=$(cat "$state")
+        # A new PID namespace can reuse a freed one's inode, so the domain this
+        # container had last time may belong to another container now. Then
+        # those are live records: clear nothing.
+        for pid in $(podman ps -q | xargs -r podman inspect -f '{{.State.Pid}}' 2>/dev/null); do
+            if [[ $pid =~ ^[1-9][0-9]*$ && $(readlink "/proc/$pid/ns/pid" 2>/dev/null) == "${old#linux:*:}" ]]; then
+                echo "agents-registry-gc: $old is a running container's now, nothing to clear"
+                exit 0
+            fi
+        done
+        python3 -I - "$sessions" "$socks" "$old" <<'PY'
+import json, os, re, stat, sys, syslog
+sessions, socks, old = sys.argv[1:4]
+syslog.openlog("agents-registry-gc")
+
+def warn(msg):
+    # Every container can write here, so a bad record is expected, never fatal.
+    print(f"agents-registry-gc: warning: {msg}", file=sys.stderr)
+    syslog.syslog(syslog.LOG_WARNING, msg)
+
+def unlink_if(path, kinds):
+    """Remove path only if it is (not through a link) one of kinds."""
+    try:
+        st = os.lstat(path)
+    except FileNotFoundError:
+        return
+    if not any(k(st.st_mode) for k in kinds):
+        warn(f"left {path}: not a {'/'.join(k.__name__[2:].lower() for k in kinds)}")
+        return
+    os.unlink(path)
+
+def one(name):
+    """Clear one record if it is of the old domain. True when cleared."""
+    path = os.path.join(sessions, name)
+    # Open without following a link and without blocking, then insist on a
+    # small regular file: a FIFO or a link planted under a record's name must
+    # not hang or steer this, which runs before Prime's start.
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    except OSError as e:
+        warn(f"skipped {name}: {e.strerror}")
+        return False
+    with os.fdopen(fd, "rb") as f:
+        st = os.fstat(f.fileno())
+        if not stat.S_ISREG(st.st_mode) or st.st_size > 1 << 20:
+            warn(f"skipped {name}: not a small regular file")
+            return False
+        rec = json.loads(f.read())
+    if not isinstance(rec, dict) or rec.get("pidDomain") != old:
+        return False
+    sock = rec.get("messagingSocketPath")
+    # Only a socket in the shared directory, named as Claude Code names them.
+    if isinstance(sock, str) and os.path.dirname(sock) == "/run/agents/cc-socks" \
+            and re.fullmatch(r"\d+(-[0-9a-f]{8})?\.sock", os.path.basename(sock)):
+        unlink_if(os.path.join(socks, os.path.basename(sock)), (stat.S_ISSOCK, stat.S_ISREG))
+    unlink_if(path, (stat.S_ISREG,))
+    return True
+
+gone = 0
+try:
+    names = os.listdir(sessions)
+except OSError as e:
+    warn(f"cannot list {sessions}: {e.strerror}")
+    names = []
+for name in names:
+    if not (re.fullmatch(r"\d+\.json", name) or re.fullmatch(r"\d+\.[0-9a-f]{64}\.key", name)):
+        continue
+    try:
+        gone += one(name)
+    except (Exception, RecursionError) as e:  # bad types, deep JSON, a dir named .sock: next record
+        warn(f"skipped {name}: {type(e).__name__}: {e}")
+print(f"agents-registry-gc: cleared {gone} record(s) of {old}")
+PY
+        ;;
+    *) echo "usage: $0 <container> <pre|post>" >&2; exit 2 ;;
+esac

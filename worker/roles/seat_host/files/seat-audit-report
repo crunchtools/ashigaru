@@ -1,0 +1,155 @@
+#!/usr/bin/python3 -I
+"""seat-audit-report: what each seat (or any key) ran over ssh, from stock audit records.
+
+    seat-audit-report [--seat NAME] [--since WHEN] [--map FILE] [FILE ...]
+
+No tagging happens at login (a1057). sshd writes CRYPTO_KEY_USER
+op=negotiate kind=auth-key fp=SHA256:<hex> for the key it accepted, pid=<sshd
+pid>; the LOGIN record from that pid gives the audit session id; every exec
+caught by the seat-exec rule carries that session id. This joins the three,
+and names the key through the map (/etc/seat-audit/seat-keys, from mkmap). A
+key not in the map is shown by its fingerprint.
+
+FILE is a raw audit log (default: /var/log/audit/audit.log and its rotations,
+oldest first) or a collector file (/var/log/seat-audit/<peer>/seat-audit.log),
+whose syslog lines may split one record over several. WHEN is anything
+`date -d` reads ("today", "1 hour ago", "2026-11-27 09:00").
+"""
+import argparse, base64, glob, os, re, subprocess, sys, time
+
+REC = re.compile(r'type=(\S+) msg=audit\((\d+)\.\d+:(\d+)\): ?(.*)')
+CTRL = re.compile(r'[\x00-\x1f\x7f]')
+FIELD = re.compile(r'(?:^|(?<=\s))([\w-]+)=("[^"]*"|\'[^\']*\'|\S+)')
+
+
+def fields(body):
+    """key=value pairs; a quoted msg='...' (where sshd puts fp= and addr=) is read too."""
+    out = {}
+    for k, v in FIELD.findall(body):
+        v = v.strip('"\'')
+        if k == 'msg' and '=' in v:
+            for k2, v2 in fields(v).items():
+                out.setdefault(k2, v2)
+        else:
+            out.setdefault(k, v)
+    return out
+
+
+def records(path):
+    """(type, epoch, serial, body) per record; collector continuation lines rejoined."""
+    cur = None
+    with open(path, errors='replace') as f:
+        for line in f:
+            line = line.rstrip('\n')
+            i = line.find('type=')
+            j = line.find(' audispd ')
+            if j >= 0:  # collector: "<ts> <peer> <host> audispd <text>"
+                text = line[j + 9:]
+                if not text.startswith('type=') and cur is not None:
+                    cur += text
+                    continue
+            elif i < 0:
+                continue
+            else:
+                text = line[i:]
+            if cur is not None:
+                yield cur
+            cur = text
+    if cur is not None:
+        yield cur
+
+
+def hexfp_to_b64(h):
+    try:
+        raw = bytes.fromhex(h.removeprefix('SHA256:').replace(':', ''))
+    except ValueError:
+        return None
+    return 'SHA256:' + base64.b64encode(raw).decode().rstrip('=') if len(raw) == 32 else None
+
+
+def argv(f):
+    n = int(f.get('argc', '0') or 0)
+    out = []
+    for i in range(n):
+        a = f.get('a%d' % i, '')
+        if re.fullmatch(r'[0-9A-F]+', a) and len(a) % 2 == 0:  # auditd hex-encodes odd arguments
+            try:
+                a = bytes.fromhex(a).decode(errors='replace')
+            except ValueError:
+                pass
+        out.append(a)
+    return ' '.join(out)
+
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__.split('\n')[0])
+    ap.add_argument('--seat', help='a seat name from the map, or a SHA256: fingerprint')
+    ap.add_argument('--since', help='only commands at or after this time (date -d syntax)')
+    ap.add_argument('--map', default='/etc/seat-audit/seat-keys')
+    ap.add_argument('files', nargs='*')
+    a = ap.parse_args()
+
+    names = {}
+    try:
+        for line in open(a.map):
+            p = line.split()
+            if len(p) == 2 and p[0].startswith('SHA256:'):
+                names[p[0]] = p[1]
+    except OSError as e:
+        print('seat-audit-report: no map (%s): keys shown by fingerprint' % e, file=sys.stderr)
+    since = 0
+    if a.since:
+        r = subprocess.run(['date', '-d', a.since, '+%s'], capture_output=True, text=True)
+        if r.returncode:
+            sys.exit('seat-audit-report: cannot read --since %r' % a.since)
+        since = int(r.stdout)
+    files = a.files or sorted(glob.glob('/var/log/audit/audit.log*'),
+                              key=lambda p: -int(p.rsplit('.', 1)[1]) if p[-1].isdigit() else 0)
+
+    pid_fp, ses_who, ses_from = {}, {}, {}
+    pending = {}  # serial -> [epoch, ses, exe, cwd, argv]
+
+    def flush(serial):
+        e = pending.pop(serial, None)
+        if not e or e[0] < since or e[1] not in ses_who:
+            return
+        who = ses_who[e[1]]
+        label = names.get(who, who)
+        if a.seat and a.seat not in (label, who):
+            return
+        cmd = CTRL.sub(lambda c: '\\x%02x' % ord(c.group()), e[4] or e[2])
+        print('%s  %-9s ses=%-6s %-15s %s' % (time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(e[0])),
+              label, e[1], ses_from.get(e[1], '?'), cmd))
+
+    for path in files:
+        for text in records(path):
+            m = REC.match(text)
+            if not m:
+                continue
+            typ, epoch, serial, body = m.group(1), int(m.group(2)), m.group(3), m.group(4)
+            f = fields(body)
+            if typ == 'CRYPTO_KEY_USER' and 'op=negotiate' in body and 'kind=auth-key' in body:
+                fp = hexfp_to_b64(f.get('fp', ''))
+                if fp:
+                    pid_fp[f.get('pid')] = fp
+            elif typ == 'LOGIN' and f.get('pid') in pid_fp:
+                ses_who[f.get('ses')] = pid_fp.pop(f.get('pid'))
+            elif typ == 'USER_LOGIN' and f.get('ses') in ses_who:
+                ses_from.setdefault(f['ses'], f.get('addr', '?'))
+            elif typ == 'SYSCALL' and f.get('key') == 'seat-exec':
+                for s in [s for s in pending if s != serial]:
+                    flush(s)
+                pending[serial] = [epoch, f.get('ses'), f.get('exe', ''), '', '']
+            elif typ == 'EXECVE' and serial in pending:
+                pending[serial][4] = argv(f)
+            elif typ == 'PROCTITLE' and serial in pending:
+                flush(serial)
+    for s in list(pending):
+        flush(s)
+
+
+if __name__ == '__main__':
+    try:
+        main()
+    except BrokenPipeError:
+        os._exit(0)

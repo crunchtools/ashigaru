@@ -1,0 +1,23 @@
+# Seat audit: every program a logged-in user runs on this host, the same on
+# RHEL and Fedora. Which seat it was is not tagged here: sshd's own audit
+# record (CRYPTO_KEY_USER kind=auth-key fp=...) names the key of each login,
+# its LOGIN record gives the session id, and every exec carries that id.
+# audit/seat-audit-report joins them, after the fact.
+#
+# Fedora's audit.rules sets no backlog (the kernel's 64): a burst then blocks
+# every process that writes an audit record, systemd included. RHEL's sets
+# 8192; set it here so both agree. No `-e 2`: rules stay changeable.
+-b 8192
+# Login sessions only (auid set), and not inside containers: a rootless
+# container started from a login session carries its auid, and on Dolza the
+# seats' own work would bury the log (about 860 execs a minute, a1057).
+-a always,exit -F arch=b64 -S execve,execveat -F auid!=unset -F subj_type!=spc_t -F subj_type!=container_t -k seat-exec
+-a always,exit -F arch=b32 -S execve,execveat -F auid!=unset -F subj_type!=spc_t -F subj_type!=container_t -k seat-exec
+# Changes to how logins and audit are set up. Every path must exist when
+# augenrules runs, or the load stops at the first missing one.
+-w /etc/seat-audit -p wa -k seat-audit-config
+-w /etc/pam.d/sshd -p wa -k seat-audit-config
+-w /etc/ssh/sshd_config -p wa -k seat-audit-config
+-w /etc/ssh/sshd_config.d -p wa -k seat-audit-config
+-w /etc/audit/rules.d -p wa -k seat-audit-config
+-w /etc/audit/plugins.d -p wa -k seat-audit-config

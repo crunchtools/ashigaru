@@ -1,0 +1,45 @@
+---
+# Record the seats a host ran before the Worker (template units such as
+# dmax@1) in its registry, so new seats never take their slots or addresses
+# and the fence check reads one list. Writes no unit and restarts nothing.
+#
+#   ansible-playbook -i <inventory> playbooks/adopt.yml [--limit <host>]
+#
+# Each host's `seat_legacy` lists them: name, kind, class, slot, address,
+# unit, desk, key, and the controller path of the public key.
+- name: Adopt the seats from before the Worker
+  hosts: seat_hosts
+  become: true
+  gather_facts: false
+  tasks:
+    - name: Record each
+      ansible.builtin.command:
+        argv: [/usr/local/libexec/ashigaru-seats, allocate, --name, "{{ item.name }}", --kind, "{{ item.kind }}",
+               --class, "{{ item.class | default('-') }}", --slot, "{{ item.slot }}", --address, "{{ item.address }}",
+               --unit, "{{ item.unit }}", --desk, "{{ item.desk }}", --key, "{{ item.key }}",
+               --avail, "{{ seat_avail | default('always') }}"]
+      loop: "{{ seat_legacy | default([]) }}"
+      loop_control:
+        label: "{{ item.name }}"
+      register: adopt_out
+      changed_when: false
+
+    - name: Each one's public key beside its record
+      ansible.builtin.copy:
+        src: "{{ item.pubkey }}"
+        dest: "/etc/ashigaru/seats/{{ item.name }}.pub"
+        owner: root
+        group: root
+        mode: "0644"
+      loop: "{{ seat_legacy | default([]) }}"
+      loop_control:
+        label: "{{ item.name }}"
+      when: item.pubkey is defined
+
+    - name: The fence check's seat list, from the registry from now on
+      ansible.builtin.shell: >-
+        /usr/local/libexec/ashigaru-seats tsv --host {{ inventory_hostname }} > /usr/local/libexec/seats.tsv.new
+        && mv /usr/local/libexec/seats.tsv.new /usr/local/libexec/seats.tsv
+        && install -o {{ seat_user }} -g {{ seat_user }} -m 0644 /usr/local/libexec/seats.tsv /home/{{ seat_user }}/.local/libexec/seats.tsv
+      changed_when: true
+      when: seat_registry_owns_tsv | default(false)

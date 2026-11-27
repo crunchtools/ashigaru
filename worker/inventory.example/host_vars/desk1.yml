@@ -1,0 +1,58 @@
+---
+seat_user: alice
+seat_network: seats
+seat_gateway: 198.51.100.55
+seat_gateway_unit: trentina.service
+seat_gateway_profiles: /home/alice/services/trentina/live/profiles.yaml
+seat_services_dir: /home/alice/services
+seat_agents_dir: /home/alice/services/agents
+seat_identity_dir: /home/alice/services/agents/identity
+seat_skills_dir: /home/alice/services/skills
+seat_ssh_config_dir: /home/alice/services/agents-ssh
+seat_shortcut_script: /usr/local/libexec/ashigaru-seat-attach
+# always: any seat may be picked; scott-first: the host's owner comes first.
+seat_avail: always
+
+# Addresses new seats take, per kind, on seat_network.
+seat_pools:
+  max: 198.51.100.60-198.51.100.79
+  vertex: 198.51.100.40-198.51.100.59
+  prime: 198.51.100.20-198.51.100.29
+
+# The source address each target sees this host's seats arrive from.
+seat_ssh_from:
+  server1: 192.0.2.20
+  desk1: 192.0.2.20
+
+# The fence: "address . port" pairs a seat of each billing may ssh to.
+seat_fence_ssh:
+  max: ["192.0.2.1 . 22", "192.0.2.20 . 22"]
+  vertex: ["192.0.2.1 . 22", "192.0.2.20 . 22"]
+
+# What each kind is. profile: its gateway profile (the seat's address joins its
+# egress grant; grant: false skips that). env_files are under
+# %t/srv-secrets; secret_services are srv-secrets@ units it waits on.
+seat_kinds:
+  max:
+    class: max
+    profile: desk1-max
+    lane: max
+    env_files: [max/max.env]
+    secret_services: [max]
+  vertex:
+    class: vertex
+    profile: desk1-vertex
+    lane: vertex
+    env_files: [vertex/vertex.env]
+    secret_services: [vertex]
+    env:
+      CLAUDE_CODE_USE_VERTEX: 1
+      CLOUD_ML_REGION: global
+      ANTHROPIC_VERTEX_PROJECT_ID: example-project
+      GOOGLE_APPLICATION_CREDENTIALS: /etc/gcloud/adc.json
+    volumes:
+      - "%h/.config/gcloud/application_default_credentials.json:/etc/gcloud/adc.json:ro"
+  prime:
+    profile: prime
+    env_files: [prime/prime.env]
+    secret_services: [prime]
