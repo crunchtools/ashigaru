@@ -1,0 +1,27 @@
+---
+# The host's local Trentina gateway: one profile per seat kind, each with its
+# own bearer token, and the egress proxy every fenced seat goes out through.
+# Pinned, never :latest, so a restart cannot pull a future bad build.
+gateway_image: quay.io/crunchtools/trentina:6.32.0
+gateway_dir: "{{ seat_services_dir }}/trentina"
+# The hosts a seat may reach through the egress proxy.
+gateway_egress_hosts:
+  - quay.io
+  - cdn.quay.io
+  - cdn01.quay.io
+  - cdn02.quay.io
+  - cdn03.quay.io
+  - registry.redhat.io
+  - registry.access.redhat.com
+  - registry.fedoraproject.org
+  - cdn.registry.fedoraproject.org
+  - pypi.org
+  - files.pythonhosted.org
+  - registry.npmjs.org
+  - codeload.github.com
+  - github.com
+  - api.anthropic.com
+  - claude.ai
+  - claude.com
+  - platform.claude.com
+  - bridge.claudeusercontent.com

@@ -1,0 +1,231 @@
+---
+# This host's OpenBao, from nothing: TLS, a static seal key, the server,
+# initialisation, then kv, AppRole, policies and the four AppRoles the host's
+# tools log in as. Every step is skipped where its result already exists, so
+# on a host that has a store this changes nothing and never re-initialises.
+
+- name: Packages OpenBao and its tools need
+  ansible.builtin.dnf:
+    name: "{{ openbao_packages }}"
+    state: present
+
+- name: The seat user's uid
+  ansible.builtin.getent:
+    database: passwd
+    key: "{{ seat_user }}"
+
+- name: Values the steps use
+  ansible.builtin.set_fact:
+    openbao_creddir: "/home/{{ seat_user }}/.config/openbao"
+    openbao_user_env:
+      XDG_RUNTIME_DIR: "/run/user/{{ ansible_facts.getent_passwd[seat_user][1] }}"
+      DBUS_SESSION_BUS_ADDRESS: "unix:path=/run/user/{{ ansible_facts.getent_passwd[seat_user][1] }}/bus"
+
+- name: The seat user lingers, so its units run without a login
+  ansible.builtin.command:
+    argv: [loginctl, enable-linger, "{{ seat_user }}"]
+    creates: "/var/lib/systemd/linger/{{ seat_user }}"
+
+- name: Wait for its user manager
+  ansible.builtin.wait_for:
+    path: "{{ openbao_user_env.XDG_RUNTIME_DIR }}/bus"
+    timeout: 60
+
+- name: Directories
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: "{{ seat_user }}"
+    group: "{{ seat_user }}"
+    mode: "{{ item.mode }}"
+  loop:
+    - {path: "/home/{{ seat_user }}/.config", mode: "0755"}
+    - {path: "{{ openbao_creddir }}", mode: "0700"}
+    - {path: "{{ openbao_creddir }}/tls", mode: "0700"}
+    - {path: "/home/{{ seat_user }}/.config/containers/systemd", mode: "0755"}
+    - {path: "/home/{{ seat_user }}/.config/systemd/user", mode: "0755"}
+    - {path: "{{ openbao_dir }}", mode: "0755"}
+    - {path: "{{ openbao_dir }}/config", mode: "0755"}
+    - {path: "{{ openbao_dir }}/data", mode: "0700"}
+    # The audit device is enabled at init and refuses a missing directory.
+    - {path: "{{ openbao_dir }}/data/audit", mode: "0700"}
+  loop_control:
+    label: "{{ item.path }}"
+
+- name: A CA and a server certificate for 127.0.0.1, made here, never copied
+  ansible.builtin.shell: |
+    set -euo pipefail
+    umask 077
+    cd "$D"
+    openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -days 3650 \
+      -subj "/CN=$H OpenBao CA" -addext "basicConstraints=critical,CA:TRUE" \
+      -addext "keyUsage=critical,keyCertSign,cRLSign" -keyout ca.key -out ca.pem 2>/dev/null
+    openssl req -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -subj "/CN=127.0.0.1" \
+      -keyout server.key -out server.csr 2>/dev/null
+    printf '%s\n' subjectAltName=IP:127.0.0.1,DNS:localhost basicConstraints=critical,CA:FALSE \
+      keyUsage=critical,digitalSignature extendedKeyUsage=serverAuth \
+      subjectKeyIdentifier=hash authorityKeyIdentifier=keyid > ext
+    openssl x509 -req -in server.csr -CA ca.pem -CAkey ca.key -CAcreateserial -days 3650 \
+      -extfile ext -out server.pem 2>/dev/null
+    rm -f server.csr ext ca.srl
+    chmod 0644 ca.pem server.pem
+  args:
+    executable: /usr/bin/bash
+    creates: "{{ openbao_creddir }}/tls/server.pem"
+  environment:
+    D: "{{ openbao_creddir }}/tls"
+    H: "{{ inventory_hostname }}"
+  become_user: "{{ seat_user }}"
+
+- name: The static seal key, 32 random bytes that never leave this host
+  ansible.builtin.shell: umask 377 && head -c 32 /dev/urandom > unseal.key
+  args:
+    chdir: "{{ openbao_creddir }}"
+    creates: "{{ openbao_creddir }}/unseal.key"
+  become_user: "{{ seat_user }}"
+
+- name: The seal key's id, from the day it was made
+  ansible.builtin.stat:
+    path: "{{ openbao_creddir }}/unseal.key"
+  register: openbao_seal_stat
+
+- name: Its config
+  ansible.builtin.template:
+    src: openbao.hcl.j2
+    dest: "{{ openbao_dir }}/config/openbao.hcl"
+    owner: "{{ seat_user }}"
+    group: "{{ seat_user }}"
+    mode: "0644"
+    force: false
+  vars:
+    openbao_seal_key_id: "{{ '%Y%m%d' | strftime(openbao_seal_stat.stat.mtime) }}-1"
+
+- name: Its unit, the srv-secrets@ template and tools.env (never overwritten)
+  ansible.builtin.template:
+    src: "{{ item.src }}"
+    dest: "{{ item.dest }}"
+    owner: "{{ seat_user }}"
+    group: "{{ seat_user }}"
+    mode: "0644"
+    force: false
+  loop:
+    - {src: openbao.container.j2, dest: "/home/{{ seat_user }}/.config/containers/systemd/openbao.container"}
+    - {src: srv-secrets@.service.j2, dest: "/home/{{ seat_user }}/.config/systemd/user/srv-secrets@.service"}
+    - {src: tools.env.j2, dest: "{{ openbao_creddir }}/tools.env"}
+  loop_control:
+    label: "{{ item.dest | basename }}"
+
+- name: The host tools, extracted from the image (srv-secrets, bao, baoctl ...)
+  ansible.builtin.command:
+    argv: [podman, run, --rm, --user, "0:0", --security-opt, label=disable,
+           -v, "{{ openbao_dir }}/config:/out", --entrypoint, openbao-install-host,
+           "{{ openbao_image }}", /out]
+    creates: "{{ openbao_dir }}/config/srv-secrets"
+  become_user: "{{ seat_user }}"
+  environment: "{{ openbao_user_env }}"
+
+- name: The files the container reads, labelled for it as Dolza's are (no :Z, which would relabel the directory)
+  ansible.builtin.file:
+    path: "{{ item }}"
+    setype: container_file_t
+  loop:
+    - "{{ openbao_dir }}/config/openbao.hcl"
+    - "{{ openbao_creddir }}/unseal.key"
+    - "{{ openbao_creddir }}/tls/server.pem"
+    - "{{ openbao_creddir }}/tls/server.key"
+
+- name: The helper that configures a new store
+  ansible.builtin.copy:
+    src: openbao-configure
+    dest: /usr/local/libexec/openbao-configure
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Start it (the unit waits for 200, which a new store reaches once initialised)
+  ansible.builtin.systemd_service:
+    name: openbao.service
+    state: started
+    daemon_reload: true
+    scope: user
+    no_block: true
+  become_user: "{{ seat_user }}"
+  environment: "{{ openbao_user_env }}"
+
+- name: It answers
+  ansible.builtin.uri:
+    url: https://127.0.0.1:8200/v1/sys/health
+    ca_path: "{{ openbao_creddir }}/tls/ca.pem"
+    status_code: [200, 429, 472, 473, 501, 503]
+  register: openbao_health
+  until: openbao_health.status != -1
+  retries: 60
+  delay: 2
+
+- name: Initialise it, once; the recovery key and root token stay 0600 here
+  ansible.builtin.shell: |
+    set -euo pipefail
+    umask 077
+    curl -sS --fail --cacert tls/ca.pem -X PUT -d '{"recovery_shares":1,"recovery_threshold":1}' \
+      https://127.0.0.1:8200/v1/sys/init > init.json.new
+    jq -e .root_token init.json.new >/dev/null
+    mv init.json.new init.json
+  args:
+    executable: /usr/bin/bash
+    chdir: "{{ openbao_creddir }}"
+    creates: "{{ openbao_creddir }}/init.json"
+  become_user: "{{ seat_user }}"
+  when: openbao_health.status == 501
+
+- name: It is unsealed and the unit is up
+  ansible.builtin.command:
+    argv: [systemctl, --user, is-active, openbao.service]
+  become_user: "{{ seat_user }}"
+  environment: "{{ openbao_user_env }}"
+  register: openbao_active
+  until: openbao_active.stdout == 'active'
+  retries: 60
+  delay: 2
+  changed_when: false
+  failed_when: false
+
+- name: Started, if the first start gave up before the store was initialised
+  ansible.builtin.systemd_service:
+    name: openbao.service
+    state: started
+    scope: user
+  become_user: "{{ seat_user }}"
+  environment: "{{ openbao_user_env }}"
+  when: openbao_active.stdout != 'active'
+
+- name: Enabled, so it comes back after a reboot
+  ansible.builtin.command:
+    argv: [systemctl, --user, is-enabled, openbao.service]
+  become_user: "{{ seat_user }}"
+  environment: "{{ openbao_user_env }}"
+  register: openbao_enabled
+  changed_when: false
+  failed_when: openbao_enabled.stdout not in ['generated', 'enabled']
+
+- name: kv, AppRole, the policies and the four AppRoles
+  ansible.builtin.command:
+    argv: [/usr/local/libexec/openbao-configure, "{{ openbao_prefix }}"]
+  become_user: "{{ seat_user }}"
+  environment: "{{ openbao_user_env }}"
+  register: openbao_configured
+  changed_when: openbao_configured.stdout == 'changed'
+
+- name: The host role can log in and read its prefix
+  ansible.builtin.shell: |
+    set -euo pipefail
+    . tools.env
+    jq -n --rawfile r "$P-host.role_id" --rawfile s "$P-host.secret_id" '{role_id: ($r|rtrimstr("\n")), secret_id: ($s|rtrimstr("\n"))}' \
+      | curl -sS --fail --cacert tls/ca.pem -X PUT --data-binary @- https://127.0.0.1:8200/v1/auth/approle/login \
+      | jq -e '.auth.policies | index(env.P + "-host")' >/dev/null
+  args:
+    executable: /usr/bin/bash
+    chdir: "{{ openbao_creddir }}"
+  environment:
+    P: "{{ openbao_prefix }}"
+  become_user: "{{ seat_user }}"
+  changed_when: false

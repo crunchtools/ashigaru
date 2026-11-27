@@ -1,0 +1,6 @@
+---
+ashigaru_url: https://ashigaru.crunchtools.com
+seat_image: quay.io/crunchtools/claude:latest
+seat_access_targets:
+  - {host: vm, users: [root, alice], kinds: [vertex, prime], own_kinds: [max], own_users: [root]}
+seat_root_from: ["{{ lookup('env', 'ASHIGARU_VM') }}"]

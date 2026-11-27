@@ -1,0 +1,33 @@
+# {{ ansible_managed }}
+[Unit]
+Description=OpenBao secret store ({{ inventory_hostname }})
+Wants=network-online.target
+After=network-online.target
+
+[Container]
+Image={{ openbao_image }}
+ContainerName=openbao
+Network=host
+UserNS=keep-id:uid=100,gid=0
+ReadOnly=true
+NoNewPrivileges=true
+DropCapability=all
+AddCapability=IPC_LOCK
+Tmpfs=/tmp:rw,nosuid,nodev
+Volume=%h/.config/openbao/unseal.key:/openbao/secrets/unseal.key:ro
+Volume=%h/.config/openbao/tls/server.pem:/openbao/tls/server.pem:ro
+Volume=%h/.config/openbao/tls/server.key:/openbao/tls/server.key:ro
+Volume={{ openbao_dir }}/config/openbao.hcl:/openbao/config/openbao.hcl:ro
+Volume={{ openbao_dir }}/data:/openbao/data:rw,Z
+Entrypoint=bao
+Exec=server -config=/openbao/config/openbao.hcl
+
+[Service]
+Restart=always
+RestartSec=10
+TimeoutStartSec=120
+# Not active until /v1/sys/health is 200: 503 while sealed, 501 before init.
+ExecStartPost=/usr/bin/bash -c 'for i in $(seq 1 90); do c=$(curl -s -o /dev/null -w "%%{http_code}" --cacert %h/.config/openbao/tls/ca.pem https://127.0.0.1:8200/v1/sys/health 2>/dev/null); if [ "$c" = "200" ]; then exit 0; fi; sleep 1; done; echo "openbao not 200 in 90s; last $c" >&2; exit 1'
+
+[Install]
+WantedBy=default.target

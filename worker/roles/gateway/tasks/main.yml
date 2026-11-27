@@ -1,0 +1,140 @@
+---
+# This host's gateway, from nothing: the seat network, the container, one
+# profile per seat kind, and each kind's bearer token. The token's digest is
+# all the gateway keeps; the token itself goes only into OpenBao, as the
+# kind's env file <kind>/<kind>.env, which srv-secrets@<kind> delivers to the
+# kind's seats. Made only where missing: a host with a gateway keeps its own.
+
+- name: The seat user's uid
+  ansible.builtin.getent:
+    database: passwd
+    key: "{{ seat_user }}"
+
+- name: Values the steps use
+  ansible.builtin.set_fact:
+    gateway_user_env:
+      XDG_RUNTIME_DIR: "/run/user/{{ ansible_facts.getent_passwd[seat_user][1] }}"
+      DBUS_SESSION_BUS_ADDRESS: "unix:path=/run/user/{{ ansible_facts.getent_passwd[seat_user][1] }}/bus"
+    gateway_unit_file: "/home/{{ seat_user }}/.config/containers/systemd/{{ seat_gateway_unit | regex_replace('\\.service$', '') }}.container"
+
+- name: The vault helper the tokens are stored with (host.yml installs it too)
+  ansible.builtin.copy:
+    src: "{{ role_path }}/../seat_host/files/ashigaru-kv"
+    dest: /usr/local/libexec/ashigaru-kv
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Does the seat network exist
+  ansible.builtin.command:
+    argv: [podman, network, exists, "{{ seat_network }}"]
+  become_user: "{{ seat_user }}"
+  environment: "{{ gateway_user_env }}"
+  register: gateway_net
+  changed_when: false
+  failed_when: gateway_net.rc not in [0, 1]
+
+- name: The seat network
+  ansible.builtin.command:
+    argv: [podman, network, create, --subnet, "{{ seat_network_subnet }}", "{{ seat_network }}"]
+  become_user: "{{ seat_user }}"
+  environment: "{{ gateway_user_env }}"
+  when: gateway_net.rc != 0
+
+- name: Directories (the data directory holds token digests, 0700)
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: "{{ seat_user }}"
+    group: "{{ seat_user }}"
+    mode: "{{ item.mode }}"
+  loop:
+    - {path: "{{ gateway_dir }}", mode: "0755"}
+    - {path: "{{ gateway_dir }}/live", mode: "0755"}
+    - {path: "{{ gateway_dir }}/data", mode: "0700"}
+    - {path: "{{ gateway_dir }}/data/tokens", mode: "0700"}
+  loop_control:
+    label: "{{ item.path }}"
+
+- name: One profile per seat kind (never overwritten)
+  ansible.builtin.template:
+    src: profiles.yaml.j2
+    dest: "{{ seat_gateway_profiles }}"
+    owner: "{{ seat_user }}"
+    group: "{{ seat_user }}"
+    mode: "0644"
+    force: false
+
+- name: Each kind's token, minted here; its digest to the gateway, itself to OpenBao
+  ansible.builtin.shell: |
+    set -euo pipefail
+    if [[ -s $TOKENS/$PROFILE ]] && /usr/local/libexec/ashigaru-kv has "$KIND" "$KIND.env"; then
+        echo unchanged; exit 0
+    fi
+    umask 077
+    tok=trt_$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')
+    printf 'TRENTINA_MCP_URL=%s\nTRENTINA_MCP_TOKEN=%s\n' "$URL" "$tok" \
+      | /usr/local/libexec/ashigaru-kv put "$KIND" "$KIND.env"
+    printf 'sha256:%s\n' "$(printf %s "$tok" | sha256sum | cut -d' ' -f1)" > "$TOKENS/$PROFILE"
+    echo changed
+  args:
+    executable: /usr/bin/bash
+  environment: "{{ gateway_user_env | combine({'TOKENS': gateway_dir ~ '/data/tokens', 'PROFILE': item.value.profile,
+                   'KIND': item.key, 'URL': 'http://' ~ seat_gateway ~ ':8019/gateway/' ~ item.value.profile ~ '/mcp'}) }}"
+  become_user: "{{ seat_user }}"
+  loop: "{{ seat_kinds | dict2items | selectattr('value.profile', 'defined') | list }}"
+  loop_control:
+    label: "{{ item.key }}"
+  register: gateway_tokens
+  changed_when: gateway_tokens.stdout == 'changed'
+
+- name: Its unit (never overwritten)
+  ansible.builtin.template:
+    src: gateway.container.j2
+    dest: "{{ gateway_unit_file }}"
+    owner: "{{ seat_user }}"
+    group: "{{ seat_user }}"
+    mode: "0644"
+    force: false
+  register: gateway_unit
+
+- name: Pull its image before the first start
+  ansible.builtin.command:
+    argv: [podman, pull, -q, "{{ gateway_image }}"]
+  become_user: "{{ seat_user }}"
+  environment: "{{ gateway_user_env }}"
+  when: gateway_unit is changed
+
+- name: Start it; restart it when a token was minted
+  ansible.builtin.systemd_service:
+    name: "{{ seat_gateway_unit }}"
+    state: "{{ 'restarted' if gateway_tokens is changed else 'started' }}"
+    daemon_reload: true
+    scope: user
+  become_user: "{{ seat_user }}"
+  environment: "{{ gateway_user_env }}"
+
+- name: Each kind's token opens its profile
+  ansible.builtin.shell: |
+    set -euo pipefail
+    d=$(mktemp -d -p "$XDG_RUNTIME_DIR"); trap 'rm -rf "$d"' EXIT
+    systemctl --user start "srv-secrets@$KIND"
+    tok=$(sed -n 's/^TRENTINA_MCP_TOKEN=//p' "$XDG_RUNTIME_DIR/srv-secrets/$KIND/$KIND.env")
+    printf 'header = "Authorization: Bearer %s"\n' "$tok" > "$d/rc"
+    for i in $(seq 1 60); do
+      c=$(curl -s -o /dev/null -w '%{http_code}' -K "$d/rc" -H 'Accept: application/json, text/event-stream' \
+          -H 'Content-Type: application/json' \
+          -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"worker","version":"1"}}}' \
+          "http://127.0.0.1:8019/gateway/$PROFILE/mcp" || true)
+      [[ $c == 200 ]] && exit 0
+      sleep 5
+    done
+    echo "gateway: $PROFILE answered $c" >&2; exit 1
+  args:
+    executable: /usr/bin/bash
+  environment: "{{ gateway_user_env | combine({'PROFILE': item.value.profile, 'KIND': item.key}) }}"
+  become_user: "{{ seat_user }}"
+  loop: "{{ seat_kinds | dict2items | selectattr('value.profile', 'defined') | list }}"
+  loop_control:
+    label: "{{ item.key }}"
+  changed_when: false

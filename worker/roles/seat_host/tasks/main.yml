@@ -7,7 +7,7 @@
 # Expects, and checks: the seat user exists with lingering, the host's
 # OpenBao (with <prefix>-operator AppRole credentials in the user's
 # ~/.config/openbao) and its local Trentina gateway are installed and running.
-# Building those from nothing is not this role's job yet (README, "Not yet").
+# playbooks/bootstrap.yml builds those on a new host.
 
 - name: The inventory says what this host is
   ansible.builtin.assert:
@@ -96,6 +96,13 @@
   notify: Reload sysctl
 
 # --- audit: one rule, a check, a report, the key map --------------------
+
+- name: Syscall auditing is on (Fedora's stock rules stop every syscall rule)
+  ansible.builtin.replace:
+    path: /etc/audit/rules.d/audit.rules
+    regexp: '^-a task,never\s*$'
+    replace: "# -a task,never  # off: it stops every syscall rule, seat audit included (a1057)"
+  notify: Load the seat audit rules
 
 - name: The seat audit rule
   ansible.builtin.copy:
@@ -199,6 +206,35 @@
     - "/home/{{ seat_user }}/.config/systemd/user/srv-secrets@.service.d"
     - "{{ seat_services_dir }}/seats"
 
+- name: What every seat mounts, made empty where this host has none yet
+  ansible.builtin.command:
+    argv: [install, -d, -o, "{{ seat_user }}", -g, "{{ seat_user }}", -m, "0755", "{{ item }}"]
+    creates: "{{ item }}"
+  loop:
+    - "{{ seat_agents_dir }}"
+    - "{{ seat_agents_dir }}/sessions"
+    - "{{ seat_agents_dir }}/run/cc-socks"
+    - "{{ seat_identity_dir }}"
+    - "{{ seat_skills_dir }}"
+    - "{{ seat_ssh_config_dir }}"
+
+- name: The seats' ssh config, known_hosts and machine-id, where missing
+  ansible.builtin.copy:
+    src: "{{ item.src | default(omit) }}"
+    content: "{{ item.content | default(omit) }}"
+    remote_src: "{{ item.src is defined }}"
+    dest: "{{ item.dest }}"
+    owner: "{{ seat_user }}"
+    group: "{{ seat_user }}"
+    mode: "0644"
+    force: false
+  loop:
+    - {dest: "{{ seat_ssh_config_dir }}/config", content: "# Seats' ssh client config (Ashigaru Worker).\n"}
+    - {dest: "{{ seat_ssh_config_dir }}/known_hosts", content: ""}
+    - {dest: "{{ seat_agents_dir }}/machine-id", src: /etc/machine-id}
+  loop_control:
+    label: "{{ item.dest }}"
+
 - name: The units' copies of the loader and the registry GC
   ansible.builtin.copy:
     src: "{{ item }}"
@@ -208,6 +244,15 @@
     mode: "0755"
   loop: [seat-fence-load, agents-registry-gc, check_seat_fence]
 
+- name: The seat image is here (the fence probes it, and refuses a seat without it)
+  ansible.builtin.shell: podman image exists "$IMG" && echo present || { podman pull -q "$IMG" >/dev/null && echo pulled; }
+  environment:
+    IMG: "{{ seat_image }}"
+    XDG_RUNTIME_DIR: "/run/user/{{ seat_user_uid }}"
+  become_user: "{{ seat_user }}"
+  register: seat_image_pull
+  changed_when: seat_image_pull.stdout == 'pulled'
+
 - name: podman reads hooks from the root-owned directories only
   ansible.builtin.copy:
     src: 60-seat-fence-hooks.conf
@@ -215,6 +260,22 @@
     owner: "{{ seat_user }}"
     group: "{{ seat_user }}"
     mode: "0644"
+
+# Rootless podman's pasta copies the host's default-route address into the
+# containers' namespace, which hides that address from them. A host with a
+# second address (Dolza's and breetai's WireGuard) lets seats ssh to it; a
+# host with one gives pasta a private address instead (seat_pasta_options).
+- name: pasta's options for the seats' network namespace (hosts that need them)
+  ansible.builtin.copy:
+    content: |
+      # Written by the Ashigaru Worker (seat_pasta_options).
+      [network]
+      pasta_options = {{ seat_pasta_options | to_json }}
+    dest: "/home/{{ seat_user }}/.config/containers/containers.conf.d/50-seat-pasta.conf"
+    owner: "{{ seat_user }}"
+    group: "{{ seat_user }}"
+    mode: "0644"
+  when: seat_pasta_options is defined
 
 - name: srv-secrets waits for OpenBao after a reboot
   ansible.builtin.copy:
@@ -234,9 +295,9 @@
     path: "{{ seat_gateway_profiles }}"
   register: seat_gw_profiles
 
-- name: OpenBao and the gateway are set up (this role does not build them)
+- name: OpenBao and the gateway are set up (bootstrap.yml builds them)
   ansible.builtin.assert:
     that:
       - seat_bao_env.stat.exists
       - seat_gw_profiles.stat.exists
-    fail_msg: "{{ inventory_hostname }} needs its OpenBao and its local Trentina gateway first (README, Not yet)"
+    fail_msg: "{{ inventory_hostname }} needs its OpenBao and its local Trentina gateway first: run playbooks/bootstrap.yml"
