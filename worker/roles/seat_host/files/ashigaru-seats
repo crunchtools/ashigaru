@@ -67,6 +67,7 @@ def write(rec: dict) -> None:
     with os.fdopen(fd, "w") as fh:
         json.dump(rec, fh, indent=1, sort_keys=True)
         fh.write("\n")
+    # 0644: read by the non-root fence check; holds no secret
     os.chmod(tmp, 0o644)
     os.replace(tmp, os.path.join(DIR, rec["name"] + ".json"))
 
