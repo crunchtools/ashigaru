@@ -117,6 +117,13 @@ class GrantTest(unittest.TestCase):
         self.grant("add", "seat-max", "10.0.0.62/32")
         self.assertEqual(self.grant("add", "seat-max", "10.0.0.62/32").stdout.strip(), "unchanged")
 
+    def test_the_last_removal_leaves_a_placeholder_the_next_add_drops(self) -> None:
+        self.file.write_text(self.YAML.replace("[10.0.0.61/32]", "[0.0.0.1/32]"))
+        self.grant("remove", "other", "10.0.0.9/32")
+        self.assertIn("source_networks: [0.0.0.2/32]", self.file.read_text())
+        self.grant("add", "other", "10.0.0.10/32")
+        self.assertIn("source_networks: [10.0.0.10/32]\n", self.file.read_text())
+
     def test_a_missing_profile_is_an_error(self) -> None:
         self.assertEqual(self.grant("add", "nope", "10.0.0.62/32").returncode, 1)
         self.assertEqual(self.file.read_text(), self.YAML)

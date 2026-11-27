@@ -14,6 +14,11 @@
   ansible.builtin.set_fact:
     seat: "{{ seat_show.stdout | from_json if seat_show.rc == 0 else {} }}"
 
+- name: Its Desk name is the one it was added with, whatever this run was given
+  ansible.builtin.set_fact:
+    seat_desk: "{{ seat.desk }}"
+  when: seat.desk is defined
+
 - name: Refuse to remove a seat that predates the Worker
   ansible.builtin.assert:
     that: seat.unit | default(seat_name ~ '.service') == seat_name ~ '.service'
@@ -27,6 +32,21 @@
   become_user: "{{ seat_user }}"
   environment: "{{ seat_user_env }}"
   failed_when: false
+
+- name: Its secrets leave tmpfs (stopping srv-secrets@ deletes what it delivered)
+  ansible.builtin.systemd_service:
+    name: "srv-secrets@{{ item }}.service"
+    state: stopped
+    scope: user
+  become_user: "{{ seat_user }}"
+  environment: "{{ seat_user_env }}"
+  loop: ["ssh-{{ seat_name }}", "ashigaru-{{ seat_name }}"]
+
+- name: Nothing of its secrets is left in the runtime directory
+  ansible.builtin.file:
+    path: "{{ seat_user_env.XDG_RUNTIME_DIR }}/srv-secrets/{{ item }}"
+    state: absent
+  loop: ["ssh-{{ seat_name }}", "ashigaru-{{ seat_name }}"]
 
 - name: Its unit goes
   ansible.builtin.file:

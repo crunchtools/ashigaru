@@ -14,6 +14,9 @@
 # /usr/local/libexec like the loader (else ~/.local/libexec).
 # Dolza also has Prime (josui), whose PID namespace and netns must differ
 # from every seat's; breetai has no Prime, and that check is just not made.
+# Any other host (one the Ashigaru Worker built) names its seat network and
+# its Prime, if any, in /etc/ashigaru/seat-fence.conf (SEAT_NETWORK,
+# SEAT_PRIME), root-owned and parsed, never sourced, like the loader's.
 #
 # CRITICAL, because each one is a seat with a way out or a way into another:
 #   - a running seat's netns has no seat_fence, or one that is not exactly
@@ -37,12 +40,20 @@ set -uo pipefail
 
 out() { echo "SEAT FENCE $1 - $2"; exit "$3"; }
 HOST=${1:-}
+CONF=/etc/ashigaru/seat-fence.conf
+conf() { sed -n "s/^$1=//p" "$CONF" 2>/dev/null | tail -1; }
 case $HOST in
-    dolza) PRIME=josui ;;
-    breetai) PRIME='' ;;
-    *) out UNKNOWN "usage: check_seat_fence <dolza|breetai>" 3 ;;
+    dolza) PRIME=josui NET=crunchtools ;;
+    breetai) PRIME='' NET=crunchtools ;;
+    [a-z]*)
+        [[ $HOST =~ ^[a-z][a-z0-9-]{0,62}$ ]] || out UNKNOWN "usage: check_seat_fence <host>" 3
+        NET=$(conf SEAT_NETWORK) PRIME=$(conf SEAT_PRIME)
+        [[ $NET =~ ^[A-Za-z0-9][A-Za-z0-9_.-]*$ ]] || out UNKNOWN "$CONF: SEAT_NETWORK is missing or malformed" 3
+        [[ -z $PRIME || $PRIME =~ ^[a-z][a-z0-9-]{0,25}$ ]] || out UNKNOWN "$CONF: SEAT_PRIME is malformed" 3
+        ;;
+    *) out UNKNOWN "usage: check_seat_fence <host>" 3 ;;
 esac
-NET=crunchtools LOADER=/usr/local/libexec/seat-fence-load TSV=/usr/local/libexec/seats.tsv
+LOADER=/usr/local/libexec/seat-fence-load TSV=/usr/local/libexec/seats.tsv
 [[ -x $LOADER ]] || LOADER=$HOME/.local/libexec/seat-fence-load
 [[ -r $TSV ]] || TSV=$HOME/.local/libexec/seats.tsv
 # The SEAT_FENCE_* overrides exist for the selftests only, and count only

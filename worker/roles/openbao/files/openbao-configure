@@ -1,0 +1,81 @@
+#!/usr/bin/bash
+# openbao-configure <prefix>: give a just-initialised OpenBao what the host's
+# tools expect (Ashigaru Worker). Idempotent: run again, it changes nothing.
+#
+#   kv-v2 at kv/, AppRole at approle/, four policies and their AppRoles:
+#     <prefix>-host       reads kv/<prefix>/*        (srv-secrets@)
+#     <prefix>-operator   writes kv/<prefix>/*       (ashigaru-kv, rotation)
+#     <prefix>-admin      manages policies, auth, mounts, audit, snapshots
+#     <prefix>-writeback  writes kv/<prefix>/+/tokens.json
+#   and each role's role_id and secret_id, 0600, in ~/.config/openbao.
+#
+# Uses the root token from init.json, which openbao-init left 0600 beside
+# them. No token or secret reaches argv or stdout.
+set -euo pipefail
+prefix=${1:?usage: openbao-configure <prefix>}
+[[ $prefix =~ ^[a-z][a-z0-9-]{0,30}$ ]] || { echo "openbao-configure: bad prefix" >&2; exit 2; }
+cred=$HOME/.config/openbao addr=https://127.0.0.1:8200 ca=$cred/tls/ca.pem
+tmp=$(mktemp -d -p "${XDG_RUNTIME_DIR:-/tmp}"); trap 'rm -rf "$tmp"' EXIT
+umask 077
+jq -r '"header = \"X-Vault-Token: " + .root_token + "\""' "$cred/init.json" > "$tmp/curlrc"
+api() { curl -sS --cacert "$ca" --max-time 30 -K "$tmp/curlrc" "$@"; }
+changed=0
+
+mounts=$(api "$addr/v1/sys/mounts")
+if ! jq -e '.data["kv/"] // ."kv/"' <<<"$mounts" >/dev/null; then
+    api -X POST -d '{"type":"kv","options":{"version":"2"}}' "$addr/v1/sys/mounts/kv" >/dev/null; changed=1
+fi
+auths=$(api "$addr/v1/sys/auth")
+if ! jq -e '.data["approle/"] // ."approle/"' <<<"$auths" >/dev/null; then
+    api -X POST -d '{"type":"approle"}' "$addr/v1/sys/auth/approle" >/dev/null; changed=1
+fi
+
+declare -A pol
+pol[host]="path \"kv/data/$prefix/*\" { capabilities = [\"read\"] }
+path \"kv/metadata/$prefix/*\" { capabilities = [\"read\", \"list\"] }"
+pol[operator]="path \"kv/data/$prefix/*\" { capabilities = [\"create\",\"update\",\"read\",\"delete\"] }
+path \"kv/metadata/$prefix/*\" { capabilities = [\"create\",\"update\",\"read\",\"list\",\"delete\"] }
+path \"kv/delete/$prefix/*\" { capabilities = [\"update\"] }
+path \"kv/undelete/$prefix/*\" { capabilities = [\"update\"] }
+path \"kv/destroy/$prefix/*\" { capabilities = [\"update\"] }"
+pol[admin]='path "sys/audit" { capabilities = ["read","list","sudo"] }
+path "sys/audit/*" { capabilities = ["create","read","update","delete","list","sudo"] }
+path "sys/storage/raft/snapshot" { capabilities = ["read","create","update","sudo"] }
+path "sys/storage/raft/snapshot-force" { capabilities = ["create","update","sudo"] }
+path "sys/policy" { capabilities = ["read","list"] }
+path "sys/policy/*" { capabilities = ["create","read","update","delete","list"] }
+path "sys/policies/acl/*" { capabilities = ["create","read","update","delete","list"] }
+path "sys/auth" { capabilities = ["read","list"] }
+path "sys/auth/*" { capabilities = ["create","read","update","delete","sudo"] }
+path "sys/mounts" { capabilities = ["read","list"] }
+path "sys/mounts/*" { capabilities = ["create","read","update","delete","sudo"] }
+path "auth/approle/role/*" { capabilities = ["create","read","update","delete","list"] }
+path "sys/health" { capabilities = ["read"] }
+path "auth/token/lookup-self" { capabilities = ["read"] }'
+pol[writeback]="path \"kv/data/$prefix/+/tokens.json\" { capabilities = [\"create\",\"update\",\"read\"] }"
+
+mkdir -p "$cred/policies"
+for r in host operator admin writeback; do
+    name=$prefix-$r
+    printf '%s\n' "${pol[$r]}" > "$tmp/$r.hcl"
+    have=$(api "$addr/v1/sys/policies/acl/$name" | jq -r '.data.policy // empty')
+    if [[ $have != "$(cat "$tmp/$r.hcl")" ]]; then
+        jq -n --rawfile p "$tmp/$r.hcl" '{policy: $p}' | api -X PUT --data-binary @- "$addr/v1/sys/policies/acl/$name" >/dev/null
+        changed=1
+    fi
+    cp "$tmp/$r.hcl" "$cred/policies/$name.hcl"
+    code=$(api -o /dev/null -w '%{http_code}' "$addr/v1/auth/approle/role/$name")
+    if [[ $code != 200 ]]; then
+        jq -n --arg p "$name" '{token_policies: [$p], token_ttl: "1h", token_max_ttl: "4h", secret_id_ttl: "0"}' \
+          | api -X POST --data-binary @- "$addr/v1/auth/approle/role/$name" >/dev/null
+        changed=1
+    fi
+    if [[ ! -s $cred/$name.role_id ]]; then
+        api "$addr/v1/auth/approle/role/$name/role-id" | jq -r '.data.role_id' > "$cred/$name.role_id"; changed=1
+    fi
+    if [[ ! -s $cred/$name.secret_id ]]; then
+        api -X POST "$addr/v1/auth/approle/role/$name/secret-id" | jq -r '.data.secret_id' > "$cred/$name.secret_id"; changed=1
+    fi
+    chmod 0600 "$cred/$name.role_id" "$cred/$name.secret_id"
+done
+[[ $changed == 1 ]] && echo changed || echo unchanged

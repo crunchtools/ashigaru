@@ -1,0 +1,15 @@
+# {{ ansible_managed }}, at first only: the Worker's seat role edits each
+# profile's source_networks line from then on (ashigaru-grant). One profile
+# per seat kind; a kind's seats reach the internet through the egress proxy
+# from the addresses listed, and nothing else does. 0.0.0.N/32 is nobody: the
+# gateway refuses an empty list, and two profiles sharing one.
+profiles:
+{% for kind, kc in seat_kinds | dictsort if kc.profile is defined %}
+  {{ kc.profile }}:
+    role: agent
+    auth:
+      bearer_token_name: {{ kc.profile }}
+    client_egress:
+      source_networks: [0.0.0.{{ loop.index }}/32]
+      hosts: [{{ (gateway_egress_hosts + [ashigaru_url | urlsplit('hostname')] + (kc.egress_hosts | default([]))) | unique | join(', ') }}]
+{% endfor %}

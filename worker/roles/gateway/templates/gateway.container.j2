@@ -1,0 +1,34 @@
+# {{ ansible_managed }}
+[Unit]
+Description=Trentina security gateway ({{ inventory_hostname }})
+Wants=network-online.target
+After=network-online.target
+
+[Container]
+Image={{ gateway_image }}
+ContainerName={{ seat_gateway_unit | regex_replace('\.service$', '') }}
+# A fixed address: every seat's proxy settings name it.
+Network={{ seat_network }}:ip={{ seat_gateway }}
+PublishPort=127.0.0.1:8019:8019
+Environment=TRENTINA_GATEWAY_ENABLED=true
+Environment=TRENTINA_PROFILES_PATH=/live/profiles.yaml
+Environment=QUARANTINE_DB=/data/quarantine.db
+Environment=FASTMCP_HOME=/data/fastmcp
+# profiles.yaml in a directory of its own, writable, so an atomic replace can
+# rename over it; the data volume holds the token digests and the databases.
+Volume={{ gateway_dir }}/live:/live:Z
+Volume={{ gateway_dir }}/data:/data:Z
+Tmpfs=/tmp:rw,nosuid,size=512m
+ReadOnly=true
+NoNewPrivileges=true
+DropCapability=all
+UserNS=keep-id:uid=65532,gid=65532
+Exec=--transport streamable-http --host 0.0.0.0 --port 8019
+
+[Service]
+Restart=always
+RestartSec=10
+TimeoutStartSec=900
+
+[Install]
+WantedBy=default.target

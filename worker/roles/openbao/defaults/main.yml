@@ -1,0 +1,8 @@
+---
+# The host's OpenBao, rootless under seat_user, the way Dolza and Breetai run
+# theirs. Pinned by digest; quay.io/crunchtools/openbao 1.0.6.
+openbao_image: quay.io/crunchtools/openbao@sha256:e4f8db545e11dde2476a2369ca86e7b3925d78469b687832a8e878176e3b2a18
+# The kv path prefix and the AppRole names' stem: one trust domain per host.
+openbao_prefix: "{{ inventory_hostname }}"
+openbao_dir: "{{ seat_services_dir }}/openbao"
+openbao_packages: [podman, openssl, jq, curl, python3]

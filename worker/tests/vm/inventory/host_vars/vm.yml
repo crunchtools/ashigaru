@@ -1,0 +1,45 @@
+---
+seat_user: alice
+seat_host_install_packages: true
+seat_network: seats
+seat_network_subnet: 10.77.0.0/24
+seat_gateway: 10.77.0.2
+seat_gateway_unit: trentina.service
+seat_gateway_profiles: /home/alice/services/trentina/live/profiles.yaml
+seat_services_dir: /home/alice/services
+seat_agents_dir: /home/alice/services/agents
+seat_identity_dir: /home/alice/services/agents/identity
+seat_skills_dir: /home/alice/services/skills
+seat_ssh_config_dir: /home/alice/services/agents-ssh
+seat_shortcut_script: /usr/local/libexec/ashigaru-seat-attach
+seat_registry_owns_tsv: true
+seat_pools:
+  prime: 10.77.0.20-10.77.0.29
+  vertex: 10.77.0.40-10.77.0.49
+  max: 10.77.0.60-10.77.0.69
+# One NIC: pasta takes a private address so the VM's own stays reachable.
+seat_pasta_options: [--address, 10.0.2.15, --netmask, "24", --gateway, 10.0.2.2, --no-map-gw]
+# Seats reach the VM's own sshd from its own address.
+seat_ssh_from:
+  vm: "{{ lookup('env', 'ASHIGARU_VM') }}"
+seat_fence_ssh:
+  max: ["{{ lookup('env', 'ASHIGARU_VM') }} . 22"]
+  vertex: ["{{ lookup('env', 'ASHIGARU_VM') }} . 22"]
+# No lane: a test seat must never be handed real work.
+seat_kinds:
+  max:
+    class: max
+    profile: vm-max
+    env_files: [max/max.env]
+    secret_services: [max]
+  vertex:
+    class: vertex
+    profile: vm-vertex
+    env_files: [vertex/vertex.env]
+    secret_services: [vertex]
+    env:
+      CLAUDE_CODE_USE_VERTEX: 1
+  prime:
+    profile: vm-prime
+    env_files: [prime/prime.env]
+    secret_services: [prime]

@@ -1,0 +1,13 @@
+---
+# Stand up what a seat host needs underneath its seats, on a host that has
+# none of it: this host's OpenBao and its local Trentina gateway (Ashigaru
+# Worker). Run before host.yml on a new host. Each piece is made only where
+# it is missing, so on a host that already has them it changes nothing.
+#
+#   ansible-playbook -i <inventory> playbooks/bootstrap.yml --limit <host>
+- name: OpenBao and the gateway
+  hosts: seat_hosts
+  become: true
+  roles:
+    - openbao
+    - gateway
