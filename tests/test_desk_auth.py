@@ -209,3 +209,27 @@ def test_identities_are_admin_only(client: TestClient, keys: Keys) -> None:
     assert client.post("/v1/identities", headers=keys[MINE], json=body).status_code == FORBIDDEN
     assert client.post("/v1/identities", headers=keys[JOSUI], json=body).status_code == CREATED
     assert client.post("/v1/identities", headers=keys[JOSUI], json=body).status_code == CONFLICT
+
+
+def test_retiring_a_seat_revokes_it_takes_it_off_the_board_and_its_name_can_return(
+    client: TestClient, keys: Keys, conn: sqlite3.Connection
+) -> None:
+    up_seat(conn, OTHER)
+    assert client.delete(f"/v1/identities/{OTHER}", headers=keys[MINE]).status_code == FORBIDDEN
+    assert client.delete("/v1/identities/nobody", headers=keys[JOSUI]).status_code == NOT_FOUND
+    held = make(client, keys, seat=OTHER)
+    busy = client.delete(f"/v1/identities/{OTHER}", headers=keys[JOSUI])
+    assert busy.status_code == CONFLICT and held in busy.text
+    client.patch(f"/v1/items/{held}", headers=keys[JOSUI], json={"state": "done"})
+    retired = client.delete(f"/v1/identities/{OTHER}", headers=keys[JOSUI])
+    assert retired.status_code == OK and retired.json()["disabled_at"]
+    assert client.get("/v1/me", headers=keys[OTHER]).status_code == UNAUTHORIZED
+    assert OTHER not in {seat["name"] for seat in client.get("/v1/seats", headers=keys[JOSUI]).json()}
+    keys_left = client.get(f"/v1/identities/{OTHER}/keys", headers=keys[JOSUI]).json()
+    assert keys_left and all(key["revoked_at"] for key in keys_left)
+    again = client.delete(f"/v1/identities/{OTHER}", headers=keys[JOSUI])
+    assert again.status_code == OK and again.json()["disabled_at"] == retired.json()["disabled_at"]
+    back = client.post("/v1/identities", headers=keys[JOSUI], json={"name": OTHER, "role": "seat"})
+    assert back.status_code == CREATED and back.json()["disabled_at"] is None
+    assert client.get("/v1/me", headers=keys[OTHER]).status_code == UNAUTHORIZED
+    assert client.get(f"/v1/items/{held}", headers=keys[JOSUI]).json()["seat"] == OTHER

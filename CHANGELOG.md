@@ -6,6 +6,16 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [6.1.0] - 2026-11-27
+
+### Added
+
+- `DELETE /v1/identities/{name}` retires an identity (admin): disabled, every API key and MCP code revoked, and its seat off the board, so a seat its host removed stops showing as missing forever. Its items and events keep its name. 409 while its seat holds open work. A later `POST /v1/identities` of the same name brings it back enabled with no keys. The Ashigaru Worker's seat removal now retires the seat's identity after revoking its keys, and passes over a Desk before 6.1.0, which answers 405.
+
+### Fixed
+
+- The Worker's fresh-host bootstrap and the fixes found proving it on a VM (#283), recorded here for the release: per-profile egress placeholders so the gateway restarts after a kind's last seat is removed, seat secrets cleared from tmpfs on removal, Desk keys revoked under the seat's recorded name, and `check_seat_fence` for hosts other than Dolza and breetai.
+
 ## [6.0.2] - 2026-11-26
 
 ### Fixed

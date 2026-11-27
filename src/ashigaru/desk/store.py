@@ -845,14 +845,42 @@ def set_role(conn: sqlite3.Connection, name: str, role: str) -> None:
 
 
 def create_identity(conn: sqlite3.Connection, name: str, role: str) -> dict[str, Any]:
+    """A new identity, or a retired one brought back under its name: enabled again, with this role
+    and none of its old keys (they stay revoked)."""
     identity = {"name": name, "role": role, "created_at": now(), "disabled_at": None}
     try:
         conn.execute(
             "INSERT INTO identities (name, role, created_at) VALUES (:name, :role, :created_at)", identity
         )
     except sqlite3.IntegrityError as error:
-        raise Conflict(f"identity {name!r} exists") from error
+        revived = conn.execute(
+            "UPDATE identities SET role = :role, disabled_at = NULL"
+            " WHERE name = :name AND disabled_at IS NOT NULL",
+            identity,
+        )
+        if not revived.rowcount:
+            raise Conflict(f"identity {name!r} exists") from error
+        return dict(conn.execute("SELECT * FROM identities WHERE name = ?", (name,)).fetchone())
     return identity
+
+
+def retire_identity(conn: sqlite3.Connection, name: str) -> dict[str, Any] | None:
+    """Retire an identity: disabled, every key and MCP code revoked, and its seat off the board, so a
+    seat its host removed stops showing as missing. Its items and events keep its name. None when
+    there is no such identity; Conflict when its seat still holds open work. Idempotent."""
+    identity = get_identity(conn, name)
+    if identity is None:
+        return None
+    held = conn.execute(f"SELECT id FROM items WHERE seat = ? AND {OPEN} ORDER BY id", (name,)).fetchall()
+    if held:
+        raise Conflict(f"{name} holds {', '.join(row[0] for row in held)}: close or move it first", "busy")
+    stamp = now()
+    conn.execute("UPDATE identities SET disabled_at = coalesce(disabled_at, ?) WHERE name = ?", (stamp, name))
+    for table in ("api_keys", "mcp_codes"):
+        revoke = f"UPDATE {table} SET revoked_at = ? WHERE identity = ? AND revoked_at IS NULL"
+        conn.execute(revoke, (stamp, name))
+    conn.execute("DELETE FROM seats WHERE name = ?", (name,))
+    return get_identity(conn, name)
 
 
 def insert_key(conn: sqlite3.Connection, key_id: str, identity: str, digest: str, label: str | None) -> None:

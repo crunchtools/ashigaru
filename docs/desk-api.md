@@ -92,7 +92,8 @@ changes nothing. Without the header the write applies as before.
 | `GET /usage` | `ashigaru usage`: per seat model, context, session tokens and cost, turn and seconds in it; spend by billing source today and this month (UTC) with limits |
 | `PUT /billing/{billing}` | admin: `daily_usd`, `monthly_usd` limits |
 | `GET /outcomes` | `ashigaru outcomes`: each outcome item with its stories' total, done, blocked and open counts |
-| `GET`, `POST /identities` | admin |
+| `GET`, `POST /identities` | admin; a POST of a retired name brings it back with no keys |
+| `DELETE /identities/{name}` | admin: retire it (keys and MCP codes revoked, its seat off the board; 409 while its seat holds open work) |
 | `GET /identities/{name}/keys` | admin or the owner; metadata only |
 | `POST /identities/{name}/keys` | admin: mint; the token is in this response only |
 | `DELETE /identities/{name}/keys/{key_id}` | admin or the owner: revoke, effective on the next request |
