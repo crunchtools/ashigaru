@@ -1,0 +1,10 @@
+---
+# Make a host ready for seats (Ashigaru Worker). Run against the seat hosts
+# of an inventory; idempotent, and safe on a host that already has seats.
+#
+#   ansible-playbook -i <inventory> playbooks/host.yml [--limit <host>]
+- name: Seat hosts
+  hosts: seat_hosts
+  become: true
+  roles:
+    - seat_host

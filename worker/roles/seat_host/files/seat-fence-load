@@ -1,0 +1,337 @@
+#!/usr/bin/bash
+# seat-fence-load: the seat egress fence, in one seat container's own netns.
+# a1038, per container since a1711. Installed root-owned at
+# /usr/local/libexec/seat-fence-load on Dolza and breetai (the same file on
+# both, beside seat-fence-hook, which runs it) and at
+# ~/.local/libexec/seat-fence-load for the units and the check.
+#
+# Every seat (dmax1-4, vertex1-4 on Dolza; bmax1-2, bvertex1-2 on breetai) is
+# a container of its own: its own PID namespace, netns and address, apart from
+# Prime and from its siblings. So the fence is the whole netns of that one
+# seat: no cgroup matching, nothing shared. The ruleset depends only on
+# billing (max or vertex), and for Max seats on the host too (each is root
+# on its own desktop only), so dmax and bmax differ in one ssh element. The table lives as long as the netns, which is the
+# container's lifetime, and seat-fence-hook loads it again every time the seat
+# is created, before its process runs. If the load fails the seat does not
+# start: the fence fails closed, and Prime, which carries no annotation, never
+# meets the hook.
+#
+# Why in the seat's netns and not by address in the rootless netns: the seats
+# reach the host's local gateway (SEAT_GATEWAY) on the same bridge, and bridged traffic
+# never meets netfilter there (no br_netfilter on Dolza, checked).
+#
+# Usage: seat-fence-load <dmax|vertex|bmax|bvertex> [mode] [container|pid:N]
+#        load (or none)  load (atomic, table replaced whole). The hook's job.
+#        --check    check the ruleset, load nothing
+#        --print    print it
+#        --table    exit 1 unless the netns holds exactly this ruleset: its
+#                   listing, counters aside, must equal the listing of the
+#                   ruleset loaded into a scratch netns. First word on
+#                   stdout when it fails: missing or differs.
+#        --verify   --hooks, then --table. Each seat's ExecStartPost.
+#        --hooks    exit 1 unless the hooks are installed. Each seat's
+#                   ExecStartPre, and check_seat_fence.
+#        --remove   delete it. Emergency only: the seat's next start loads it
+#                   again. Rollback is the README's.
+#
+# The netns is the container's (a seat name, dmax1..bvertex2), or with
+# pid:<N> the one of that pid: the hook's form, already root in the rootless
+# user namespace, so nft runs without `podman unshare`. Nothing here reads
+# the environment, except the selftest's overrides under
+# SEAT_FENCE_SELFTEST=1.
+set -euo pipefail
+
+USAGE="usage: $0 <max|vertex|dmax|bmax|bvertex> [load|--check|--print|--table|--verify|--hooks|--remove] [container|pid:N]"
+class=${1:-}
+# max and vertex are the classes; dmax, bmax and bvertex are the names the
+# seats of Dolza and breetai carried before the Ashigaru Worker, kept so a
+# running seat's annotation still matches. A class's ruleset is the same on
+# every host but for its ssh targets, which come from the host's config.
+case $class in
+    max|dmax|bmax) billing=max ;;
+    vertex|bvertex) billing=vertex ;;
+    *) echo "$USAGE" >&2; exit 2 ;;
+esac
+mode=${2:-load}
+TARGET=${3:-}
+
+# This host's values, written root-owned by the Ashigaru Worker's seat_host
+# role from the inventory: the local gateway's address, each billing's ssh
+# targets as nft set elements ("10.0.0.1 . 22, ..."), and the image the
+# hooks probe is made from. Parsed, never sourced: only these keys, only
+# these shapes. The selftest may point elsewhere under SEAT_FENCE_SELFTEST=1.
+CONF=/etc/ashigaru/seat-fence.conf
+[[ ${SEAT_FENCE_SELFTEST:-} == 1 ]] && CONF=${SEAT_FENCE_CONF:-$CONF}
+LOCAL_GW= SSH_MAX= SSH_VERTEX= PROBE_IMAGE=
+conf_line() { # <key> <regex>
+    local v
+    v=$(sed -n "s/^$1=//p" "$CONF" 2>/dev/null | tail -1)
+    [[ $v =~ $2 ]] || { echo "seat-fence: $CONF: $1 is missing or malformed" >&2; exit 2; }
+    printf '%s' "$v"
+}
+IP='[0-9]{1,3}(\.[0-9]{1,3}){3}'
+ELEM="$IP \\. [0-9]{1,5}"
+LOCAL_GW=$(conf_line SEAT_GATEWAY "^$IP\$")
+SSH_MAX=$(conf_line SEAT_SSH_MAX "^$ELEM(, $ELEM)*\$")
+SSH_VERTEX=$(conf_line SEAT_SSH_VERTEX "^$ELEM(, $ELEM)*\$")
+PROBE_IMAGE=$(conf_line SEAT_PROBE_IMAGE '^[a-z0-9./:@_-]+$')
+
+ruleset() {
+    echo 'table inet seat_fence {}'
+    echo 'delete table inet seat_fence'
+    echo 'table inet seat_fence {'
+    local ssh
+    if [[ $billing == vertex ]]; then
+        ssh=$SSH_VERTEX
+        cat <<'RULES'
+	# Vertex seats: the host's local gateway, plus ssh to every host the
+	# inventory makes them root on (Scott accepts that a shell there is
+	# egress: a1711). Vertex AI goes through the gateway's CONNECT listener.
+RULES
+    else
+        ssh=$SSH_MAX
+        cat <<'RULES'
+	# Max seats: the host's local gateway, and ssh to the servers and their
+	# own desktop (root there, Scott 2026-11-27), not the other desktops.
+RULES
+    fi
+    cat <<RULES
+	# The gateway: MCP, git and Gatehouse on :8019; every https host through
+	# its CONNECT listener on :8021 (HTTPS_PROXY), whose grant names the
+	# hosts. ssh on keys that are restrict. No gloval CONNECT.
+	set ssh_hosts {
+		type ipv4_addr . inet_service
+		elements = { $ssh }
+	}
+
+	chain output {
+		type filter hook output priority filter; policy accept;
+		oif "lo" accept
+		ct state established,related accept
+		ip daddr . tcp dport @ssh_hosts accept
+		ip daddr $LOCAL_GW tcp dport { 8019, 8021 } accept
+		counter jump refuse
+	}
+RULES
+    cat <<'RULES'
+	# Nothing may open a connection to a seat: not Prime, not a sibling, not
+	# anything else on the bridge. Replies to its own connections and
+	# loopback only.
+	chain input {
+		type filter hook input priority filter; policy accept;
+		iif "lo" accept
+		ct state established,related accept
+		counter jump refuse
+	}
+
+	# DNS included: a seat resolves nothing itself (the proxy resolves), and an
+	# open resolver would be a tunnel. Reject, not drop, so clients fail fast.
+	chain refuse {
+		meta l4proto tcp reject with tcp reset
+		reject with icmpx admin-prohibited
+	}
+}
+RULES
+}
+
+loud() {
+    echo "seat-fence: $*" >&2
+    logger -p user.err -t seat-fence -- "$*" 2>/dev/null || true
+}
+
+# pid:<N> is the hook's form: the netns of that pid, from inside the
+# rootless user namespace.
+IN_USERNS=0
+[[ $TARGET == pid:* ]] && IN_USERNS=1
+netns_pid() {
+    local pid
+    if [[ $TARGET == pid:* ]]; then
+        pid=${TARGET#pid:}
+    else
+        [[ -n $TARGET ]] || { echo "no container named"; return 1; }
+        pid=$(podman inspect -f '{{.State.Pid}}' "$TARGET" 2>&1) || true
+    fi
+    [[ $pid =~ ^[1-9][0-9]*$ ]] || { echo "${TARGET:-the netns pid} is not running ($pid)"; return 1; }
+    echo "$pid"
+}
+
+# nft in the seat's netns needs CAP_NET_ADMIN over it, which root in the
+# rootless user namespace has (podman made the netns there); the seats
+# themselves drop every capability, and their own user namespace is a child.
+in_userns() {
+    if (( IN_USERNS )); then "$@"; else podman unshare "$@"; fi
+}
+in_seat_netns() {
+    local pid
+    pid=$(netns_pid) || { echo "$pid"; return 1; }
+    in_userns nsenter --net="/proc/$pid/ns/net" "$@"
+}
+
+# nft's listing, counters zeroed: what is loaded, not what it has seen.
+normalize() { sed -E 's/counter packets [0-9]+ bytes [0-9]+/counter/'; }
+# The ruleset as nft lists it once loaded, from a scratch netns of our own.
+expected() {
+    ruleset | in_userns timeout 10 unshare --net sh -c 'nft -f - && nft list table inet seat_fence' | normalize
+}
+
+# The hook fails OPEN if its script is gone: podman skips a hook whose path
+# does not resolve and starts the seat anyway, unfenced. So the fence also
+# asserts the install itself (a1711 reviews): the hooks dirs podman really
+# uses (asked of podman: it logs them when it inits a container, here a
+# throwaway one with no annotation, so no hook matches it) are all
+# root-owned or absent; the seat-fence.json that wins among them (a later
+# dir overrides an earlier one of the same name) is /etc's and
+# byte-identical to the shipped file (by sha256); and the script it names,
+# the loader beside it and their dir are root-owned and writable by root
+# only. This detects a changed podman config or install; it cannot stop
+# smccarty from making one.
+# The SEAT_FENCE_HOOK_* overrides exist for the selftest only, and count
+# only with SEAT_FENCE_SELFTEST=1; anything else gets the production values.
+# HOOK_DIRS is the exact list podman must report, in order: the two root
+# dirs 60-seat-fence-hooks.conf names, and nothing else. The hook file must
+# be the last one's.
+HOOK_DIRS=/usr/share/containers/oci/hooks.d:/etc/containers/oci/hooks.d
+HOOK_SHA=041e25735fe09aa0a07db96fd5b98fd6f9af0a6b390a829de6e6754bf97581df
+HOOK_PATH=/usr/local/libexec/seat-fence-hook
+HOOK_UID=0
+if [[ ${SEAT_FENCE_SELFTEST:-} == 1 ]]; then
+    HOOK_DIRS=${SEAT_FENCE_HOOK_DIRS:-$HOOK_DIRS} HOOK_SHA=${SEAT_FENCE_HOOK_SHA:-$HOOK_SHA}
+    HOOK_PATH=${SEAT_FENCE_HOOK_PATH:-$HOOK_PATH} HOOK_UID=${SEAT_FENCE_HOOK_UID:-$HOOK_UID}
+fi
+# The probe container is made from PROBE_IMAGE (the config's): the seats'
+# own image, so it is always present.
+# podman's debug log of a throwaway container's init: it names each hooks
+# dir it reads. A subshell, so the probe goes on any exit, a timeout or a
+# signal included.
+hook_log() (
+    name="seat-fence-hooks-probe-$$-$RANDOM"
+    trap 'podman rm -f -v -t 0 "$name" >/dev/null 2>&1' EXIT
+    trap 'exit 1' INT TERM HUP
+    timeout 60 podman create -q --pull never --network none --name "$name" --entrypoint true "$PROBE_IMAGE" >/dev/null 2>&1 \
+        || { echo "cannot create a probe container from $PROBE_IMAGE"; exit 1; }
+    out=$(timeout 60 podman --log-level=debug init "$name" 2>&1) \
+        || { echo "podman init of the probe failed: ${out//$'\n'/ }"; exit 1; }
+    echo "$out"
+)
+hooks_ok() {
+    local log
+    log=$(hook_log) || { echo "$log"; return 1; }
+    python3 -I - "$HOOK_DIRS" "$HOOK_SHA" "$HOOK_PATH" "$HOOK_UID" <(printf '%s\n' "$log") <<'PY'
+import hashlib, json, os, re, stat, sys
+want_dirs, want_sha, want_path, want_uid, log = sys.argv[1:6]
+want_dirs = want_dirs.split(":")
+want_dir = want_dirs[-1]
+want_uid = int(want_uid)
+# logrus quotes msg Go-style: \" and \\ inside. Decoded as a JSON string.
+msg = re.compile(r"\bmsg=\"((?:[^\"\\]|\\.)*)\"")
+dirs = []
+for line in open(log):
+    m = msg.search(line)
+    if m:
+        text = json.loads("\"" + m.group(1) + "\"")
+        if text.startswith("reading hooks from "):
+            dirs.append(text[len("reading hooks from "):])
+bad = []
+def owned(path, what):
+    try:
+        st = os.lstat(path)
+    except FileNotFoundError:
+        return False
+    if stat.S_ISLNK(st.st_mode):
+        bad.append(f"{what} {path} is a symlink")
+    elif st.st_uid != want_uid:
+        bad.append(f"{what} {path} is owned by uid {st.st_uid}, not {want_uid}")
+    elif st.st_mode & 0o022:
+        bad.append(f"{what} {path} is writable by group or others")
+    return True
+if dirs != want_dirs:
+    print("podman reads hooks from [%s], not exactly [%s]" % (", ".join(dirs), ", ".join(want_dirs)))
+    sys.exit(1)
+for d in dirs:
+    owned(d, "hooks dir")
+found = [os.path.join(d, "seat-fence.json") for d in dirs if os.path.lexists(os.path.join(d, "seat-fence.json"))]
+win = found[-1] if found else None
+if win is None:
+    bad.append(f"no seat-fence.json in any hooks dir: {' '.join(dirs)}")
+elif win != os.path.join(want_dir, "seat-fence.json"):
+    bad.append(f"{win} wins over {want_dir}/seat-fence.json")
+else:
+    owned(win, "hook file")
+    data = open(win, "rb").read()
+    if hashlib.sha256(data).hexdigest() != want_sha:
+        bad.append(f"{win} is not the shipped hook file (sha256 differs)")
+    path = json.loads(data).get("hook", {}).get("path")
+    if path != want_path:
+        bad.append(f"{win} names {path}, not {want_path}")
+    for f in (want_path, os.path.join(os.path.dirname(want_path), "seat-fence-load")):
+        if not owned(f, "script"):
+            bad.append(f"script {f} is missing")
+        elif not (os.path.isfile(f) and os.access(f, os.X_OK)):
+            bad.append(f"script {f} is not an executable file")
+    owned(os.path.dirname(want_path), "script dir")
+if bad:
+    print("\n".join(bad))
+    sys.exit(1)
+PY
+}
+
+seat=${TARGET:-the $class seat}
+# table: exact, or say why not (first word: missing or differs).
+table() {
+    local got want
+    if ! got=$(in_seat_netns timeout 10 nft list table inet seat_fence 2>&1); then
+        echo "missing: $seat has no seat_fence (${got//$'\n'/ })"
+        return 1
+    fi
+    want=$(expected) || { echo "missing: cannot build the reference $class ruleset"; return 1; }
+    if [[ $(normalize <<<"$got") != "$want" ]]; then
+        echo "differs: $seat's seat_fence is not the $class ruleset"
+        diff <(echo "$want") <(normalize <<<"$got") >&2 || true
+        return 1
+    fi
+}
+
+case $mode in
+    --print) ruleset ;;
+    --check) ruleset | in_seat_netns timeout 10 nft -c -f - && echo "seat-fence: $class ruleset OK" ;;
+    --table)
+        table && echo "seat-fence: $seat fenced"
+        ;;
+    --verify)
+        if ! hk=$(hooks_ok); then
+            loud "REFUSING $seat: the seat fence hook is not installed, so a podman start would bring a seat up unfenced: ${hk//$'\n'/; }"
+            exit 1
+        fi
+        if ! why=$(table); then
+            loud "REFUSING $seat: ${why}. Run: systemctl --user restart ${TARGET:-<seat>}"
+            exit 1
+        fi
+        echo "seat-fence: $seat fenced"
+        ;;
+    --hooks)
+        if ! hk=$(hooks_ok); then
+            loud "REFUSING to start a $class seat: the seat fence hook is not installed: ${hk//$'\n'/; }"
+            exit 1
+        fi
+        echo "seat-fence: hooks installed"
+        ;;
+    --remove) in_seat_netns nft delete table inet seat_fence && echo "seat-fence: $seat unfenced until it next starts" ;;
+    load)
+        # Worst case: 5 attempts of at most 10 s each with 2+4+8+16 s between
+        # them, 80 s; the hook's timeout (150 s) sits above it. No lock: each
+        # seat has a netns of its own, and only its hook loads into it.
+        delay=2
+        for attempt in 1 2 3 4 5; do
+            if err=$(ruleset | in_seat_netns timeout 10 nft -f - 2>&1); then
+                echo "seat-fence: $class loaded into $seat (attempt $attempt)"
+                exit 0
+            fi
+            loud "$class load into $seat, attempt $attempt/5 failed: ${err//$'\n'/ }"
+            (( attempt < 5 )) && sleep "$delay"
+            delay=$((delay * 2))
+        done
+        loud "GAVE UP after 5 attempts: $seat has NO fence and will not start. Fix the cause, then: systemctl --user restart ${TARGET:-<seat>}"
+        exit 1
+        ;;
+    *) echo "$USAGE" >&2; exit 2 ;;
+esac

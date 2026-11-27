@@ -1,0 +1,22 @@
+---
+# Add or remove one seat (Ashigaru Worker). The person adding it names it:
+#
+#   ansible-playbook -i <inventory> playbooks/seat.yml \
+#     -e seat_host=<host> -e seat_name=<name> -e seat_kind=max|vertex|prime \
+#     [-e seat_desk='<Desk name>'] [-e seat_state=absent] [-e seat_purge_data=true]
+#
+# The host's registry picks the seat's address and PID slot. Its key, logins,
+# audit map line, gateway grant, Desk key, unit and shortcut follow, and
+# seat_state=absent takes every one of them away again.
+- name: One seat
+  hosts: "{{ seat_host }}"
+  become: true
+  gather_facts: false
+  pre_tasks:
+    - name: A seat host was named
+      ansible.builtin.assert:
+        that: seat_host is defined and seat_host in groups['seat_hosts']
+        fail_msg: "seat_host must be one of: {{ groups['seat_hosts'] | join(', ') }}"
+      run_once: true
+  roles:
+    - seat

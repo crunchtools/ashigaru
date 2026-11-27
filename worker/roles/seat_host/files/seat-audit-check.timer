@@ -1,0 +1,10 @@
+# /etc/systemd/system/seat-audit-check.timer on all four hosts (a1753, a1057): every 5 min.
+[Unit]
+Description=Seat audit health, every 5 minutes
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=5min
+
+[Install]
+WantedBy=timers.target

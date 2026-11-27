@@ -1,0 +1,6 @@
+---
+seat_image: quay.io/crunchtools/claude:latest
+# Install missing packages with dnf. Off on image-mode hosts, where the
+# image carries them: the role then only checks they are there.
+seat_host_install_packages: false
+seat_host_packages: [audit, audispd-plugins, rsyslog, python3, python3-pyyaml, jq, nftables, podman, openssh-server, curl]

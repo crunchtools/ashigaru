@@ -1,0 +1,10 @@
+{
+  "version": "1.0.0",
+  "hook": {
+    "path": "/usr/local/libexec/seat-fence-hook",
+    "env": ["PATH=/usr/bin:/usr/sbin"],
+    "timeout": 150
+  },
+  "when": {"annotations": {"^io\\.crunchtools\\.seat-fence$": "^(max|vertex|dmax|bmax|bvertex)$"}},
+  "stages": ["createRuntime"]
+}

@@ -1,0 +1,15 @@
+---
+# One seat, named by whoever adds it. Pass seat_name and seat_kind (max,
+# vertex or prime); seat_desk is its Desk and JOSUI_NAME name, the
+# container name by default.
+seat_state: present
+seat_name: ""
+seat_kind: ""
+seat_desk: "{{ seat_name }}"
+# Remove the seat's state, containers, audit and work directories with it.
+# Off by default: a removed seat's work tree stays on disk until purged.
+seat_purge_data: false
+# The Desk admin key, read on the controller only.
+ashigaru_url: https://ashigaru.crunchtools.com
+ashigaru_admin_key_file: "{{ lookup('env', 'ASHIGARU_API_KEY_FILE') }}"
+seat_image: quay.io/crunchtools/claude:latest

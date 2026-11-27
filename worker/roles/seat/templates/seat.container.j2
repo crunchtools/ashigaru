@@ -1,0 +1,100 @@
+# {{ ansible_managed }}
+# Ashigaru seat {{ seat.desk }}: a {{ seat.kind }} seat, container {{ seat.name }},
+# address {{ seat.address }}, PID slot {{ seat.slot }} (registry:
+# /etc/ashigaru/seats/{{ seat.name }}.json). Remove it with the Worker's
+# seat.yml (state=absent), not by hand: its keys, grant and Desk key go too.
+{% set kc = seat_kinds[seat.kind] %}
+{% set prime = seat.kind == 'prime' %}
+{% set own = ',Z' if prime else '' %}
+{% set shared = ',z' if prime else '' %}
+{% set dir = seat_services_dir ~ '/seats/' ~ seat.name %}
+{% set secrets = ['ssh-' ~ seat.name, 'ashigaru-' ~ seat.name] + (kc.secret_services | default([])) %}
+[Unit]
+Description=Ashigaru seat {{ seat.desk }} ({{ seat.kind }})
+Wants={% for s in secrets %}srv-secrets@{{ s }}.service {% endfor %}network-online.target
+After={% for s in secrets %}srv-secrets@{{ s }}.service {% endfor %}network-online.target {{ seat_gateway_unit }}
+
+[Container]
+Image={{ seat_image }}
+ContainerName={{ seat.name }}
+Network={{ seat_network }}:ip={{ seat.address }}
+UserNS=keep-id:uid=1000,gid=1000
+ReadOnly=true
+Tmpfs=/tmp:rw,nosuid,size=2g
+Tmpfs=/var/tmp:rw,nosuid,size=1g
+Tmpfs=/run/agents:rw,nosuid,mode=1777
+DropCapability=all
+{% if prime %}
+NoNewPrivileges=true
+{% else %}
+# Nested podman, as the claude image documents.
+AddCapability=setuid setgid sys_chroot chown setfcap
+SecurityLabelDisable=true
+Unmask=/proc/*
+AddDevice=/dev/fuse
+# The fence hook loads the {{ seat.class }} ruleset into this seat's own netns
+# and seeds its PID base from these, before the seat's process runs.
+Annotation=io.crunchtools.seat-fence={{ seat.class }}
+Annotation=io.crunchtools.seat-name={{ seat.name }}
+Annotation=io.crunchtools.seat-slot={{ seat.slot }}
+Environment=HTTPS_PROXY=http://{{ seat_gateway }}:8021
+Environment=https_proxy=http://{{ seat_gateway }}:8021
+Environment=NO_PROXY=127.0.0.1,localhost,::1,{{ seat_gateway }}
+Environment=no_proxy=127.0.0.1,localhost,::1,{{ seat_gateway }}
+Environment=TRENTINA_MCP_URL=http://{{ seat_gateway }}:8019/gateway/{{ kc.profile }}/mcp
+Environment=TRENTINA_GIT_URL=http://{{ seat_gateway }}:8019/proxy/git
+{% endif %}
+{% for f in kc.env_files | default([]) %}
+EnvironmentFile=%t/srv-secrets/{{ f }}
+{% endfor %}
+Environment="JOSUI_NAME={{ seat.desk }}"
+Environment=JOSUI_MODE=worker
+Environment=JOSUI_RC=1
+Environment=JOSUI_WORKDIR=/home/podman/work
+Environment=XDG_RUNTIME_DIR=/run/agents
+Environment=JOSUI_SSH_DIR=/etc/josui-ssh
+Environment=ASHIGARU_URL={{ ashigaru_url }}
+Environment=ASHIGARU_API_KEY_FILE=/run/secrets/ashigaru.key
+{% for k, v in (kc.env | default({})) | dictsort %}
+Environment="{{ k }}={{ v }}"
+{% endfor %}
+Volume={{ dir }}/state:/home/podman{{ own | replace(',', ':') }}
+Volume={{ dir }}/containers:/home/podman/.local/share/containers{{ own | replace(',', ':') }}
+Volume={{ dir }}/audit:/var/log/josui{{ own | replace(',', ':') }}
+Volume={{ dir }}/work:/home/podman/work{{ own | replace(',', ':') }}
+Volume={{ seat_identity_dir }}:/etc/josui:ro{{ shared }}
+Volume={{ seat_skills_dir }}:/var/lib/josui/josui-skills:ro{{ shared }}
+Volume={{ seat_agents_dir }}/sessions:/home/podman/.claude/sessions{{ shared | replace(',', ':') }}
+Volume={{ seat_agents_dir }}/run/cc-socks:/run/agents/cc-socks{{ shared | replace(',', ':') }}
+Volume={{ seat_agents_dir }}/machine-id:/etc/machine-id:ro{{ shared }}
+Volume=%t/srv-secrets/ssh-{{ seat.name }}/id_ed25519:/etc/josui-ssh/id_ed25519:ro{{ own }}
+Volume={{ seat_ssh_config_dir }}/config:/etc/josui-ssh/config:ro{{ shared }}
+Volume={{ seat_ssh_config_dir }}/known_hosts:/etc/josui-ssh/known_hosts:ro{{ shared }}
+Volume=%t/srv-secrets/ashigaru-{{ seat.name }}/ashigaru.key:/run/secrets/ashigaru.key:ro{{ own }}
+{% if kc.gatehouse_env is defined %}
+Volume={{ kc.gatehouse_env }}:/etc/josui/mcp-env/gatehouse.env:ro{{ own }}
+{% endif %}
+{% for v in kc.volumes | default([]) %}
+Volume={{ v }}
+{% endfor %}
+PodmanArgs=--memory={{ kc.memory | default('4g') }} --memory-swap={{ kc.memory | default('4g') }}
+
+[Service]
+Restart=always
+RestartSec=30
+TimeoutStartSec=240
+ExecStartPre=/usr/bin/mkdir -p {{ seat_agents_dir }}/sessions {{ seat_agents_dir }}/run/cc-socks
+ExecStartPre=-%h/.local/libexec/agents-registry-gc {{ seat.name }} pre {{ seat_agents_dir }}
+ExecStartPost=-%h/.local/libexec/agents-registry-gc {{ seat.name }} post {{ seat_agents_dir }}
+{% if not prime %}
+# Belts from systemd: the hook is installed before podman runs, and once the
+# seat runs its netns holds exactly the {{ seat.class }} ruleset.
+ExecStartPre=%h/.local/libexec/seat-fence-load {{ seat.class }} --hooks
+ExecStartPost=%h/.local/libexec/seat-fence-load {{ seat.class }} --verify {{ seat.name }}
+{% endif %}
+{% for line in kc.service_lines | default([]) %}
+{{ line }}
+{% endfor %}
+
+[Install]
+WantedBy=default.target

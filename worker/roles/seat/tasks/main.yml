@@ -1,0 +1,38 @@
+---
+- name: The seat is named and of a known kind
+  ansible.builtin.assert:
+    that:
+      - seat_name is match('^[a-z][a-z0-9-]{0,25}$')
+      - seat_kind in ['max', 'vertex', 'prime']
+      - seat_kind in seat_kinds
+      - seat_state in ['present', 'absent']
+    fail_msg: >-
+      seat_name must be lower-case letters, digits and hyphens (at most 26),
+      seat_kind one of max, vertex, prime that this host's seat_kinds defines,
+      seat_state present or absent
+
+- name: The seat user's uid
+  ansible.builtin.getent:
+    database: passwd
+    key: "{{ seat_user }}"
+
+- name: The seat user's uid, remembered
+  ansible.builtin.set_fact:
+    seat_user_uid: "{{ ansible_facts.getent_passwd[seat_user][1] }}"
+
+- name: Values every step uses
+  ansible.builtin.set_fact:
+    seat_kc: "{{ seat_kinds[seat_kind] }}"
+    seat_key_comment: "{{ inventory_hostname }}-{{ seat_name }}"
+    seat_dir: "{{ seat_services_dir }}/seats/{{ seat_name }}"
+    seat_user_env:
+      XDG_RUNTIME_DIR: "/run/user/{{ seat_user_uid }}"
+      DBUS_SESSION_BUS_ADDRESS: "unix:path=/run/user/{{ seat_user_uid }}/bus"
+
+- name: Add the seat
+  ansible.builtin.include_tasks: present.yml
+  when: seat_state == 'present'
+
+- name: Remove the seat
+  ansible.builtin.include_tasks: absent.yml
+  when: seat_state == 'absent'

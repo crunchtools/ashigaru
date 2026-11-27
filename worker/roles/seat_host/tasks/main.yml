@@ -1,0 +1,242 @@
+---
+# A seat host: everything a host needs before its first seat, and nothing
+# about any one seat (the seat role does that). Idempotent; safe to rerun on
+# a host already carrying seats: a running seat is not restarted, and the new
+# fence scripts take effect at each seat's next start.
+#
+# Expects, and checks: the seat user exists with lingering, the host's
+# OpenBao (with <prefix>-operator AppRole credentials in the user's
+# ~/.config/openbao) and its local Trentina gateway are installed and running.
+# Building those from nothing is not this role's job yet (README, "Not yet").
+
+- name: The inventory says what this host is
+  ansible.builtin.assert:
+    that:
+      - seat_user is defined
+      - seat_gateway is defined
+      - seat_network is defined
+      - seat_services_dir is defined
+      - seat_pools is defined
+      - seat_fence_ssh.max is defined and seat_fence_ssh.vertex is defined
+      - seat_root_from is defined
+    fail_msg: "host_vars for {{ inventory_hostname }} are incomplete (worker/README.md, Inventory)"
+
+- name: Installed packages
+  ansible.builtin.package_facts:
+
+- name: Install what is missing (package-mode hosts only)
+  ansible.builtin.dnf:
+    name: "{{ seat_host_packages | reject('in', ansible_facts.packages) | list }}"
+    state: present
+  when: seat_host_install_packages | bool
+
+- name: Every package a seat host needs is there
+  ansible.builtin.assert:
+    that: seat_host_packages | reject('in', ansible_facts.packages) | list | length == 0
+    fail_msg: "missing: {{ seat_host_packages | reject('in', ansible_facts.packages) | list | join(' ') }}"
+  when: not (seat_host_install_packages | bool)
+
+- name: The seat user's uid
+  ansible.builtin.getent:
+    database: passwd
+    key: "{{ seat_user }}"
+
+- name: Remember it
+  ansible.builtin.set_fact:
+    seat_user_uid: "{{ ansible_facts.getent_passwd[seat_user][1] }}"
+
+- name: The seat user lingers, so its seats run without a login
+  ansible.builtin.command:
+    argv: [loginctl, enable-linger, "{{ seat_user }}"]
+    creates: "/var/lib/systemd/linger/{{ seat_user }}"
+
+- name: The registry and config directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  loop: [/etc/ashigaru, /etc/ashigaru/seats, /etc/seat-audit, /etc/containers/oci/hooks.d]
+
+# --- root-owned scripts: the fence hook and loader, the registry, helpers ---
+
+- name: The scripts, root-owned and writable by root only
+  ansible.builtin.copy:
+    src: "{{ item }}"
+    dest: "/usr/local/libexec/{{ item }}"
+    owner: root
+    group: root
+    mode: "0755"
+  loop: [seat-fence-hook, seat-fence-load, ashigaru-seats, ashigaru-kv, ashigaru-grant, ashigaru-seat-attach]
+
+- name: The fence's view of this host
+  ansible.builtin.template:
+    src: seat-fence.conf.j2
+    dest: /etc/ashigaru/seat-fence.conf
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: The OCI hook that runs the fence at each seat's creation
+  ansible.builtin.copy:
+    src: seat-fence.json
+    dest: /etc/containers/oci/hooks.d/seat-fence.json
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Yama ptrace scope 1
+  ansible.builtin.copy:
+    src: 60-ptrace-scope.conf
+    dest: /etc/sysctl.d/60-ptrace-scope.conf
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Reload sysctl
+
+# --- audit: one rule, a check, a report, the key map --------------------
+
+- name: The seat audit rule
+  ansible.builtin.copy:
+    src: 60-seat-audit.rules
+    dest: /etc/audit/rules.d/60-seat-audit.rules
+    owner: root
+    group: root
+    mode: "0640"
+  notify: Load the seat audit rules
+
+- name: The audit check and report
+  ansible.builtin.copy:
+    src: "{{ item }}"
+    dest: "/usr/local/libexec/{{ item }}"
+    owner: root
+    group: root
+    mode: "0755"
+  loop: [check_seat_audit, seat-audit-report]
+
+- name: The audit check's timer
+  ansible.builtin.copy:
+    src: "{{ item }}"
+    dest: "/etc/systemd/system/{{ item }}"
+    owner: root
+    group: root
+    mode: "0644"
+  loop: [seat-audit-check.service, seat-audit-check.timer]
+
+- name: The audit check runs
+  ansible.builtin.systemd_service:
+    name: seat-audit-check.timer
+    enabled: true
+    state: started
+    daemon_reload: true
+
+- name: The key map exists (each seat adds its own line)
+  ansible.builtin.file:
+    path: /etc/seat-audit/seat-keys
+    state: touch
+    owner: root
+    group: root
+    mode: "0644"
+    modification_time: preserve
+    access_time: preserve
+
+- name: Josui Prime is in the key map
+  ansible.builtin.lineinfile:
+    path: /etc/seat-audit/seat-keys
+    regexp: " josui$"
+    line: "{{ seat_prime_fingerprint }} josui"
+  when: seat_prime_fingerprint is defined
+
+# --- sshd: fingerprints in the log, root by key from the seat hosts -------
+
+- name: sshd logs each key's fingerprint, and lets seat keys in as root
+  ansible.builtin.template:
+    src: "{{ item.src }}"
+    dest: "/etc/ssh/sshd_config.d/{{ item.dest }}"
+    owner: root
+    group: root
+    mode: "0644"
+    setype: etc_t
+  loop:
+    - {src: 01-seat-root.conf.j2, dest: 01-seat-root.conf}
+  notify: Check and reload sshd
+
+- name: sshd logs at VERBOSE
+  ansible.builtin.copy:
+    src: 60-seat-audit.conf
+    dest: /etc/ssh/sshd_config.d/60-seat-audit.conf
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Check and reload sshd
+
+- name: Josui Prime is root by key here
+  ansible.builtin.lineinfile:
+    path: /root/.ssh/authorized_keys
+    regexp: " {{ seat_prime_key.split(' ')[-1] | regex_escape }}$"
+    line: 'from="{{ seat_prime_from }}",restrict,pty {{ seat_prime_key }}'
+    create: true
+    owner: root
+    group: root
+    mode: "0600"
+  when: seat_prime_key is defined
+
+# --- the seat user's side -------------------------------------------------
+
+- name: The seat user's directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ seat_user }}"
+    group: "{{ seat_user }}"
+    mode: "0755"
+  loop:
+    - "/home/{{ seat_user }}/.local/libexec"
+    - "/home/{{ seat_user }}/.local/bin"
+    - "/home/{{ seat_user }}/.config/containers/systemd"
+    - "/home/{{ seat_user }}/.config/containers/containers.conf.d"
+    - "/home/{{ seat_user }}/.config/systemd/user/srv-secrets@.service.d"
+    - "{{ seat_services_dir }}/seats"
+
+- name: The units' copies of the loader and the registry GC
+  ansible.builtin.copy:
+    src: "{{ item }}"
+    dest: "/home/{{ seat_user }}/.local/libexec/{{ item }}"
+    owner: "{{ seat_user }}"
+    group: "{{ seat_user }}"
+    mode: "0755"
+  loop: [seat-fence-load, agents-registry-gc, check_seat_fence]
+
+- name: podman reads hooks from the root-owned directories only
+  ansible.builtin.copy:
+    src: 60-seat-fence-hooks.conf
+    dest: "/home/{{ seat_user }}/.config/containers/containers.conf.d/60-seat-fence-hooks.conf"
+    owner: "{{ seat_user }}"
+    group: "{{ seat_user }}"
+    mode: "0644"
+
+- name: srv-secrets waits for OpenBao after a reboot
+  ansible.builtin.copy:
+    src: 50-wait-openbao.conf
+    dest: "/home/{{ seat_user }}/.config/systemd/user/srv-secrets@.service.d/50-wait-openbao.conf"
+    owner: "{{ seat_user }}"
+    group: "{{ seat_user }}"
+    mode: "0644"
+
+- name: The host's OpenBao tools are there for the seat user
+  ansible.builtin.stat:
+    path: "/home/{{ seat_user }}/.config/openbao/tools.env"
+  register: seat_bao_env
+
+- name: Its gateway profile file is there
+  ansible.builtin.stat:
+    path: "{{ seat_gateway_profiles }}"
+  register: seat_gw_profiles
+
+- name: OpenBao and the gateway are set up (this role does not build them)
+  ansible.builtin.assert:
+    that:
+      - seat_bao_env.stat.exists
+      - seat_gw_profiles.stat.exists
+    fail_msg: "{{ inventory_hostname }} needs its OpenBao and its local Trentina gateway first (README, Not yet)"

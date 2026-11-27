@@ -1,0 +1,250 @@
+---
+# Add one seat, in the order a seat can use it: a record, a key, logins, a
+# grant, a Desk key, a unit, a shortcut. Every step is idempotent: a rerun
+# changes nothing, and a seat half made by a failed run is finished by the
+# next one.
+
+- name: The pools new seats take addresses from
+  ansible.builtin.set_fact:
+    seat_pool_args: "{{ seat_pool_args | default([]) + ['--pool=' ~ item.key ~ '=' ~ item.value] }}"
+  loop: "{{ seat_pools | dict2items }}"
+
+- name: Record the seat (slot and address from the host's registry)
+  ansible.builtin.command:
+    argv: "{{ ['/usr/local/libexec/ashigaru-seats', 'allocate', '--name', seat_name, '--kind', seat_kind,
+              '--class', seat_kc.class | default('-'), '--desk', seat_desk, '--key', seat_key_comment,
+              '--unit', seat_name ~ '.service', '--avail', seat_avail | default('always')] + seat_pool_args }}"
+  register: seat_alloc
+  changed_when: false
+
+- name: The seat's record
+  ansible.builtin.set_fact:
+    seat: "{{ seat_alloc.stdout | from_json }}"
+
+- name: Its directories, owned by the seat user before the first start
+  ansible.builtin.file:
+    path: "{{ seat_dir }}/{{ item }}"
+    state: directory
+    owner: "{{ seat_user }}"
+    group: "{{ seat_user }}"
+    mode: "0750"
+  loop: [state, state/.claude, state/.local, state/.local/share, containers, audit, work]
+
+# --- its ssh key: made on this host, kept in this host's vault -------------
+
+- name: Is its key in the vault
+  ansible.builtin.command:
+    argv: [/usr/local/libexec/ashigaru-kv, has, "ssh-{{ seat_name }}", id_ed25519]
+  become_user: "{{ seat_user }}"
+  environment: "{{ seat_user_env }}"
+  register: seat_key_stored
+  changed_when: false
+  failed_when: seat_key_stored.rc not in [0, 1]
+
+- name: Make its key pair on tmpfs, store the private half, keep the public
+  ansible.builtin.shell: |
+    set -euo pipefail
+    d=$(mktemp -d -p "$XDG_RUNTIME_DIR"); trap 'rm -rf "$d"' EXIT
+    ssh-keygen -q -t ed25519 -N '' -C "$COMMENT" -f "$d/id"
+    /usr/local/libexec/ashigaru-kv put "ssh-$NAME" id_ed25519 < "$d/id"
+    cat "$d/id.pub"
+  args:
+    executable: /usr/bin/bash
+  environment: "{{ seat_user_env | combine({'COMMENT': seat_key_comment, 'NAME': seat_name}) }}"
+  become_user: "{{ seat_user }}"
+  register: seat_keygen
+  when: seat_key_stored.rc != 0
+
+- name: Its public key beside its record
+  ansible.builtin.copy:
+    content: "{{ seat_keygen.stdout | trim }}\n"
+    dest: "/etc/ashigaru/seats/{{ seat_name }}.pub"
+    owner: root
+    group: root
+    mode: "0644"
+  when: seat_keygen is changed
+
+- name: Read its public key
+  ansible.builtin.slurp:
+    src: "/etc/ashigaru/seats/{{ seat_name }}.pub"
+  register: seat_pub_b64
+
+- name: Its public key
+  ansible.builtin.set_fact:
+    seat_pub: "{{ seat_pub_b64.content | b64decode | trim }}"
+
+- name: Its fingerprint (SHA256), as the audit map and report use it
+  ansible.builtin.shell: printf '%s\n' "$PUB" | ssh-keygen -lf - -E sha256 | awk '{print $2}'
+  environment:
+    PUB: "{{ seat_pub }}"
+  delegate_to: localhost
+  become: false
+  register: seat_fp_out
+  changed_when: false
+
+# --- its logins: root (and the desktop user for vertex and prime) ----------
+
+- name: Where this seat logs in
+  ansible.builtin.set_fact:
+    seat_logins: >-
+      {%- set out = [] -%}
+      {%- for t in seat_access_targets -%}
+        {%- if seat_kind in t.kinds -%}{%- set users = t.users -%}
+        {%- elif seat_kind in (t.own_kinds | default([])) and t.host == inventory_hostname -%}{%- set users = t.own_users -%}
+        {%- else -%}{%- set users = [] -%}{%- endif -%}
+        {%- for u in users -%}{%- set _ = out.append({'host': t.host, 'user': u, 'pin': seat_ssh_from[t.host]}) -%}{%- endfor -%}
+      {%- endfor -%}
+      {{ out }}
+
+- name: Its key is a login on each target, pinned to where it arrives from
+  ansible.builtin.lineinfile:
+    path: "{{ '/root' if item.user == 'root' else '/home/' ~ item.user }}/.ssh/authorized_keys"
+    regexp: " {{ seat_key_comment | regex_escape }}$"
+    line: 'from="{{ item.pin }}",restrict,pty {{ seat_pub }}'
+    create: true
+    owner: "{{ item.user }}"
+    group: "{{ item.user }}"
+    mode: "0600"
+  delegate_to: "{{ item.host }}"
+  loop: "{{ seat_logins }}"
+  loop_control:
+    label: "{{ item.user }}@{{ item.host }}"
+
+- name: Its fingerprint is in every host's audit map
+  ansible.builtin.lineinfile:
+    path: /etc/seat-audit/seat-keys
+    regexp: " {{ seat_name | regex_escape }}$"
+    line: "{{ seat_fp_out.stdout }} {{ seat_name }}"
+    create: true
+    owner: root
+    group: root
+    mode: "0644"
+  delegate_to: "{{ item }}"
+  loop: "{{ groups['seat_audit_hosts'] }}"
+
+# --- its grant on the local gateway: its address in its kind's profile -----
+
+- name: Its address is in its kind's egress grant
+  ansible.builtin.command:
+    argv: [/usr/local/libexec/ashigaru-grant, add, --file, "{{ seat_gateway_profiles }}",
+           --profile, "{{ seat_kc.profile }}", --source, "{{ seat.address }}/32"]
+  become_user: "{{ seat_user }}"
+  register: seat_grant
+  changed_when: seat_grant.stdout == 'changed'
+  when: seat_kc.profile is defined and seat_kc.grant | default(true)
+
+- name: The gateway reads the grant
+  ansible.builtin.systemd_service:
+    name: "{{ seat_gateway_unit }}"
+    state: restarted
+    scope: user
+  become_user: "{{ seat_user }}"
+  environment: "{{ seat_user_env }}"
+  when: seat_grant is changed
+
+# --- its Desk identity and key --------------------------------------------
+
+- name: Its Desk identity
+  ansible.builtin.uri:
+    url: "{{ ashigaru_url }}/v1/identities"
+    method: POST
+    headers:
+      Authorization: "Bearer {{ lookup('ansible.builtin.file', ashigaru_admin_key_file) }}"
+    body_format: json
+    body: {name: "{{ seat_desk }}", role: seat}
+    status_code: [200, 201, 409]
+  delegate_to: localhost
+  become: false
+  no_log: true
+  register: seat_identity
+
+- name: Is its Desk key in the vault
+  ansible.builtin.command:
+    argv: [/usr/local/libexec/ashigaru-kv, has, "ashigaru-{{ seat_name }}", ashigaru.key]
+  become_user: "{{ seat_user }}"
+  environment: "{{ seat_user_env }}"
+  register: seat_desk_stored
+  changed_when: false
+  failed_when: seat_desk_stored.rc not in [0, 1]
+
+- name: Mint its Desk key
+  ansible.builtin.uri:
+    url: "{{ ashigaru_url }}/v1/identities/{{ seat_desk | urlencode }}/keys"
+    method: POST
+    headers:
+      Authorization: "Bearer {{ lookup('ansible.builtin.file', ashigaru_admin_key_file) }}"
+    body_format: json
+    body: {}
+    status_code: [200, 201]
+  delegate_to: localhost
+  become: false
+  no_log: true
+  register: seat_desk_key
+  when: seat_desk_stored.rc != 0
+
+- name: Store its Desk key
+  ansible.builtin.command:
+    argv: [/usr/local/libexec/ashigaru-kv, put, "ashigaru-{{ seat_name }}", ashigaru.key]
+    stdin: "{{ seat_desk_key.json.token | default(seat_desk_key.json.key) }}"
+  become_user: "{{ seat_user }}"
+  environment: "{{ seat_user_env }}"
+  no_log: true
+  when: seat_desk_stored.rc != 0
+
+- name: Its Desk lane
+  ansible.builtin.uri:
+    url: "{{ ashigaru_url }}/v1/seats/{{ seat_desk | urlencode }}"
+    method: PATCH
+    headers:
+      Authorization: "Bearer {{ lookup('ansible.builtin.file', ashigaru_admin_key_file) }}"
+    body_format: json
+    body: {lane: "{{ seat_kc.lane }}"}
+    status_code: [200, 404]
+  delegate_to: localhost
+  become: false
+  no_log: true
+  when: seat_kc.lane is defined
+
+# --- its unit -------------------------------------------------------------
+
+- name: Its unit
+  ansible.builtin.template:
+    src: seat.container.j2
+    dest: "/home/{{ seat_user }}/.config/containers/systemd/{{ seat_name }}.container"
+    owner: "{{ seat_user }}"
+    group: "{{ seat_user }}"
+    mode: "0644"
+  register: seat_unit
+
+- name: The fence check's seat list follows the registry
+  ansible.builtin.shell: >-
+    /usr/local/libexec/ashigaru-seats tsv --host {{ inventory_hostname }} > /usr/local/libexec/seats.tsv.new
+    && mv /usr/local/libexec/seats.tsv.new /usr/local/libexec/seats.tsv
+  when: seat_registry_owns_tsv | default(false)
+  changed_when: true
+
+- name: Start it
+  ansible.builtin.systemd_service:
+    name: "{{ seat_name }}.service"
+    state: "{{ 'restarted' if seat_unit is changed else 'started' }}"
+    daemon_reload: true
+    scope: user
+  become_user: "{{ seat_user }}"
+  environment: "{{ seat_user_env }}"
+
+# --- its shortcut ---------------------------------------------------------
+
+- name: Its shortcut, named after it
+  ansible.builtin.file:
+    src: "{{ seat_shortcut_script }}"
+    dest: "/home/{{ seat_user }}/.local/bin/{{ seat_name }}"
+    state: link
+    owner: "{{ seat_user }}"
+    group: "{{ seat_user }}"
+    force: true
+
+- name: What is left for a person
+  ansible.builtin.debug:
+    msg: >-
+      {{ seat_desk }} is up as container {{ seat_name }} at {{ seat.address }}.
+      {{ 'Sign it in: run ' ~ seat_name ~ ' and /login.' if seat_kind in ['max', 'prime'] else '' }}

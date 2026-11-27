@@ -1,0 +1,68 @@
+#!/usr/bin/bash
+# check_seat_audit [--no-auditctl] -- is seat audit recording? A Nagios plugin:
+# one line, exit 0 OK / 2 CRITICAL ("audit-broken") / 3 UNKNOWN (usage).
+# Nothing here is in the login path: a broken audit raises an alarm and never
+# stops anyone logging in (a1057).
+#
+# CRITICAL when:
+#   - auditd.service is not active (asked with a timeout: a wedged systemd
+#     must not hang the check);
+#   - audit-capped: /var/lib/seat-audit/capped exists. Dolza's collector hit a
+#     per-file size cap and is dropping new lines (old ones are kept). An
+#     operator clears it, after looking and rotating: install-notes.
+#   - audit-stalled: root's half found a problem and left it in
+#     /var/lib/seat-audit/stalled. As root (seat-audit-check.timer): auditctl -s
+#     is not "enabled 1"; the seat-exec rule is not loaded; the rules hold
+#     "-a never,task" (Fedora's default, which stops every syscall rule); the
+#     backlog is under 8192 (Fedora's kernel default is 64, and a full backlog
+#     blocks every process that writes an audit record); or a heartbeat written
+#     with auditctl -m does not reach the audit log within 5 s (auditd suspends
+#     logging on a full disk and never resumes on its own: Exedore, Nov 24).
+#     --no-auditctl skips the root half and reads the flag (smccarty's check on
+#     Dolza and breetai).
+# Test overrides count only with SEAT_FENCE_SELFTEST=1.
+set -uo pipefail
+PATH=/usr/sbin:/usr/bin
+AUDITCTL=/usr/sbin/auditctl SYSTEMCTL=/usr/bin/systemctl CAPFLAG=/var/lib/seat-audit/capped
+STALLFLAG=/var/lib/seat-audit/stalled AUDITLOG=/var/log/audit/audit.log
+if [[ ${SEAT_FENCE_SELFTEST:-} == 1 ]]; then
+    AUDITCTL=${SEAT_AUDIT_AUDITCTL:-$AUDITCTL} SYSTEMCTL=${SEAT_AUDIT_SYSTEMCTL:-$SYSTEMCTL} CAPFLAG=${SEAT_AUDIT_CAPFLAG:-$CAPFLAG}
+    STALLFLAG=${SEAT_AUDIT_STALLFLAG:-$STALLFLAG} AUDITLOG=${SEAT_AUDIT_LOG:-$AUDITLOG}
+fi
+root_auditctl=1
+case ${1:-} in --no-auditctl) root_auditctl=0 ;; '') ;; *) echo "SEAT AUDIT UNKNOWN - usage: $0 [--no-auditctl]"; exit 3 ;; esac
+
+problems=()
+timeout 10 "$SYSTEMCTL" is-active --quiet auditd.service 2>/dev/null || problems+=("auditd.service is not active")
+if (( root_auditctl )); then
+    stall=()
+    status=$(timeout 10 "$AUDITCTL" -s 2>/dev/null)
+    en=$(awk '$1 == "enabled" { print $2; exit }' <<< "$status")
+    [[ $en == 1 ]] || stall+=("auditctl -s says enabled=${en:-?}, need 1")
+    bl=$(awk '$1 == "backlog_limit" { print $2; exit }' <<< "$status")
+    [[ $bl =~ ^[0-9]+$ ]] && (( bl >= 8192 )) || stall+=("backlog_limit is ${bl:-?}, need 8192 or more")
+    rules=$(timeout 10 "$AUDITCTL" -l 2>/dev/null)
+    grep -q 'never,task' <<< "$rules" && stall+=("the rules hold -a never,task: no syscall rule fires")
+    grep -q 'key=seat-exec' <<< "$rules" || stall+=("the seat-exec rule is not loaded")
+    nonce=hb-$$-$RANDOM$RANDOM
+    if timeout 10 "$AUDITCTL" -m "seat-audit heartbeat $nonce" 2>/dev/null; then
+        seen=0
+        for _ in 1 2 3 4 5; do tail -c 1000000 "$AUDITLOG" 2>/dev/null | grep -qF "$nonce" && { seen=1; break; }; sleep 1; done
+        (( seen )) || stall+=("a heartbeat did not reach $AUDITLOG in 5 s (auditd suspended? disk full?)")
+    else
+        stall+=("auditctl -m could not write a heartbeat")
+    fi
+    install -d -m 0755 "$(dirname "$STALLFLAG")" 2>/dev/null
+    if (( ${#stall[@]} )); then (IFS=';'; echo "${stall[*]}") > "$STALLFLAG"; chmod 0644 "$STALLFLAG"; else rm -f "$STALLFLAG"; fi
+fi
+
+capped=''
+[[ -e $CAPFLAG ]] && capped="audit-capped: $(head -c 300 "$CAPFLAG" 2>/dev/null | tr '\n' ' ')"
+[[ -e $STALLFLAG ]] && problems+=("audit-stalled: $(head -c 300 "$STALLFLAG" 2>/dev/null | tr '\n' ' ')")
+if (( ${#problems[@]} )) || [[ -n $capped ]]; then
+    msg=''
+    (( ${#problems[@]} )) && msg="audit-broken: $(IFS=';'; echo "${problems[*]}")"
+    echo "SEAT AUDIT CRITICAL - ${msg}${msg:+${capped:+; }}${capped}"; exit 2
+fi
+echo "SEAT AUDIT OK - auditd recording$( ((root_auditctl)) || echo ' (root half read from its flag)')"
+exit 0

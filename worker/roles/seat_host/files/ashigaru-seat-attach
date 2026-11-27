@@ -1,0 +1,72 @@
+#!/bin/bash
+# seat -- attach to a worker's Claude Code session. Installed as one link per
+# seat; the link's name says which. A seat made by the Ashigaru Worker is
+# reached by a link named after it, from its record in /etc/ashigaru/seats;
+# the fixed names below are the seats from before the Worker:
+#
+#   v1..v4   Dolza 1-4 - Vertex      m1..m4   Dolza 1-4 - Max
+#   x1..x4   Exedore 1-4 - Max       prime    Josui Prime
+#
+# On breetai the same links reach breetai's own seats: v1, v2 are
+# bvertex1-2 and m1, m2 are bmax1-2 (Breetai N - Vertex/Max). The host is
+# read from `hostname -s`; SEAT_HOST overrides it.
+#
+# `v2 shell` opens the seat's shell window instead, on the old image only.
+# Ctrl-b d detaches and leaves the session running.
+set -euo pipefail
+name=$(basename "$0")
+window=0
+[ "${1:-}" = shell ] && window=1
+# tmux's own bar in quiet grey instead of green, full color passed through
+# to Claude Code, and the mouse left to the terminal (right-click, select,
+# copy and paste work as anywhere else; scroll back with Ctrl-b [); then
+# attach. The target is picked inside the container: under claude-agent
+# (developer 1.11.0+) Claude Code is session claude-agent on socket
+# claude-agent, with no shell window; the old image has session dev.
+inner='w=$1
+if tmux -L claude-agent has-session -t =claude-agent 2>/dev/null; then
+  if [ "$w" = 1 ]; then
+    echo "seat: no shell window under claude-agent; attach without shell" >&2
+    exit 2
+  fi
+  set -- -L claude-agent; target="=claude-agent:0"
+else
+  set --; target="=dev:$w"
+fi
+exec tmux -u "$@" set -g status-style "bg=default,fg=colour244" \; \
+  set -g mouse off \; \
+  set -g window-status-current-style "fg=colour250,bold" \; \
+  set -g terminal-overrides ",*:Tc" \; attach -t "$target"'
+tmux_cmd=(sh -c "$inner" seat "$window")
+# The terminal tab is titled with the seat's name, so several are told apart
+# at a glance; tmux leaves the title alone (set-titles is off by default).
+host=${SEAT_HOST:-$(hostname -s)}
+case "$host" in
+  breetai) site=Breetai vpre=bvertex mpre=bmax ;;
+  *)       site=Dolza   vpre=vertex  mpre=dmax ;;
+esac
+case "$name" in
+  v[1-4]) label="$site ${name#v} - Vertex" ;;
+  m[1-4]) label="$site ${name#m} - Max" ;;
+  x[1-4]) label="Exedore ${name#x} - Max" ;;
+  prime)  label="Josui Prime" ;;
+  *)      label= ;;
+esac
+# A Worker seat: its record names it; attach to its container by name.
+rec=/etc/ashigaru/seats/$name.json
+if [[ -z $label && $name =~ ^[a-z][a-z0-9-]{0,25}$ && -r $rec ]]; then
+  label=$(python3 -I -c 'import json,sys; print(json.load(open(sys.argv[1]))["desk"])' "$rec" 2>/dev/null || echo "$name")
+  [ -t 1 ] && printf '\033]0;%s\007' "$label"
+  exec podman exec -it "$name" "${tmux_cmd[@]}"
+fi
+[ -n "$label" ] && [ -t 1 ] && printf '\033]0;%s\007' "$label"
+case "$name" in
+  v[1-4])  exec podman exec -it "$vpre${name#v}" "${tmux_cmd[@]}" ;;
+  m[1-4])  exec podman exec -it "$mpre${name#m}" "${tmux_cmd[@]}" ;;
+  # @Q writes $'...' words, so exedore's login shell must be bash, zsh or ksh (it is).
+  x[1-4])  exec ssh -t exedore podman exec -it "max${name#x}" "${tmux_cmd[@]@Q}" ;;
+  prime)   exec podman exec -it josui "${tmux_cmd[@]}" ;;
+  *) printf '%s\n' "seat: link this script as v1..v4, m1..m4, x1..x4 or prime" \
+       "  v = Dolza N - Vertex, m = Dolza N - Max, x = Exedore N - Max; add 'shell' for the shell window"
+     exit 2 ;;
+esac

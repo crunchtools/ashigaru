@@ -1,0 +1,8 @@
+# {{ ansible_managed }}
+# Read (parsed, never sourced) by seat-fence-load: this host's gateway, the
+# ssh targets each billing's seats may reach (nft set elements), and the
+# image the hooks probe is made from.
+SEAT_GATEWAY={{ seat_gateway }}
+SEAT_SSH_MAX={{ seat_fence_ssh.max | join(', ') }}
+SEAT_SSH_VERTEX={{ seat_fence_ssh.vertex | join(', ') }}
+SEAT_PROBE_IMAGE={{ seat_image }}
