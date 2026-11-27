@@ -119,7 +119,7 @@
   no_log: true
   register: seat_desk_keys
 
-- name: Revoke them (the Desk keeps the identity; it shows as missing)
+- name: Revoke them
   ansible.builtin.uri:
     url: "{{ ashigaru_url }}/v1/identities/{{ seat_desk | urlencode }}/keys/{{ item.key_id }}"
     method: DELETE
@@ -132,6 +132,17 @@
   loop: "{{ (seat_desk_keys.json | default([])) | selectattr('revoked_at', 'none') | list if seat_desk_keys.status == 200 else [] }}"
   loop_control:
     label: "{{ item.key_id }}"
+
+- name: Retire it, so its seat leaves the board (a Desk before 6.1.0 answers 405)
+  ansible.builtin.uri:
+    url: "{{ ashigaru_url }}/v1/identities/{{ seat_desk | urlencode }}"
+    method: DELETE
+    headers:
+      Authorization: "Bearer {{ lookup('ansible.builtin.file', ashigaru_admin_key_file) }}"
+    status_code: [200, 404, 405]
+  delegate_to: localhost
+  become: false
+  no_log: true
 
 - name: Its secrets leave the vault
   ansible.builtin.command:

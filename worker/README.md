@@ -98,5 +98,3 @@ documented in `inventory.example/`. The ones every seat host needs:
 
 - Servers that run seats rootful (Exedore's `max1`-`4`) are not managed by
   the Worker yet.
-- The Desk cannot delete an identity, so a removed seat's row stays on the
-  board (its key revoked, shown as missing).

@@ -4823,6 +4823,94 @@
         ]
       }
     },
+    "/v1/identities/{name}": {
+      "delete": {
+        "description": "Admin: retire an identity, as the Worker does when it removes a seat. Its keys and MCP codes\nare revoked and its seat leaves the board; its items and events keep its name. 409 while its seat\nholds open work. A later POST /v1/identities of the same name brings it back with no keys.",
+        "operationId": "retire_identity_v1_identities__name__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "title": "Name",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Identity"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Missing, unknown or revoked API key."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The caller's role, or its seat, may not do this."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "No such item, seat, identity or key."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "A taken id or subject_key (the detail names the item holding it), an existing identity, a second child in one assignment, a seat that holds another open item, a seat session the Desk has ended (`code` stale-session), or an item or seat not in a state to assign, claim or wrap."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Retire Identity",
+        "tags": [
+          "identities"
+        ]
+      }
+    },
     "/v1/identities/{name}/keys": {
       "get": {
         "description": "Key metadata only; secrets are never stored.",

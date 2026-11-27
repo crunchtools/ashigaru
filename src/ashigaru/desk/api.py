@@ -820,6 +820,19 @@ def create_identity(conn: Conn, who: Admin, body: IdentityCreate) -> Identity:
         raise _conflict(error) from error
 
 
+@router.delete("/v1/identities/{name}", tags=["identities"], responses=errors(401, 403, 404, 409))
+def retire_identity(conn: Conn, who: Admin, name: str) -> Identity:
+    """Admin: retire an identity, as the Worker does when it removes a seat. Its keys and MCP codes
+    are revoked and its seat leaves the board; its items and events keep its name. 409 while its seat
+    holds open work. A later POST /v1/identities of the same name brings it back with no keys."""
+    try:
+        with store.transaction(conn):
+            retired = store.retire_identity(conn, name)
+    except store.Conflict as error:
+        raise _conflict(error) from error
+    return Identity.model_validate(_found(retired, "identity"))
+
+
 def own_seat(who: auth.Caller, name: str) -> None:
     if not (who.admin or (who.role == Role.SEAT and who.name == name)):
         raise HTTPException(status.HTTP_403_FORBIDDEN, f"{who.name} may not write seat {name}")
