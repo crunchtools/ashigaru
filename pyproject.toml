@@ -110,17 +110,17 @@ network = true
 [tool.sdlc.ci.rpm-fc43]
 kind = "image-build"
 containerfile = "packaging/rpm.Containerfile"
-build_args = { BUILD_ROOT = "registry.fedoraproject.org/fedora:43" }
+build_args = { TARGET = "fc43" }
 tag = "localhost/ashigaru:rpm-fc43"
 
 [tool.sdlc.ci.rpm-fc45]
 kind = "image-build"
 containerfile = "packaging/rpm.Containerfile"
-build_args = { BUILD_ROOT = "registry.fedoraproject.org/fedora:45" }
+build_args = { TARGET = "fc45" }
 tag = "localhost/ashigaru:rpm-fc45"
 
 [tool.sdlc.ci.rpm-el10]
 kind = "image-build"
 containerfile = "packaging/rpm.Containerfile"
-build_args = { BUILD_ROOT = "quay.io/centos/centos:stream10" }
+build_args = { TARGET = "el10" }
 tag = "localhost/ashigaru:rpm-el10"
