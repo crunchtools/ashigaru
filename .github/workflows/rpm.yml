@@ -8,7 +8,8 @@
 # Each target builds in a fresh container on the runner (packaging/build.sh),
 # then a second fresh container installs the RPMs and runs every command they
 # ship with --help (packaging/smoke.sh); on a release `ashigaru` must be one.
-# Pull requests that touch the package build and smoke-test without publishing.
+# Pull requests are not built here: sdlc ci's rpm-fc43, rpm-fc45 and rpm-el10
+# checks (packaging/rpm.Containerfile) build and smoke-test them (a1790).
 # 2.x release tags are skipped: 2.x ships workflows, not a package.
 #
 # Not stopped by ASHIGARU_ENABLED: it runs no model. Only the publish job can
@@ -20,16 +21,6 @@ name: RPM
 on:
   release:
     types: [published]
-  pull_request:
-    branches: [main]
-    paths:
-      - packaging/**
-      - pyproject.toml
-      - uv.lock
-      - VERSION
-      - src/**
-      - skills/**
-      - .github/workflows/rpm.yml
   workflow_dispatch:
     inputs:
       tag:
@@ -42,9 +33,7 @@ permissions: {}
 jobs:
   build:
     name: Build and smoke-test (${{ matrix.dist }})
-    if: >-
-      github.event_name == 'pull_request' ||
-      !startsWith(github.event.release.tag_name || inputs.tag, 'v2.')
+    if: "!startsWith(github.event.release.tag_name || inputs.tag, 'v2.')"
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -86,7 +75,6 @@ jobs:
   publish:
     name: Attach the RPMs to the release
     needs: build
-    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
